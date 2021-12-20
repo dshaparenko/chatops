@@ -3,7 +3,7 @@ module github.com/devopsext/chatops
 go 1.17
 
 require (
-	github.com/devopsext/sre v0.0.13
+	github.com/devopsext/sre v0.0.14
 	github.com/devopsext/utils v0.0.3
 	github.com/spf13/cobra v1.3.0
 )
