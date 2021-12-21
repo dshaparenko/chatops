@@ -88,6 +88,7 @@ var telegramOptions = bot.TelegramOptions{
 	BotToken: env.Get(fmt.Sprintf("%s_TELEGRAM_BOT_TOKEN", APPNAME), "").(string),
 	Debug:    env.Get(fmt.Sprintf("%s_TELEGRAM_DEBUG", APPNAME), false).(bool),
 	Timeout:  env.Get(fmt.Sprintf("%s_TELEGRAM_TIMEOUT", APPNAME), 60).(int),
+	Offset:   env.Get(fmt.Sprintf("%s_TELEGRAM_OFFSET", APPNAME), 0).(int),
 }
 
 func interceptSyscall() {
@@ -100,6 +101,18 @@ func interceptSyscall() {
 		os.Exit(1)
 	}()
 }
+
+// /start - show list of commands and simple description
+// /k8s - list of k8s clusters
+// /k8s/cluster1 - type k8s cluster
+// /k8s/cluster2 - type k8s cluster
+// /grafana - current grafana
+// /aws/name-of-resource - some resource under aws
+// /alicloud - whole alicloud account
+// /some-command - custom command
+// /gitlab?
+// /datadog
+// /newrelic
 
 func Execute() {
 
@@ -145,12 +158,12 @@ func Execute() {
 				bots.Add(telegram)
 			}
 
-			slack := bot.NewSlack()
-			if slack != nil {
-				bots.Add(slack)
-			}
+			// slack := bot.NewSlack()
+			// if slack != nil {
+			// 	bots.Add(slack)
+			// }
 
-			bots.Start(&mainWG)
+			bots.StartInWaitGroup(&mainWG)
 			mainWG.Wait()
 		},
 	}
