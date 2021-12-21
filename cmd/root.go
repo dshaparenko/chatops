@@ -10,6 +10,9 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/devopsext/chatops/bot"
+	"github.com/devopsext/chatops/common"
+
 	sreCommon "github.com/devopsext/sre/common"
 	sreProvider "github.com/devopsext/sre/provider"
 	utils "github.com/devopsext/utils"
@@ -22,8 +25,8 @@ var appName = strings.ToLower(APPNAME)
 
 var env = utils.GetEnvironment()
 var logs = sreCommon.NewLogs()
-var traces = sreCommon.NewTraces()
 var metrics = sreCommon.NewMetrics()
+var traces = sreCommon.NewTraces()
 var stdout *sreProvider.Stdout
 var mainWG sync.WaitGroup
 
@@ -81,6 +84,12 @@ var jaegerOptions = sreProvider.JaegerOptions{
 	Debug:               env.Get(fmt.Sprintf("%s_JAEGER_DEBUG", APPNAME), false).(bool),
 }
 
+var telegramOptions = bot.TelegramOptions{
+	BotToken: env.Get(fmt.Sprintf("%s_TELEGRAM_BOT_TOKEN", APPNAME), "").(string),
+	Debug:    env.Get(fmt.Sprintf("%s_TELEGRAM_DEBUG", APPNAME), false).(bool),
+	Timeout:  env.Get(fmt.Sprintf("%s_TELEGRAM_TIMEOUT", APPNAME), 60).(int),
+}
+
 func interceptSyscall() {
 
 	c := make(chan os.Signal)
@@ -128,15 +137,29 @@ func Execute() {
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 
+			bots := common.NewBots()
+			observability := common.NewObservability(logs, traces, metrics)
+
+			telegram := bot.NewTelegram(telegramOptions, observability)
+			if telegram != nil {
+				bots.Add(telegram)
+			}
+
+			slack := bot.NewSlack()
+			if slack != nil {
+				bots.Add(slack)
+			}
+
+			bots.Start(&mainWG)
 			mainWG.Wait()
 		},
 	}
 
 	flags := rootCmd.PersistentFlags()
 
-	flags.StringSliceVar(&rootOptions.Logs, "logs", rootOptions.Logs, "Log providers: stdout, datadog")
-	flags.StringSliceVar(&rootOptions.Metrics, "metrics", rootOptions.Metrics, "Metric providers: prometheus, datadog, opentelemetry")
-	flags.StringSliceVar(&rootOptions.Traces, "traces", rootOptions.Traces, "Trace providers: jaeger, datadog, opentelemetry")
+	flags.StringSliceVar(&rootOptions.Logs, "logs", rootOptions.Logs, "Log providers: stdout")
+	flags.StringSliceVar(&rootOptions.Metrics, "metrics", rootOptions.Metrics, "Metric providers: prometheus")
+	flags.StringSliceVar(&rootOptions.Traces, "traces", rootOptions.Traces, "Trace providers: jaeger")
 
 	flags.StringVar(&stdoutOptions.Format, "stdout-format", stdoutOptions.Format, "Stdout format: json, text, template")
 	flags.StringVar(&stdoutOptions.Level, "stdout-level", stdoutOptions.Level, "Stdout level: info, warn, error, debug, panic")
@@ -168,6 +191,10 @@ func Execute() {
 	flags.IntVar(&jaegerOptions.QueueSize, "jaeger-queue-size", jaegerOptions.QueueSize, "Jaeger queue size")
 	flags.StringVar(&jaegerOptions.Tags, "jaeger-tags", jaegerOptions.Tags, "Jaeger tags, comma separated list of name=value")
 	flags.BoolVar(&jaegerOptions.Debug, "jaeger-debug", jaegerOptions.Debug, "Jaeger debug")
+
+	flags.StringVar(&telegramOptions.BotToken, "telegram-bot-token", telegramOptions.BotToken, "Telegram bot token")
+	flags.BoolVar(&telegramOptions.Debug, "telegram-debug", telegramOptions.Debug, "Telegram debug")
+	flags.IntVar(&telegramOptions.Timeout, "telegram-timeout", telegramOptions.Timeout, "Telegram timeout")
 
 	interceptSyscall()
 
