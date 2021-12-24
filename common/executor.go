@@ -1,7 +1,7 @@
 package common
 
-type ExecuteCallback = func()
+type ExecutorSendFunc = func(text string) bool
 
 type Executor interface {
-	Execute(command string, payload, args interface{}, callback ExecuteCallback) (bool, error)
+	Execute(bot Bot, command string, payload, args interface{}, send ExecutorSendFunc) (bool, error)
 }

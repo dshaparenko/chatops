@@ -1,1 +1,7 @@
 Hello, this is start!
+{{- if eq .Name "Telegram"}}
+  {{- printf "\nTelegram is processing..."}}
+{{- end}}
+{{- if eq .Name "Slack"}}
+  {{- printf "\nSlack is processing..."}}
+{{- end}}

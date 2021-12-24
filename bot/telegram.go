@@ -5,6 +5,7 @@ import (
 
 	"github.com/devopsext/chatops/common"
 	sre "github.com/devopsext/sre/common"
+	"github.com/devopsext/utils"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jinzhu/copier"
 )
@@ -19,9 +20,27 @@ type TelegramOptions struct {
 type Telegram struct {
 	options    TelegramOptions
 	processors common.Processors
+	bot        *tgbotapi.BotAPI
 	logger     sre.Logger
 	tracer     sre.Tracer
 	//metricer sre.MetricsCounter
+}
+
+func (t *Telegram) Name() string {
+	return "Telegram"
+}
+
+func (t *Telegram) sendTyping(m *tgbotapi.Message) {
+
+	t.bot.Send(tgbotapi.NewChatAction(m.Chat.ID, tgbotapi.ChatTyping))
+}
+
+func (t *Telegram) sendMessage(m *tgbotapi.Message, text string) {
+
+	if !utils.IsEmpty(text) {
+		response := tgbotapi.NewMessage(m.Chat.ID, text)
+		t.bot.Send(response)
+	}
 }
 
 func (t *Telegram) processMessage(m *tgbotapi.Message) {
@@ -29,13 +48,21 @@ func (t *Telegram) processMessage(m *tgbotapi.Message) {
 	command := m.Command()
 	executor := t.processors.Executor(command)
 	if executor == nil {
-		t.logger.Debug("Command %s is not found")
+		t.logger.Debug("Command %s is not found", command)
 		return
 	}
-	callback := func() {
 
+	t.sendTyping(m)
+
+	_, err := executor.Execute(t, command, "", m.CommandArguments(), func(text string) bool {
+
+		t.sendMessage(m, text)
+		return true
+	})
+
+	if err != nil {
+		t.logger.Error(err)
 	}
-	executor.Execute(command, "", m.CommandArguments(), callback)
 }
 
 func (t *Telegram) Start() {
@@ -46,6 +73,7 @@ func (t *Telegram) Start() {
 		return
 	}
 	bot.Debug = t.options.Debug
+	t.bot = bot
 
 	u := tgbotapi.NewUpdate(t.options.Offset)
 	u.Timeout = t.options.Timeout

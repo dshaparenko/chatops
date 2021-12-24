@@ -41,7 +41,7 @@ func LoadYaml(config string, obj interface{}) (bool, error) {
 	return true, nil
 }
 
-func LoadTemplate(tmpl string) (*template.Template, error) {
+func LoadTemplate(name, tmpl string) (*template.Template, error) {
 
 	if utils.IsEmpty(tmpl) {
 		return nil, nil
@@ -63,7 +63,7 @@ func LoadTemplate(tmpl string) (*template.Template, error) {
 		return nil, nil
 	}
 
-	t, err := template.New(fmt.Sprintf("%s_template")).Funcs(sprig.TxtFuncMap()).Parse(tmpl)
+	t, err := template.New(fmt.Sprintf("%s_template", name)).Funcs(sprig.TxtFuncMap()).Parse(raw)
 	if err != nil {
 		return nil, err
 	}

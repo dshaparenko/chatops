@@ -95,6 +95,7 @@ var telegramOptions = bot.TelegramOptions{
 var slackOptions = bot.SlackOptions{
 	BotToken: env.Get(fmt.Sprintf("%s_SLACK_BOT_TOKEN", APPNAME), "").(string),
 	AppToken: env.Get(fmt.Sprintf("%s_SLACK_APP_TOKEN", APPNAME), "").(string),
+	Debug:    env.Get(fmt.Sprintf("%s_SLACK_DEBUG", APPNAME), false).(bool),
 }
 
 var startOptions = processor.StartOptions{
@@ -220,6 +221,7 @@ func Execute() {
 
 	flags.StringVar(&slackOptions.BotToken, "slack-bot-token", slackOptions.BotToken, "Slack bot token")
 	flags.StringVar(&slackOptions.AppToken, "slack-app-token", slackOptions.AppToken, "Slack app token")
+	flags.BoolVar(&slackOptions.Debug, "slack-debug", slackOptions.Debug, "Slack debug")
 
 	flags.StringVar(&startOptions.Template, "start-template", startOptions.Template, "Start template")
 

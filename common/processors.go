@@ -10,6 +10,10 @@ func (ps *Processors) Add(p Processor) {
 	}
 }
 
+func (ps *Processors) Items() []Processor {
+	return ps.list
+}
+
 func (ps *Processors) Executor(command string) Executor {
 
 	for _, p := range ps.list {

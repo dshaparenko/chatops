@@ -7,6 +7,10 @@ import (
 	"github.com/devopsext/chatops/common"
 )
 
+type StartTemplate struct {
+	Name string
+}
+
 type StartOptions struct {
 	Template string
 }
@@ -16,8 +20,10 @@ type Start struct {
 	options  StartOptions
 }
 
+const startName = "start"
+
 func (s *Start) Name() string {
-	return "start"
+	return startName
 }
 
 func (s *Start) Contains(command string) common.Executor {
@@ -27,18 +33,23 @@ func (s *Start) Contains(command string) common.Executor {
 	return nil
 }
 
-func (s *Start) Execute(command string, payload, args interface{}, callback common.ExecuteCallback) (bool, error) {
+func (s *Start) Execute(bot common.Bot, command string, payload, args interface{}, send common.ExecutorSendFunc) (bool, error) {
 
 	if s.template == nil {
 		return false, nil
 	}
 
 	var b strings.Builder
-	err := s.template.Execute(&b, nil)
+	err := s.template.Execute(&b, &StartTemplate{
+		Name: bot.Name(),
+	})
 	if err != nil {
 		return false, err
 	}
 
+	if send != nil {
+		return send(b.String()), nil
+	}
 	return false, nil
 }
 
@@ -46,7 +57,7 @@ func NewStart(options StartOptions, observability common.Observability) *Start {
 
 	logger := observability.Logs()
 
-	t, err := common.LoadTemplate(options.Template)
+	t, err := common.LoadTemplate(startName, options.Template)
 	if err != nil {
 		logger.Error(err)
 	}
