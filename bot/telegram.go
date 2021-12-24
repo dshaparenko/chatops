@@ -32,7 +32,10 @@ func (t *Telegram) processMessage(m *tgbotapi.Message) {
 		t.logger.Debug("Command %s is not found")
 		return
 	}
-	executor.Execute(command, "", m.CommandArguments())
+	callback := func() {
+
+	}
+	executor.Execute(command, "", m.CommandArguments(), callback)
 }
 
 func (t *Telegram) Start() {

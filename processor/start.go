@@ -1,8 +1,8 @@
 package processor
 
 import (
-	"html/template"
 	"strings"
+	"text/template"
 
 	"github.com/devopsext/chatops/common"
 )

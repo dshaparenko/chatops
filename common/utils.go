@@ -3,9 +3,9 @@ package common
 import (
 	"errors"
 	"fmt"
-	"html/template"
 	"io/ioutil"
 	"os"
+	"text/template"
 
 	"github.com/Masterminds/sprig"
 	"github.com/devopsext/utils"
