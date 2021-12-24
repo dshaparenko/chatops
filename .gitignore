@@ -4,5 +4,7 @@ bin/
 pkg/
 src/
 vscode.sh
+grafana.yml
+k8s.yml
 coverage.txt
 __debug_bin

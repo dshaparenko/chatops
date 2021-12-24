@@ -7,7 +7,9 @@ type Bots struct {
 }
 
 func (bs *Bots) Add(b Bot) {
-	bs.list = append(bs.list, b)
+	if b != nil {
+		bs.list = append(bs.list, b)
+	}
 }
 
 func (bs *Bots) StartInWaitGroup(wg *sync.WaitGroup) {

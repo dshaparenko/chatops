@@ -22,9 +22,9 @@ func (o *Observability) Metrics() *sre.Metrics {
 	return o.metrics
 }
 
-func NewObservability(logs *sre.Logs, traces *sre.Traces, metrics *sre.Metrics) *Observability {
+func NewObservability(logs *sre.Logs, traces *sre.Traces, metrics *sre.Metrics) Observability {
 
-	return &Observability{
+	return Observability{
 		logs:    logs,
 		traces:  traces,
 		metrics: metrics,

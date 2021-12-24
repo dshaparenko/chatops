@@ -12,6 +12,7 @@ import (
 
 	"github.com/devopsext/chatops/bot"
 	"github.com/devopsext/chatops/common"
+	"github.com/devopsext/chatops/processor"
 
 	sreCommon "github.com/devopsext/sre/common"
 	sreProvider "github.com/devopsext/sre/provider"
@@ -91,6 +92,25 @@ var telegramOptions = bot.TelegramOptions{
 	Offset:   env.Get(fmt.Sprintf("%s_TELEGRAM_OFFSET", APPNAME), 0).(int),
 }
 
+var slackOptions = bot.SlackOptions{
+	BotToken: env.Get(fmt.Sprintf("%s_SLACK_BOT_TOKEN", APPNAME), "").(string),
+	AppToken: env.Get(fmt.Sprintf("%s_SLACK_APP_TOKEN", APPNAME), "").(string),
+}
+
+var startOptions = processor.StartOptions{
+	Template: env.Get(fmt.Sprintf("%s_START_TEMPLATE", APPNAME), "start.template").(string),
+}
+
+var k8sOptions = processor.K8sOptions{
+	Name:   env.Get(fmt.Sprintf("%s_K8S_NAME", APPNAME), "k8s").(string),
+	Config: env.Get(fmt.Sprintf("%s_K8S_CONFIG", APPNAME), "k8s.yml").(string),
+}
+
+var grafanaOptions = processor.GrafanaOptions{
+	Name:   env.Get(fmt.Sprintf("%s_GRAFANA_NAME", APPNAME), "grafana").(string),
+	Config: env.Get(fmt.Sprintf("%s_GRAFANA_CONFIG", APPNAME), "grafana.yml").(string),
+}
+
 func interceptSyscall() {
 
 	c := make(chan os.Signal)
@@ -150,18 +170,16 @@ func Execute() {
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 
-			bots := common.NewBots()
 			observability := common.NewObservability(logs, traces, metrics)
 
-			telegram := bot.NewTelegram(telegramOptions, observability)
-			if telegram != nil {
-				bots.Add(telegram)
-			}
+			processors := common.NewProcessors()
+			processors.Add(processor.NewStart(startOptions, observability))
+			// processors.Add(processor.NewK8s(k8sOptions, observability))
+			// processors.Add(processor.NewGrafana(grafanaOptions, observability))
 
-			// slack := bot.NewSlack()
-			// if slack != nil {
-			// 	bots.Add(slack)
-			// }
+			bots := common.NewBots()
+			bots.Add(bot.NewTelegram(telegramOptions, observability, processors))
+			bots.Add(bot.NewSlack(slackOptions, observability, processors))
 
 			bots.StartInWaitGroup(&mainWG)
 			mainWG.Wait()
@@ -185,15 +203,6 @@ func Execute() {
 	flags.StringVar(&prometheusOptions.Listen, "prometheus-listen", prometheusOptions.Listen, "Prometheus listen")
 	flags.StringVar(&prometheusOptions.Prefix, "prometheus-prefix", prometheusOptions.Prefix, "Prometheus prefix")
 
-	/*flags.StringVar(&grafanaOptions.URL, "grafana-url", grafanaOptions.URL, "Grafana URL")
-	flags.IntVar(&grafanaOptions.Timeout, "grafana-timeout", grafanaOptions.Timeout, "Grafan timeout")
-	flags.StringVar(&grafanaOptions.Datasource, "grafana-datasource", grafanaOptions.Datasource, "Grafana datasource")
-	flags.StringVar(&grafanaOptions.ApiKey, "grafana-api-key", grafanaOptions.ApiKey, "Grafana API key")
-	flags.StringVar(&grafanaOptions.Org, "grafana-org", grafanaOptions.Org, "Grafana org")
-	flags.IntVar(&grafanaOptions.Period, "grafana-period", grafanaOptions.Period, "Grafana period in minutes")
-	flags.IntVar(&grafanaOptions.ImageWidth, "grafana-image-width", grafanaOptions.ImageWidth, "Grafan image width")
-	flags.IntVar(&grafanaOptions.ImageHeight, "grafana-image-height", grafanaOptions.ImageHeight, "Grafan image height")
-	*/
 	flags.StringVar(&jaegerOptions.ServiceName, "jaeger-service-name", jaegerOptions.ServiceName, "Jaeger service name")
 	flags.StringVar(&jaegerOptions.AgentHost, "jaeger-agent-host", jaegerOptions.AgentHost, "Jaeger agent host")
 	flags.IntVar(&jaegerOptions.AgentPort, "jaeger-agent-port", jaegerOptions.AgentPort, "Jaeger agent port")
@@ -208,6 +217,17 @@ func Execute() {
 	flags.StringVar(&telegramOptions.BotToken, "telegram-bot-token", telegramOptions.BotToken, "Telegram bot token")
 	flags.BoolVar(&telegramOptions.Debug, "telegram-debug", telegramOptions.Debug, "Telegram debug")
 	flags.IntVar(&telegramOptions.Timeout, "telegram-timeout", telegramOptions.Timeout, "Telegram timeout")
+
+	flags.StringVar(&slackOptions.BotToken, "slack-bot-token", slackOptions.BotToken, "Slack bot token")
+	flags.StringVar(&slackOptions.AppToken, "slack-app-token", slackOptions.AppToken, "Slack app token")
+
+	flags.StringVar(&startOptions.Template, "start-template", startOptions.Template, "Start template")
+
+	flags.StringVar(&k8sOptions.Name, "k8s-name", k8sOptions.Name, "K8s name")
+	flags.StringVar(&k8sOptions.Config, "k8s-config", k8sOptions.Config, "K8s config")
+
+	flags.StringVar(&grafanaOptions.Name, "grafana-name", grafanaOptions.Name, "Grafana name")
+	flags.StringVar(&grafanaOptions.Config, "grafana-config", grafanaOptions.Config, "Grafana config")
 
 	interceptSyscall()
 
