@@ -7,7 +7,6 @@ import (
 	"os"
 	"text/template"
 
-	"github.com/Masterminds/sprig"
 	"github.com/devopsext/utils"
 	"gopkg.in/yaml.v2"
 )
@@ -63,7 +62,7 @@ func LoadTemplate(name, tmpl string) (*template.Template, error) {
 		return nil, nil
 	}
 
-	t, err := template.New(fmt.Sprintf("%s_template", name)).Funcs(sprig.TxtFuncMap()).Parse(raw)
+	t, err := template.New(fmt.Sprintf("%s_template", name)).Parse(raw)
 	if err != nil {
 		return nil, err
 	}

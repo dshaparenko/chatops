@@ -53,7 +53,7 @@ func (s *Start) Execute(bot common.Bot, command string, payload, args interface{
 	return false, nil
 }
 
-func NewStart(options StartOptions, observability common.Observability) *Start {
+func NewStart(options StartOptions, observability *common.Observability) *Start {
 
 	logger := observability.Logs()
 

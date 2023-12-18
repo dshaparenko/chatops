@@ -5,8 +5,8 @@ import (
 	"sync"
 
 	"github.com/devopsext/chatops/common"
-	sre "github.com/devopsext/sre/common"
-	"github.com/shomali11/slacker"
+	sreCommon "github.com/devopsext/sre/common"
+	"github.com/slack-io/slacker"
 )
 
 type SlackOptions struct {
@@ -19,19 +19,18 @@ type Slack struct {
 	options    SlackOptions
 	processors common.Processors
 	bot        *slacker.Slacker
-	logger     sre.Logger
-	tracer     sre.Tracer
+	logger     sreCommon.Logger
 }
 
 func (s *Slack) Name() string {
 	return "Slack"
 }
 
-func (s *Slack) Start() {
+func (s *Slack) start() {
 
 	bot := slacker.NewClient(s.options.BotToken, s.options.AppToken, slacker.WithDebug(s.options.Debug))
 
-	for _, p := range s.processors.Items() {
+	/*for _, p := range s.processors.Items() {
 		bot.Command(p.Name(), &slacker.CommandDefinition{
 			Description: "Echo a word!",
 			Example:     "echo hello",
@@ -40,7 +39,7 @@ func (s *Slack) Start() {
 				response.Reply("test")
 			},
 		})
-	}
+	}*/
 	s.bot = bot
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -53,22 +52,27 @@ func (s *Slack) Start() {
 	}
 }
 
-func (t *Slack) StartInWaitGroup(wg *sync.WaitGroup) {
+func (t *Slack) Start(wg *sync.WaitGroup) {
+
+	if wg == nil {
+		t.start()
+		return
+	}
 
 	wg.Add(1)
 
 	go func(wg *sync.WaitGroup) {
 
 		defer wg.Done()
-		t.Start()
+		t.start()
 	}(wg)
 }
 
-func NewSlack(options SlackOptions, observability common.Observability, processors common.Processors) *Slack {
+func NewSlack(options SlackOptions, observability *common.Observability, processors common.Processors) *Slack {
+
 	return &Slack{
 		options:    options,
 		processors: processors,
 		logger:     observability.Logs(),
-		tracer:     observability.Traces(),
 	}
 }

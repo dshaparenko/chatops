@@ -1,23 +1,27 @@
 package common
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/devopsext/utils"
+)
 
 type Bots struct {
 	list []Bot
 }
 
 func (bs *Bots) Add(b Bot) {
-	if b != nil {
+	if !utils.IsEmpty(b) {
 		bs.list = append(bs.list, b)
 	}
 }
 
-func (bs *Bots) StartInWaitGroup(wg *sync.WaitGroup) {
+func (bs *Bots) Start(wg *sync.WaitGroup) {
 
 	for _, i := range bs.list {
 
 		if i != nil {
-			i.StartInWaitGroup(wg)
+			i.Start(wg)
 		}
 	}
 }

@@ -4,9 +4,9 @@ import (
 	"sync"
 
 	"github.com/devopsext/chatops/common"
-	sre "github.com/devopsext/sre/common"
+	sreCommon "github.com/devopsext/sre/common"
 	"github.com/devopsext/utils"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/jinzhu/copier"
 )
 
@@ -21,8 +21,7 @@ type Telegram struct {
 	options    TelegramOptions
 	processors common.Processors
 	bot        *tgbotapi.BotAPI
-	logger     sre.Logger
-	tracer     sre.Tracer
+	logger     sreCommon.Logger
 	//metricer sre.MetricsCounter
 }
 
@@ -65,7 +64,7 @@ func (t *Telegram) processMessage(m *tgbotapi.Message) {
 	}
 }
 
-func (t *Telegram) Start() {
+func (t *Telegram) start() {
 
 	bot, err := tgbotapi.NewBotAPI(t.options.BotToken)
 	if err != nil {
@@ -80,7 +79,12 @@ func (t *Telegram) Start() {
 
 	var wg sync.WaitGroup
 
-	updates := bot.GetUpdatesChan(u)
+	updates, err := bot.GetUpdatesChan(u)
+	if err != nil {
+		t.logger.Error(err)
+		return
+	}
+
 	for update := range updates {
 		if update.Message != nil && update.Message.IsCommand() {
 			t.logger.Debug("Message: [%s] %s", update.Message.From.UserName, update.Message.Text)
@@ -100,23 +104,27 @@ func (t *Telegram) Start() {
 	}
 }
 
-func (t *Telegram) StartInWaitGroup(wg *sync.WaitGroup) {
+func (t *Telegram) Start(wg *sync.WaitGroup) {
+
+	if wg == nil {
+		t.start()
+		return
+	}
 
 	wg.Add(1)
 
 	go func(wg *sync.WaitGroup) {
 
 		defer wg.Done()
-		t.Start()
+		t.start()
 	}(wg)
 }
 
-func NewTelegram(options TelegramOptions, observability common.Observability, processors common.Processors) *Telegram {
+func NewTelegram(options TelegramOptions, observability *common.Observability, processors common.Processors) *Telegram {
 	return &Telegram{
 		options:    options,
 		processors: processors,
 		logger:     observability.Logs(),
-		tracer:     observability.Traces(),
 		//metrics: observability.Metrics().Counter(),
 	}
 }
