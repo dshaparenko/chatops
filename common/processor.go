@@ -1,6 +1,26 @@
 package common
 
-type Processor interface {
+type ResponseAttachement struct {
+	Text  string
+	Title string
+	Data  []byte
+}
+
+type Response interface {
+	Message() (string, error)
+	Attachments() []*ResponseAttachement
+}
+
+type ExecuteParams = map[string]string
+
+type Command interface {
 	Name() string
-	Contains(command string) Executor
+	Description() string
+	Params() []string
+	Execute(bot Bot, params ExecuteParams) (Response, error)
+}
+
+type Processor interface {
+	Command
+	Commands() []Command
 }

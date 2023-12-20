@@ -61,9 +61,10 @@ var telegramOptions = bot.TelegramOptions{
 }
 
 var slackOptions = bot.SlackOptions{
-	BotToken: envGet("SLACK_BOT_TOKEN", "").(string),
-	AppToken: envGet("SLACK_APP_TOKEN", "").(string),
-	Debug:    envGet("SLACK_DEBUG", false).(bool),
+	BotToken:      envGet("SLACK_BOT_TOKEN", "").(string),
+	AppToken:      envGet("SLACK_APP_TOKEN", "").(string),
+	Debug:         envGet("SLACK_DEBUG", false).(bool),
+	ReplyInThread: envGet("SLACK_REPLY_IN_THREAD", false).(bool),
 }
 
 func getOnlyEnv(key string) string {
@@ -144,9 +145,9 @@ func Execute() {
 
 			obs := common.NewObservability(logs, metrics)
 			processors := common.NewProcessors()
-			processors.Add(processor.NewStart(startOptions, obs))
-			processors.Add(processor.NewK8s(k8sOptions, obs))
-			processors.Add(processor.NewGrafana(grafanaOptions, obs))
+			processors.Add(processor.NewStart(startOptions, obs, processors))
+			//processors.Add(processor.NewK8s(k8sOptions, obs))
+			//processors.Add(processor.NewGrafana(grafanaOptions, obs))
 
 			bots := common.NewBots()
 			bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
@@ -180,6 +181,7 @@ func Execute() {
 	flags.StringVar(&slackOptions.BotToken, "slack-bot-token", slackOptions.BotToken, "Slack bot token")
 	flags.StringVar(&slackOptions.AppToken, "slack-app-token", slackOptions.AppToken, "Slack app token")
 	flags.BoolVar(&slackOptions.Debug, "slack-debug", slackOptions.Debug, "Slack debug")
+	flags.BoolVar(&slackOptions.ReplyInThread, "slack-reply-in-thread", slackOptions.ReplyInThread, "Slack reply in thread")
 
 	SetStartFlags(flags)
 	SetK8sFlags(flags)

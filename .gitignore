@@ -9,4 +9,4 @@ k8s.yml
 coverage.txt
 __debug_bin
 chatops
-start.template
+.start.template

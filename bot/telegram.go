@@ -19,7 +19,7 @@ type TelegramOptions struct {
 
 type Telegram struct {
 	options    TelegramOptions
-	processors common.Processors
+	processors *common.Processors
 	bot        *tgbotapi.BotAPI
 	logger     sreCommon.Logger
 	//metricer sre.MetricsCounter
@@ -42,28 +42,29 @@ func (t *Telegram) sendMessage(m *tgbotapi.Message, text string) {
 	}
 }
 
+/*
 func (t *Telegram) processMessage(m *tgbotapi.Message) {
 
-	command := m.Command()
-	executor := t.processors.Executor(command)
-	if executor == nil {
-		t.logger.Debug("Command %s is not found", command)
-		return
+		command := m.Command()
+		executor := t.processors.Executor(command)
+		if executor == nil {
+			t.logger.Debug("Command %s is not found", command)
+			return
+		}
+
+		t.sendTyping(m)
+
+		_, err := executor.Execute(t, command, "", m.CommandArguments(), func(text string) bool {
+
+			t.sendMessage(m, text)
+			return true
+		})
+
+		if err != nil {
+			t.logger.Error(err)
+		}
 	}
-
-	t.sendTyping(m)
-
-	_, err := executor.Execute(t, command, "", m.CommandArguments(), func(text string) bool {
-
-		t.sendMessage(m, text)
-		return true
-	})
-
-	if err != nil {
-		t.logger.Error(err)
-	}
-}
-
+*/
 func (t *Telegram) start() {
 
 	bot, err := tgbotapi.NewBotAPI(t.options.BotToken)
@@ -95,7 +96,7 @@ func (t *Telegram) start() {
 			wg.Add(1)
 			go func(m *tgbotapi.Message) {
 				defer wg.Done()
-				t.processMessage(update.Message)
+				//t.processMessage(update.Message)
 			}(&m)
 		}
 		if update.CallbackQuery != nil && update.CallbackQuery.Message != nil {
@@ -120,7 +121,8 @@ func (t *Telegram) Start(wg *sync.WaitGroup) {
 	}(wg)
 }
 
-func NewTelegram(options TelegramOptions, observability *common.Observability, processors common.Processors) *Telegram {
+func NewTelegram(options TelegramOptions, observability *common.Observability, processors *common.Processors) *Telegram {
+
 	return &Telegram{
 		options:    options,
 		processors: processors,

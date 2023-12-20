@@ -6,7 +6,7 @@ import (
 )
 
 var startOptions = processor.StartOptions{
-	Template: envGet("START_TEMPLATE", "start.template").(string),
+	Template: envFileContentExpand("START_TEMPLATE", ""),
 }
 
 func SetStartFlags(flags *pflag.FlagSet) {

@@ -2,9 +2,11 @@ package processor
 
 import (
 	"strings"
-	"text/template"
 
 	"github.com/devopsext/chatops/common"
+	sreCommon "github.com/devopsext/sre/common"
+	toolsRender "github.com/devopsext/tools/render"
+	"github.com/devopsext/utils"
 )
 
 type StartTemplate struct {
@@ -12,62 +14,94 @@ type StartTemplate struct {
 }
 
 type StartOptions struct {
-	Template string
+	Template    string
+	Description string
 }
 
 type Start struct {
-	template *template.Template
-	options  StartOptions
+	template   *toolsRender.TextTemplate
+	processors *common.Processors
+	options    StartOptions
+	logger     sreCommon.Logger
 }
 
-const startName = "start"
+type StartResponse struct {
+	start  *Start
+	params common.ExecuteParams
+	bot    common.Bot
+}
+
+const (
+	startName        = "start"
+	startDescription = "List of all commands across the service"
+)
+
+func (sr *StartResponse) Message() (string, error) {
+
+	m := make(map[string]interface{})
+	m["processors"] = sr.start.processors
+	m["params"] = sr.params
+	m["bot"] = sr.bot.Name()
+
+	b, err := sr.start.template.RenderObject(m)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+func (sr *StartResponse) Attachments() []*common.ResponseAttachement {
+	return []*common.ResponseAttachement{}
+}
 
 func (s *Start) Name() string {
 	return startName
 }
 
-func (s *Start) Contains(command string) common.Executor {
-	if strings.ToLower(command) == s.Name() {
-		return s
+func (s *Start) Description() string {
+
+	desc := s.options.Description
+	if utils.IsEmpty(desc) {
+		desc = startDescription
 	}
+	return desc
+}
+
+func (s *Start) Commands() []common.Command {
 	return nil
 }
 
-func (s *Start) Execute(bot common.Bot, command string, payload, args interface{}, send common.ExecutorSendFunc) (bool, error) {
-
-	if s.template == nil {
-		return false, nil
-	}
-
-	var b strings.Builder
-	err := s.template.Execute(&b, &StartTemplate{
-		Name: bot.Name(),
-	})
-	if err != nil {
-		return false, err
-	}
-
-	if send != nil {
-		return send(b.String()), nil
-	}
-	return false, nil
+func (s *Start) Params() []string {
+	return []string{}
 }
 
-func NewStart(options StartOptions, observability *common.Observability) *Start {
+func (s *Start) Execute(bot common.Bot, params common.ExecuteParams) (common.Response, error) {
+
+	sr := &StartResponse{
+		start:  s,
+		params: params,
+		bot:    bot,
+	}
+	return sr, nil
+}
+
+func NewStart(options StartOptions, observability *common.Observability, processors *common.Processors) *Start {
 
 	logger := observability.Logs()
 
-	t, err := common.LoadTemplate(startName, options.Template)
+	templateOpts := toolsRender.TemplateOptions{
+		Content: options.Template,
+	}
+	template, err := toolsRender.NewTextTemplate(templateOpts, observability)
 	if err != nil {
 		logger.Error(err)
-	}
-
-	if t == nil {
-		logger.Debug("Start has no template.")
+		return nil
 	}
 
 	return &Start{
-		options:  options,
-		template: t,
+		options:    options,
+		template:   template,
+		processors: processors,
+		logger:     logger,
 	}
 }
