@@ -61,10 +61,13 @@ var telegramOptions = bot.TelegramOptions{
 }
 
 var slackOptions = bot.SlackOptions{
-	BotToken:      envGet("SLACK_BOT_TOKEN", "").(string),
-	AppToken:      envGet("SLACK_APP_TOKEN", "").(string),
-	Debug:         envGet("SLACK_DEBUG", false).(bool),
-	ReplyInThread: envGet("SLACK_REPLY_IN_THREAD", false).(bool),
+	BotToken:       envGet("SLACK_BOT_TOKEN", "").(string),
+	AppToken:       envGet("SLACK_APP_TOKEN", "").(string),
+	Debug:          envGet("SLACK_DEBUG", false).(bool),
+	ReplyInThread:  envGet("SLACK_REPLY_IN_THREAD", false).(bool),
+	ReactionDoing:  envGet("SLACK_REACTION_DOING", "eyes").(string),
+	ReactionDone:   envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
+	ReactionFailed: envGet("SLACK_REACTION_FAILED", "x").(string),
 }
 
 func getOnlyEnv(key string) string {
@@ -182,6 +185,9 @@ func Execute() {
 	flags.StringVar(&slackOptions.AppToken, "slack-app-token", slackOptions.AppToken, "Slack app token")
 	flags.BoolVar(&slackOptions.Debug, "slack-debug", slackOptions.Debug, "Slack debug")
 	flags.BoolVar(&slackOptions.ReplyInThread, "slack-reply-in-thread", slackOptions.ReplyInThread, "Slack reply in thread")
+	flags.StringVar(&slackOptions.ReactionDoing, "slack-reaction-doing", slackOptions.ReactionDoing, "Slack reaction doing name")
+	flags.StringVar(&slackOptions.ReactionDone, "slack-reaction-done", slackOptions.ReactionDone, "Slack reaction done name")
+	flags.StringVar(&slackOptions.ReactionFailed, "slack-reaction-failed", slackOptions.ReactionFailed, "Slack reaction failed name")
 
 	SetStartFlags(flags)
 	SetK8sFlags(flags)

@@ -15,10 +15,13 @@ import (
 )
 
 type SlackOptions struct {
-	BotToken      string
-	AppToken      string
-	Debug         bool
-	ReplyInThread bool
+	BotToken       string
+	AppToken       string
+	Debug          bool
+	ReplyInThread  bool
+	ReactionDoing  string
+	ReactionDone   string
+	ReactionFailed string
 }
 
 type Slack struct {
@@ -64,11 +67,16 @@ func (s *Slack) reply(cc *slacker.CommandContext, options []slacker.ReplyOption,
 	userID := cc.Event().UserID
 	channelID := cc.Event().ChannelID
 	threadTS := cc.Event().ThreadTimeStamp
-
+	typ := cc.Event().Type
 	text := cc.Event().Text
-	items := strings.Split(text, ">")
-	if len(items) > 1 {
-		text = items[1]
+
+	if typ == "slash_commands" {
+		text = strings.TrimSpace(text)
+	} else {
+		items := strings.Split(text, ">")
+		if len(items) > 1 {
+			text = strings.TrimSpace(items[1])
+		}
 	}
 
 	replyInThread := s.options.ReplyInThread
@@ -96,7 +104,7 @@ func (s *Slack) reply(cc *slacker.CommandContext, options []slacker.ReplyOption,
 		// add quote
 		&RichTextQuote{Type: slack.RTEQuote, Elements: []*RichTextQuoteElement{
 			{Type: "user", UserID: userID},
-			{Type: "text", Text: text},
+			{Type: "text", Text: fmt.Sprintf(" %s", text)},
 		}},
 	}
 
@@ -124,6 +132,33 @@ func (s *Slack) replyMessage(cc *slacker.CommandContext, options []slacker.Reply
 
 func (s *Slack) replyError(cc *slacker.CommandContext, options []slacker.ReplyOption, err error) {
 	s.reply(cc, options, err.Error(), true)
+}
+
+func (s *Slack) addReaction(cc *slacker.CommandContext, name string) {
+
+	if cc.Event().Type == "slash_commands" {
+		return
+	}
+	err := cc.SlackClient().AddReaction(name, slack.NewRefToMessage(cc.Event().ChannelID, cc.Event().TimeStamp))
+	if err != nil {
+		s.logger.Error(err)
+	}
+}
+
+func (s *Slack) removeReaction(cc *slacker.CommandContext, name string) {
+
+	if cc.Event().Type == "slash_commands" {
+		return
+	}
+	err := cc.SlackClient().RemoveReaction(name, slack.NewRefToMessage(cc.Event().ChannelID, cc.Event().TimeStamp))
+	if err != nil {
+		s.logger.Error(err)
+	}
+}
+
+func (s *Slack) addRemoveReactions(cc *slacker.CommandContext, first, second string) {
+	s.addReaction(cc, first)
+	s.removeReaction(cc, second)
 }
 
 func (s *Slack) buildCommand(name string, params []string) string {
@@ -154,11 +189,12 @@ func (s *Slack) convertProperties(params []string, props *proper.Properties) com
 	return r
 }
 
-func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string) *slacker.CommandDefinition {
+func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, first bool) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
 	params := cmd.Params()
 	def := &slacker.CommandDefinition{
+
 		Command:     s.buildCommand(cName, params),
 		Description: cmd.Description(),
 		Handler: func(cc *slacker.CommandContext) {
@@ -169,17 +205,21 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string) *
 				return
 			}
 
+			s.addReaction(cc, s.options.ReactionDoing)
+
 			replyOpts := s.replyDefaultOptions()
 			cr, err := cmd.Execute(s, s.convertProperties(params, r.Properties()))
 			if err != nil {
 				s.logger.Error("Slack command %s request %s execution error: %s", groupName, cName, err)
 				s.replyError(cc, replyOpts, err)
+				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
 			if utils.IsEmpty(cr) {
 				err := fmt.Errorf("Slack command %s request %s no response", groupName, cName)
 				s.logger.Error(err)
 				s.replyError(cc, replyOpts, err)
+				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
 
@@ -203,9 +243,11 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string) *
 			if err != nil {
 				err = fmt.Errorf("Slack command %s response %s message error: %s", groupName, cName, err)
 				s.replyError(cc, replyOpts, err)
+				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
 			s.replyMessage(cc, replyOpts, message)
+			s.addRemoveReactions(cc, s.options.ReactionDone, s.options.ReactionDoing)
 		},
 	}
 	return def
@@ -215,18 +257,19 @@ func (s *Slack) start() {
 
 	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, slacker.WithDebug(s.options.Debug))
 
-	for _, p := range s.processors.Items() {
+	items := s.processors.Items()
+	for _, p := range items {
 
 		pName := p.Name()
 		commands := p.Commands()
 
 		if len(commands) == 0 {
-			client.AddCommand(s.defaultCommandDefinition(p, pName))
+			client.AddCommand(s.defaultCommandDefinition(p, pName, false))
 		} else {
 
 			group := client.AddCommandGroup(pName)
 			for _, c := range commands {
-				group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name())))
+				group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name()), false))
 			}
 		}
 	}

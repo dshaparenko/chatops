@@ -36,10 +36,27 @@ const (
 	startDescription = "List of all commands across the service"
 )
 
+type StartProcessor struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func (sr *StartResponse) buildProcessors() []*StartProcessor {
+
+	var r []*StartProcessor
+	for _, v := range sr.start.processors.Items() {
+		r = append(r, &StartProcessor{
+			Name:        v.Name(),
+			Description: v.Description(),
+		})
+	}
+	return r
+}
+
 func (sr *StartResponse) Message() (string, error) {
 
 	m := make(map[string]interface{})
-	m["processors"] = sr.start.processors
+	m["processors"] = sr.buildProcessors()
 	m["params"] = sr.params
 	m["bot"] = sr.bot.Name()
 

@@ -1,5 +1,7 @@
 package common
 
+import "github.com/devopsext/utils"
+
 type ResponseAttachement struct {
 	Text  string
 	Title string
@@ -23,4 +25,22 @@ type Command interface {
 type Processor interface {
 	Command
 	Commands() []Command
+}
+
+type Processors struct {
+	list []Processor
+}
+
+func (ps *Processors) Add(p Processor) {
+	if !utils.IsEmpty(p) {
+		ps.list = append(ps.list, p)
+	}
+}
+
+func (ps *Processors) Items() []Processor {
+	return ps.list
+}
+
+func NewProcessors() *Processors {
+	return &Processors{}
 }
