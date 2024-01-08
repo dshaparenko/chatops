@@ -117,7 +117,7 @@ func envFileContentExpand(s string, def string) string {
 func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observability, processors *common.Processors) {
 
 	logger := obs.Logs()
-	dirs, err := os.ReadDir(options.Dir)
+	first, err := os.ReadDir(options.Dir)
 	if err != nil {
 		logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
 		return
@@ -128,20 +128,43 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 		logger.Error("No default root processor")
 		return
 	}
+	processors.Add(rootProcessor)
 
-	for _, de := range dirs {
-		if !de.IsDir() {
-			name := de.Name()
-			path := fmt.Sprintf("%s%c%s", options.Dir, os.PathSeparator, name)
-			if err != nil {
-				logger.Error(err)
-				continue
-			}
-			rootProcessor.AddCommand(strings.TrimSuffix(name, filepath.Ext(name)), path)
+	for _, de1 := range first {
+
+		name1 := de1.Name()
+		path1 := fmt.Sprintf("%s%c%s", options.Dir, os.PathSeparator, name1)
+
+		// file is there
+		if !de1.IsDir() {
+			rootProcessor.AddCommand(strings.TrimSuffix(name1, filepath.Ext(name1)), path1)
 			continue
+		} else {
+
+			second, err := os.ReadDir(path1)
+			if err != nil {
+				logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
+				return
+			}
+
+			dirProcessor := processor.NewDefault(name1, obs, processors)
+			if utils.IsEmpty(dirProcessor) {
+				logger.Error("No default dir processor %s", name1)
+				return
+			}
+
+			for _, de2 := range second {
+
+				name2 := de2.Name()
+				path2 := fmt.Sprintf("%s%c%s", path1, os.PathSeparator, name2)
+				if de2.IsDir() {
+					continue
+				}
+				dirProcessor.AddCommand(strings.TrimSuffix(name2, filepath.Ext(name2)), path2)
+			}
+			processors.Add(dirProcessor)
 		}
 	}
-	processors.Add(rootProcessor)
 }
 
 func interceptSyscall() {
