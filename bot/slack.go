@@ -189,7 +189,7 @@ func (s *Slack) convertProperties(params []string, props *proper.Properties) com
 	return r
 }
 
-func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, first bool) *slacker.CommandDefinition {
+func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
 	params := cmd.Params()
@@ -210,13 +210,13 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, f
 			replyOpts := s.replyDefaultOptions()
 			cr, err := cmd.Execute(s, s.convertProperties(params, r.Properties()))
 			if err != nil {
-				s.logger.Error("Slack command %s request %s execution error: %s", groupName, cName, err)
+				s.logger.Error("Slack command %s request execution error: %s", groupName, err)
 				s.replyError(cc, replyOpts, err)
 				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
 			if utils.IsEmpty(cr) {
-				err := fmt.Errorf("Slack command %s request %s no response", groupName, cName)
+				err := fmt.Errorf("Slack command %s request no response", groupName)
 				s.logger.Error(err)
 				s.replyError(cc, replyOpts, err)
 				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -241,7 +241,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, f
 
 			message, err := cr.Message()
 			if err != nil {
-				err = fmt.Errorf("Slack command %s response %s message error: %s", groupName, cName, err)
+				err = fmt.Errorf("Slack command %s response message error: %s", groupName, err)
 				s.replyError(cc, replyOpts, err)
 				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
@@ -262,14 +262,16 @@ func (s *Slack) start() {
 
 		pName := p.Name()
 		commands := p.Commands()
+		var group *slacker.CommandGroup
 
-		if len(commands) == 0 {
-			client.AddCommand(s.defaultCommandDefinition(p, pName, false))
-		} else {
-
-			group := client.AddCommandGroup(pName)
+		if utils.IsEmpty(pName) {
 			for _, c := range commands {
-				group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name()), false))
+				client.AddCommand(s.defaultCommandDefinition(c, c.Name()))
+			}
+		} else {
+			group = client.AddCommandGroup(pName)
+			for _, c := range commands {
+				group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name())))
 			}
 		}
 	}

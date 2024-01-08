@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -96,6 +97,53 @@ func envFileContentExpand(s string, def string) string {
 	return os.Expand(string(bytes), getOnlyEnv)
 }
 
+/*func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observability, processors *common.Processors) {
+
+	var r []common.Processor
+
+	filepath.Walk(options.Dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			logger.Error("Default: walk over %s error %s", dir, err)
+			return err
+		}
+		if !info.IsDir() {
+			processors.Add(processor.NewDefault(options, obs, processors))
+		}
+		return nil
+	})
+	return r
+}*/
+
+func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observability, processors *common.Processors) {
+
+	logger := obs.Logs()
+	dirs, err := os.ReadDir(options.Dir)
+	if err != nil {
+		logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
+		return
+	}
+
+	rootProcessor := processor.NewDefault("", obs, processors)
+	if utils.IsEmpty(rootProcessor) {
+		logger.Error("No default root processor")
+		return
+	}
+
+	for _, de := range dirs {
+		if !de.IsDir() {
+			name := de.Name()
+			path := fmt.Sprintf("%s%c%s", options.Dir, os.PathSeparator, name)
+			if err != nil {
+				logger.Error(err)
+				continue
+			}
+			rootProcessor.AddCommand(strings.TrimSuffix(name, filepath.Ext(name)), path)
+			continue
+		}
+	}
+	processors.Add(rootProcessor)
+}
+
 func interceptSyscall() {
 
 	c := make(chan os.Signal, 1)
@@ -148,9 +196,7 @@ func Execute() {
 
 			obs := common.NewObservability(logs, metrics)
 			processors := common.NewProcessors()
-			processors.Add(processor.NewStart(startOptions, obs, processors))
-			//processors.Add(processor.NewK8s(k8sOptions, obs))
-			//processors.Add(processor.NewGrafana(grafanaOptions, obs))
+			buildDefaultProcessors(defaultOptions, obs, processors)
 
 			bots := common.NewBots()
 			bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
@@ -189,7 +235,7 @@ func Execute() {
 	flags.StringVar(&slackOptions.ReactionDone, "slack-reaction-done", slackOptions.ReactionDone, "Slack reaction done name")
 	flags.StringVar(&slackOptions.ReactionFailed, "slack-reaction-failed", slackOptions.ReactionFailed, "Slack reaction failed name")
 
-	SetStartFlags(flags)
+	SetDefaultFlags(flags)
 	SetK8sFlags(flags)
 	SetGrafanaFlags(flags)
 

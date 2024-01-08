@@ -46,8 +46,8 @@ func (sr *StartResponse) buildProcessors() []*StartProcessor {
 	var r []*StartProcessor
 	for _, v := range sr.start.processors.Items() {
 		r = append(r, &StartProcessor{
-			Name:        v.Name(),
-			Description: v.Description(),
+			Name: v.Name(),
+			//Description: v.Description(),
 		})
 	}
 	return r
@@ -71,7 +71,7 @@ func (sr *StartResponse) Attachments() []*common.ResponseAttachement {
 	return []*common.ResponseAttachement{}
 }
 
-func (s *Start) Name() string {
+func (s *Start) GroupName() string {
 	return startName
 }
 

@@ -23,7 +23,7 @@ type Command interface {
 }
 
 type Processor interface {
-	Command
+	Name() string
 	Commands() []Command
 }
 
@@ -35,6 +35,10 @@ func (ps *Processors) Add(p Processor) {
 	if !utils.IsEmpty(p) {
 		ps.list = append(ps.list, p)
 	}
+}
+
+func (ps *Processors) AddList(list []Processor) {
+	ps.list = append(ps.list, list...)
 }
 
 func (ps *Processors) Items() []Processor {

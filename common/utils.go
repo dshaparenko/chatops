@@ -68,3 +68,22 @@ func LoadTemplate(name, tmpl string) (*template.Template, error) {
 	}
 	return t, nil
 }
+
+/*func FileTree(dir, pattern string, level, max int) (map[string][]string, error) {
+
+	if !utils.DirExists(dir) {
+		return nil, fmt.Errorf("directory %s is not exists", dir)
+	}
+	r := make(map[string][]string)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+      info.Name()
+			fmt.Println(path)
+		}
+		return nil
+	})
+	return r, err
+}*/
