@@ -6,7 +6,7 @@ replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.3
 
 require (
 	github.com/devopsext/sre v0.3.0
-	github.com/devopsext/tools v0.10.3
+	github.com/devopsext/tools v0.10.4
 	github.com/devopsext/utils v0.2.4
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0
@@ -14,7 +14,6 @@ require (
 	github.com/slack-go/slack v0.12.2
 	github.com/slack-io/slacker v0.1.0
 	github.com/spf13/cobra v1.8.0
-	github.com/spf13/pflag v1.0.5
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -50,6 +49,7 @@ require (
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
+	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
 	github.com/tidwall/gjson v1.14.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

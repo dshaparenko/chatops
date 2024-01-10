@@ -22,47 +22,67 @@ type SlackOptions struct {
 	ReactionDoing  string
 	ReactionDone   string
 	ReactionFailed string
+	DefaultCommand string
+	HelpCommand    string
+}
+
+type SlackUser struct {
+	id   string
+	name string
 }
 
 type Slack struct {
-	options    SlackOptions
-	processors *common.Processors
-	client     *slacker.Slacker
-	logger     sreCommon.Logger
+	options           SlackOptions
+	processors        *common.Processors
+	client            *slacker.Slacker
+	logger            sreCommon.Logger
+	defaultDefinition *slacker.CommandDefinition
 }
 
-type RichTextQuoteElement struct {
+type SlackRichTextQuoteElement struct {
 	Type   slack.RichTextElementType `json:"type"`
 	Text   string                    `json:"text,omitempty"`
 	UserID string                    `json:"user_id,omitempty"`
 }
 
-type RichTextQuote struct {
-	Type     slack.RichTextElementType `json:"type"`
-	Elements []*RichTextQuoteElement   `json:"elements"`
+type SlackRichTextQuote struct {
+	Type     slack.RichTextElementType    `json:"type"`
+	Elements []*SlackRichTextQuoteElement `json:"elements"`
 }
 
-func (r RichTextQuote) RichTextElementType() slack.RichTextElementType {
+func (r SlackRichTextQuote) RichTextElementType() slack.RichTextElementType {
 	return r.Type
 }
 
-func (r RichTextQuoteElement) RichTextElementType() slack.RichTextElementType {
+func (r SlackRichTextQuoteElement) RichTextElementType() slack.RichTextElementType {
 	return r.Type
 }
+
+// SlackUser
+
+func (su *SlackUser) ID() string {
+	return su.id
+}
+
+func (su *SlackUser) Name() string {
+	return su.name
+}
+
+// Slack
 
 func (s *Slack) Name() string {
 	return "Slack"
 }
 
-func (s *Slack) replyDefaultOptions() []slacker.ReplyOption {
+/*func (s *Slack) replyDefaultOptions() []slacker.ReplyOption {
 
 	opts := []slacker.ReplyOption{
 		slacker.WithInThread(s.options.ReplyInThread),
 	}
 	return opts
-}
+}*/
 
-func (s *Slack) reply(cc *slacker.CommandContext, options []slacker.ReplyOption, message string, error bool) {
+func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []slack.Attachment, error bool) error {
 
 	userID := cc.Event().UserID
 	channelID := cc.Event().ChannelID
@@ -86,15 +106,16 @@ func (s *Slack) reply(cc *slacker.CommandContext, options []slacker.ReplyOption,
 		replyInThread = true
 	}
 
+	atts := []slack.Attachment{}
 	opts := []slacker.PostOption{}
 	if error {
-		attachments := []slack.Attachment{}
-		attachments = append(attachments, slack.Attachment{
+		atts = append(atts, slack.Attachment{
 			Color: "danger",
 			Text:  message,
 		})
-		opts = append(opts, slacker.SetAttachments(attachments))
 	}
+	atts = append(atts, attachments...)
+	opts = append(opts, slacker.SetAttachments(atts))
 
 	if replyInThread {
 		opts = append(opts, slacker.SetThreadTS(threadTS))
@@ -102,7 +123,7 @@ func (s *Slack) reply(cc *slacker.CommandContext, options []slacker.ReplyOption,
 
 	elements := []slack.RichTextElement{
 		// add quote
-		&RichTextQuote{Type: slack.RTEQuote, Elements: []*RichTextQuoteElement{
+		&SlackRichTextQuote{Type: slack.RTEQuote, Elements: []*SlackRichTextQuoteElement{
 			{Type: "user", UserID: userID},
 			{Type: "text", Text: fmt.Sprintf(" %s", text)},
 		}},
@@ -122,16 +143,17 @@ func (s *Slack) reply(cc *slacker.CommandContext, options []slacker.ReplyOption,
 
 	_, err := cc.Response().PostBlocks(channelID, blocks, opts...)
 	if err != nil {
-		s.logger.Error(err)
+		return err
 	}
+	return nil
 }
 
-func (s *Slack) replyMessage(cc *slacker.CommandContext, options []slacker.ReplyOption, message string) {
-	s.reply(cc, options, message, false)
+func (s *Slack) replyMessage(cc *slacker.CommandContext, message string, attachments []slack.Attachment) error {
+	return s.reply(cc, message, attachments, false)
 }
 
-func (s *Slack) replyError(cc *slacker.CommandContext, options []slacker.ReplyOption, err error) {
-	s.reply(cc, options, err.Error(), true)
+func (s *Slack) replyError(cc *slacker.CommandContext, err error, attachments []slack.Attachment) error {
+	return s.reply(cc, err.Error(), attachments, true)
 }
 
 func (s *Slack) addReaction(cc *slacker.CommandContext, name string) {
@@ -189,7 +211,7 @@ func (s *Slack) convertProperties(params []string, props *proper.Properties) com
 	return r
 }
 
-func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string) *slacker.CommandDefinition {
+func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, error bool) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
 	params := cmd.Params()
@@ -197,36 +219,36 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string) *
 
 		Command:     s.buildCommand(cName, params),
 		Description: cmd.Description(),
+		HideHelp:    true,
 		Handler: func(cc *slacker.CommandContext) {
-
-			r := cc.Request()
-			if r == nil {
-				s.logger.Debug("Slack command %s request %v is empty", groupName, r)
-				return
-			}
 
 			s.addReaction(cc, s.options.ReactionDoing)
 
-			replyOpts := s.replyDefaultOptions()
-			cr, err := cmd.Execute(s, s.convertProperties(params, r.Properties()))
+			r := cc.Request()
+			eParams := s.convertProperties(params, r.Properties())
+			event := cc.Event()
+
+			user := &SlackUser{
+				id: event.UserID,
+			}
+
+			profile, err := s.client.SlackClient().GetUserProfile(&slack.GetUserProfileParameters{UserID: event.UserID, IncludeLabels: false})
+			if err == nil && profile != nil {
+				user.name = profile.DisplayName
+			}
+
+			var replyAttachments []slack.Attachment
+
+			message, attachments, err := cmd.Execute(s, user, eParams)
 			if err != nil {
 				s.logger.Error("Slack command %s request execution error: %s", groupName, err)
-				s.replyError(cc, replyOpts, err)
-				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
-				return
-			}
-			if utils.IsEmpty(cr) {
-				err := fmt.Errorf("Slack command %s request no response", groupName)
-				s.logger.Error(err)
-				s.replyError(cc, replyOpts, err)
+				s.replyError(cc, err, replyAttachments)
 				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
 
 			// add attachements if some
-			attachments := cr.Attachments()
 			if len(attachments) > 0 {
-				var replyAttachments []slack.Attachment
 				for _, a := range attachments {
 					replyAttachments = append(replyAttachments, slack.Attachment{
 						Pretext: a.Text,
@@ -234,29 +256,35 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string) *
 						Text:    string(a.Data),
 					})
 				}
-				if len(replyAttachments) > 0 {
-					replyOpts = append(replyOpts, slacker.WithAttachments(replyAttachments))
-				}
 			}
-
-			message, err := cr.Message()
+			err = s.reply(cc, message, replyAttachments, error)
 			if err != nil {
-				err = fmt.Errorf("Slack command %s response message error: %s", groupName, err)
-				s.replyError(cc, replyOpts, err)
+				s.replyError(cc, err, replyAttachments)
 				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
-			s.replyMessage(cc, replyOpts, message)
-			s.addRemoveReactions(cc, s.options.ReactionDone, s.options.ReactionDoing)
+			if error {
+				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
+			} else {
+				s.addRemoveReactions(cc, s.options.ReactionDone, s.options.ReactionDoing)
+			}
 		},
 	}
 	return def
 }
 
+func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
+	if s.defaultDefinition != nil {
+		s.defaultDefinition.Handler(cc)
+	}
+}
+
 func (s *Slack) start() {
 
 	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, slacker.WithDebug(s.options.Debug))
+	client.UnsupportedCommandHandler(s.unsupportedCommandHandler)
 
+	s.defaultDefinition = nil
 	items := s.processors.Items()
 	for _, p := range items {
 
@@ -266,12 +294,21 @@ func (s *Slack) start() {
 
 		if utils.IsEmpty(pName) {
 			for _, c := range commands {
-				client.AddCommand(s.defaultCommandDefinition(c, c.Name()))
+				name := c.Name()
+				if name == s.options.DefaultCommand {
+					s.defaultDefinition = s.defaultCommandDefinition(c, name, true)
+				} else {
+					def := s.defaultCommandDefinition(c, name, false)
+					if name == s.options.HelpCommand {
+						client.Help(def)
+					}
+					client.AddCommand(def)
+				}
 			}
 		} else {
 			group = client.AddCommandGroup(pName)
 			for _, c := range commands {
-				group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name())))
+				group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name()), false))
 			}
 		}
 	}

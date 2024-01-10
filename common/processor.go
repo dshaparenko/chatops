@@ -2,15 +2,15 @@ package common
 
 import "github.com/devopsext/utils"
 
-type ResponseAttachement struct {
-	Text  string
-	Title string
-	Data  []byte
+type User interface {
+	ID() string
+	Name() string
 }
 
-type Response interface {
-	Message() (string, error)
-	Attachments() []*ResponseAttachement
+type Attachment struct {
+	Title string
+	Text  string
+	Data  []byte
 }
 
 type ExecuteParams = map[string]string
@@ -19,7 +19,7 @@ type Command interface {
 	Name() string
 	Description() string
 	Params() []string
-	Execute(bot Bot, params ExecuteParams) (Response, error)
+	Execute(bot Bot, user User, params ExecuteParams) (string, []*Attachment, error)
 }
 
 type Processor interface {

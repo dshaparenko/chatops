@@ -3,7 +3,6 @@ package common
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"text/template"
 
@@ -22,7 +21,7 @@ func LoadYaml(config string, obj interface{}) (bool, error) {
 	if _, err := os.Stat(config); errors.Is(err, os.ErrNotExist) {
 		raw = config
 	} else {
-		r, err := ioutil.ReadFile(config)
+		r, err := os.ReadFile(config)
 		if err != nil {
 			return false, err
 		}
@@ -51,7 +50,7 @@ func LoadTemplate(name, tmpl string) (*template.Template, error) {
 	if _, err := os.Stat(tmpl); errors.Is(err, os.ErrNotExist) {
 		raw = tmpl
 	} else {
-		r, err := ioutil.ReadFile(tmpl)
+		r, err := os.ReadFile(tmpl)
 		if err != nil {
 			return nil, err
 		}
@@ -68,22 +67,3 @@ func LoadTemplate(name, tmpl string) (*template.Template, error) {
 	}
 	return t, nil
 }
-
-/*func FileTree(dir, pattern string, level, max int) (map[string][]string, error) {
-
-	if !utils.DirExists(dir) {
-		return nil, fmt.Errorf("directory %s is not exists", dir)
-	}
-	r := make(map[string][]string)
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-      info.Name()
-			fmt.Println(path)
-		}
-		return nil
-	})
-	return r, err
-}*/

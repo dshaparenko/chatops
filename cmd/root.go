@@ -69,6 +69,13 @@ var slackOptions = bot.SlackOptions{
 	ReactionDoing:  envGet("SLACK_REACTION_DOING", "eyes").(string),
 	ReactionDone:   envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
 	ReactionFailed: envGet("SLACK_REACTION_FAILED", "x").(string),
+	DefaultCommand: envGet("SLACK_DEFAULT_COMMAND", "").(string),
+	HelpCommand:    envGet("SLACK_HELP_COMMAND", "").(string),
+}
+
+var defaultOptions = processor.DefaultOptions{
+	Dir:     envGet("DEFAULT_DIR", "").(string),
+	Pattern: envGet("DEFAULT_PATTERN", "*.template").(string),
 }
 
 func getOnlyEnv(key string) string {
@@ -97,36 +104,30 @@ func envFileContentExpand(s string, def string) string {
 	return os.Expand(string(bytes), getOnlyEnv)
 }
 
-/*func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observability, processors *common.Processors) {
+func interceptSyscall() {
 
-	var r []common.Processor
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	go func() {
+		<-c
+		logs.Info("Exiting...")
+		os.Exit(1)
+	}()
+}
 
-	filepath.Walk(options.Dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			logger.Error("Default: walk over %s error %s", dir, err)
-			return err
-		}
-		if !info.IsDir() {
-			processors.Add(processor.NewDefault(options, obs, processors))
-		}
-		return nil
-	})
-	return r
-}*/
-
-func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observability, processors *common.Processors) {
+func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observability, processors *common.Processors) error {
 
 	logger := obs.Logs()
 	first, err := os.ReadDir(options.Dir)
 	if err != nil {
 		logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
-		return
+		return err
 	}
 
 	rootProcessor := processor.NewDefault("", obs, processors)
 	if utils.IsEmpty(rootProcessor) {
 		logger.Error("No default root processor")
-		return
+		return err
 	}
 	processors.Add(rootProcessor)
 
@@ -137,20 +138,27 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 
 		// file is there
 		if !de1.IsDir() {
-			rootProcessor.AddCommand(strings.TrimSuffix(name1, filepath.Ext(name1)), path1)
+			ext := filepath.Ext(name1)
+			if ext != ".template" {
+				continue
+			}
+			err := rootProcessor.AddCommand(strings.TrimSuffix(name1, ext), path1)
+			if err != nil {
+				return err
+			}
 			continue
 		} else {
 
 			second, err := os.ReadDir(path1)
 			if err != nil {
 				logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
-				return
+				return err
 			}
 
 			dirProcessor := processor.NewDefault(name1, obs, processors)
 			if utils.IsEmpty(dirProcessor) {
 				logger.Error("No default dir processor %s", name1)
-				return
+				return err
 			}
 
 			for _, de2 := range second {
@@ -160,22 +168,19 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 				if de2.IsDir() {
 					continue
 				}
-				dirProcessor.AddCommand(strings.TrimSuffix(name2, filepath.Ext(name2)), path2)
+				ext := filepath.Ext(name2)
+				if ext != ".template" {
+					continue
+				}
+				err := dirProcessor.AddCommand(strings.TrimSuffix(name2, ext), path2)
+				if err != nil {
+					return err
+				}
 			}
 			processors.Add(dirProcessor)
 		}
 	}
-}
-
-func interceptSyscall() {
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-c
-		logs.Info("Exiting...")
-		os.Exit(1)
-	}()
+	return nil
 }
 
 // /start - show list of commands and simple description
@@ -219,10 +224,14 @@ func Execute() {
 
 			obs := common.NewObservability(logs, metrics)
 			processors := common.NewProcessors()
-			buildDefaultProcessors(defaultOptions, obs, processors)
+
+			err := buildDefaultProcessors(defaultOptions, obs, processors)
+			if err != nil {
+				os.Exit(1)
+			}
 
 			bots := common.NewBots()
-			bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
+			//bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
 			bots.Add(bot.NewSlack(slackOptions, obs, processors))
 
 			bots.Start(&mainWG)
@@ -257,10 +266,11 @@ func Execute() {
 	flags.StringVar(&slackOptions.ReactionDoing, "slack-reaction-doing", slackOptions.ReactionDoing, "Slack reaction doing name")
 	flags.StringVar(&slackOptions.ReactionDone, "slack-reaction-done", slackOptions.ReactionDone, "Slack reaction done name")
 	flags.StringVar(&slackOptions.ReactionFailed, "slack-reaction-failed", slackOptions.ReactionFailed, "Slack reaction failed name")
+	flags.StringVar(&slackOptions.DefaultCommand, "slack-default-command", slackOptions.DefaultCommand, "Slack default command")
+	flags.StringVar(&slackOptions.HelpCommand, "slack-help-command", slackOptions.HelpCommand, "Slack help command")
 
-	SetDefaultFlags(flags)
-	SetK8sFlags(flags)
-	SetGrafanaFlags(flags)
+	flags.StringVar(&defaultOptions.Dir, "default-dir", defaultOptions.Dir, "Default dir")
+	flags.StringVar(&defaultOptions.Pattern, "default-pattern", defaultOptions.Pattern, "Default pattern")
 
 	interceptSyscall()
 
