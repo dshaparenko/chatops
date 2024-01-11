@@ -37,6 +37,7 @@ type Slack struct {
 	client            *slacker.Slacker
 	logger            sreCommon.Logger
 	defaultDefinition *slacker.CommandDefinition
+	helpDefinition    *slacker.CommandDefinition
 }
 
 type SlackRichTextQuoteElement struct {
@@ -211,6 +212,21 @@ func (s *Slack) convertProperties(params []string, props *proper.Properties) com
 	return r
 }
 
+func (s *Slack) convertAttachmentType(typ common.AttachmentType) string {
+
+	switch typ {
+	case common.AttachmentTypeUnknown:
+		return ""
+	case common.AttachmentTypeText:
+		return "text"
+	case common.AttachmentTypeImage:
+		return "image"
+	default:
+		return "text"
+	}
+
+}
+
 func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, error bool) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
@@ -251,9 +267,10 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 			if len(attachments) > 0 {
 				for _, a := range attachments {
 					replyAttachments = append(replyAttachments, slack.Attachment{
-						Pretext: a.Text,
-						Title:   a.Title,
-						Text:    string(a.Data),
+						Pretext:    a.Text,
+						Title:      a.Title,
+						Text:       string(a.Data),
+						MarkdownIn: []string{s.convertAttachmentType(a.Type)},
 					})
 				}
 			}
@@ -274,8 +291,21 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 }
 
 func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
+
+	text := cc.Event().Text
+	items := strings.Split(text, ">")
+	if len(items) > 1 {
+		text = strings.TrimSpace(items[1])
+	}
+
+	if utils.IsEmpty(text) && s.helpDefinition != nil {
+		s.helpDefinition.Handler(cc)
+		return
+	}
+
 	if s.defaultDefinition != nil {
 		s.defaultDefinition.Handler(cc)
+		return
 	}
 }
 
@@ -285,6 +315,8 @@ func (s *Slack) start() {
 	client.UnsupportedCommandHandler(s.unsupportedCommandHandler)
 
 	s.defaultDefinition = nil
+	s.helpDefinition = nil
+
 	items := s.processors.Items()
 	for _, p := range items {
 
@@ -300,6 +332,7 @@ func (s *Slack) start() {
 				} else {
 					def := s.defaultCommandDefinition(c, name, false)
 					if name == s.options.HelpCommand {
+						s.helpDefinition = def
 						client.Help(def)
 					}
 					client.AddCommand(def)

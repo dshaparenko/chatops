@@ -7,10 +7,13 @@ type User interface {
 	Name() string
 }
 
+type AttachmentType string
+
 type Attachment struct {
 	Title string
 	Text  string
 	Data  []byte
+	Type  AttachmentType
 }
 
 type ExecuteParams = map[string]string
@@ -30,6 +33,12 @@ type Processor interface {
 type Processors struct {
 	list []Processor
 }
+
+const (
+	AttachmentTypeUnknown = ""
+	AttachmentTypeText    = "text"
+	AttachmentTypeImage   = "image"
+)
 
 func (ps *Processors) Add(p Processor) {
 	if !utils.IsEmpty(p) {

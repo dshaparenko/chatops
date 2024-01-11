@@ -21,7 +21,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var VERSION = "unknown"
+var version = "unknown"
 var APPNAME = "CHATOPS"
 var appName = strings.ToLower(APPNAME)
 
@@ -202,7 +202,7 @@ func Execute() {
 		Short: "Chatops",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 
-			stdoutOptions.Version = VERSION
+			stdoutOptions.Version = version
 			stdout = sreProvider.NewStdout(stdoutOptions)
 			if utils.Contains(rootOptions.Logs, "stdout") && stdout != nil {
 				stdout.SetCallerOffset(2)
@@ -213,7 +213,7 @@ func Execute() {
 
 			// Metrics
 
-			prometheusOptions.Version = VERSION
+			prometheusOptions.Version = version
 			prometheus := sreProvider.NewPrometheusMeter(prometheusOptions, logs, stdout)
 			if utils.Contains(rootOptions.Metrics, "prometheus") && prometheus != nil {
 				prometheus.StartInWaitGroup(&mainWG)
@@ -278,7 +278,7 @@ func Execute() {
 		Use:   "version",
 		Short: "Print the version number",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(VERSION)
+			fmt.Println(version)
 		},
 	})
 

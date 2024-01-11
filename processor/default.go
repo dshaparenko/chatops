@@ -47,6 +47,7 @@ func (dc *DefaultCommand) Params() []string {
 func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params common.ExecuteParams) (string, []*common.Attachment, error) {
 
 	gid := utils.GoRoutineID()
+	logger := dc.processor.observability.Logs()
 
 	m := make(map[string]interface{})
 	m["processors"] = dc.processor.processors.Items()
@@ -58,7 +59,8 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 
 	b, err := dc.template.RenderObject(m)
 	if err != nil {
-		return "", atts, err
+		logger.Error(err)
+		return "", atts, fmt.Errorf("%s", "Couldn't execute command")
 	}
 
 	r, ok := dc.attachments.LoadAndDelete(gid)
@@ -69,9 +71,10 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	return strings.TrimSpace(string(b)), atts, nil
 }
 
-func (dc *DefaultCommand) fAddAttachment(title, text string, data interface{}) error {
+func (dc *DefaultCommand) fAddAttachment(title, text string, data interface{}, typ string) error {
 
 	gid := utils.GoRoutineID()
+
 	var atts []*common.Attachment
 
 	r, ok := dc.attachments.Load(gid)
@@ -89,6 +92,7 @@ func (dc *DefaultCommand) fAddAttachment(title, text string, data interface{}) e
 		Title: title,
 		Text:  text,
 		Data:  dBytes,
+		Type:  common.AttachmentType(typ),
 	})
 	dc.attachments.Store(gid, atts)
 	return nil
