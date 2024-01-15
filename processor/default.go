@@ -14,6 +14,7 @@ type DefaultOptions struct {
 	Dir         string
 	Pattern     string
 	Description string
+	Error       string
 }
 
 type DefaultCommand struct {
@@ -25,6 +26,7 @@ type DefaultCommand struct {
 
 type Default struct {
 	name          string
+	options       DefaultOptions
 	processors    *common.Processors
 	commands      []common.Command
 	observability *common.Observability
@@ -60,7 +62,7 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	b, err := dc.template.RenderObject(m)
 	if err != nil {
 		logger.Error(err)
-		return "", atts, fmt.Errorf("%s", "Couldn't execute command")
+		return "", atts, fmt.Errorf("%s", dc.processor.options.Error)
 	}
 
 	r, ok := dc.attachments.LoadAndDelete(gid)
@@ -144,10 +146,11 @@ func (d *Default) AddCommand(name, path string) error {
 	return nil
 }
 
-func NewDefault(name string, observability *common.Observability, processors *common.Processors) *Default {
+func NewDefault(name string, options DefaultOptions, observability *common.Observability, processors *common.Processors) *Default {
 
 	return &Default{
 		name:          name,
+		options:       options,
 		processors:    processors,
 		observability: observability,
 	}

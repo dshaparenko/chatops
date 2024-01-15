@@ -76,6 +76,7 @@ var slackOptions = bot.SlackOptions{
 var defaultOptions = processor.DefaultOptions{
 	Dir:     envGet("DEFAULT_DIR", "").(string),
 	Pattern: envGet("DEFAULT_PATTERN", "*.template").(string),
+	Error:   envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
 }
 
 func getOnlyEnv(key string) string {
@@ -124,7 +125,7 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 		return err
 	}
 
-	rootProcessor := processor.NewDefault("", obs, processors)
+	rootProcessor := processor.NewDefault("", options, obs, processors)
 	if utils.IsEmpty(rootProcessor) {
 		logger.Error("No default root processor")
 		return err
@@ -155,7 +156,7 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 				return err
 			}
 
-			dirProcessor := processor.NewDefault(name1, obs, processors)
+			dirProcessor := processor.NewDefault(name1, options, obs, processors)
 			if utils.IsEmpty(dirProcessor) {
 				logger.Error("No default dir processor %s", name1)
 				return err
@@ -271,6 +272,7 @@ func Execute() {
 
 	flags.StringVar(&defaultOptions.Dir, "default-dir", defaultOptions.Dir, "Default dir")
 	flags.StringVar(&defaultOptions.Pattern, "default-pattern", defaultOptions.Pattern, "Default pattern")
+	flags.StringVar(&defaultOptions.Error, "default-error", defaultOptions.Error, "Default error")
 
 	interceptSyscall()
 

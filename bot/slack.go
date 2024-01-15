@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/devopsext/chatops/common"
 	sreCommon "github.com/devopsext/sre/common"
@@ -83,7 +84,7 @@ func (s *Slack) Name() string {
 	return opts
 }*/
 
-func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []slack.Attachment, error bool) error {
+func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration, error bool) error {
 
 	userID := cc.Event().UserID
 	channelID := cc.Event().ChannelID
@@ -122,11 +123,16 @@ func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []
 		opts = append(opts, slacker.SetThreadTS(threadTS))
 	}
 
+	duration := ""
+	if elapsed != nil {
+		duration = fmt.Sprintf(" [%s]", elapsed.Round(time.Millisecond))
+	}
+
 	elements := []slack.RichTextElement{
 		// add quote
 		&SlackRichTextQuote{Type: slack.RTEQuote, Elements: []*SlackRichTextQuoteElement{
 			{Type: "user", UserID: userID},
-			{Type: "text", Text: fmt.Sprintf(" %s", text)},
+			{Type: "text", Text: fmt.Sprintf(" %s%s", text, duration)},
 		}},
 	}
 
@@ -149,12 +155,12 @@ func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []
 	return nil
 }
 
-func (s *Slack) replyMessage(cc *slacker.CommandContext, message string, attachments []slack.Attachment) error {
-	return s.reply(cc, message, attachments, false)
+func (s *Slack) replyMessage(cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration) error {
+	return s.reply(cc, message, attachments, elapsed, false)
 }
 
 func (s *Slack) replyError(cc *slacker.CommandContext, err error, attachments []slack.Attachment) error {
-	return s.reply(cc, err.Error(), attachments, true)
+	return s.reply(cc, err.Error(), attachments, nil, true)
 }
 
 func (s *Slack) addReaction(cc *slacker.CommandContext, name string) {
@@ -255,6 +261,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 
 			var replyAttachments []slack.Attachment
 
+			t1 := time.Now()
 			message, attachments, err := cmd.Execute(s, user, eParams)
 			if err != nil {
 				s.logger.Error("Slack command %s request execution error: %s", groupName, err)
@@ -274,7 +281,8 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 					})
 				}
 			}
-			err = s.reply(cc, message, replyAttachments, error)
+			elapsed := time.Since(t1)
+			err = s.reply(cc, message, replyAttachments, &elapsed, false)
 			if err != nil {
 				s.replyError(cc, err, replyAttachments)
 				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
