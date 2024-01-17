@@ -57,6 +57,12 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	m["bot"] = bot.Name()
 	m["user"] = user
 
+	if utils.IsEmpty(dc.processor.name) {
+		m["name"] = dc.name
+	} else {
+		m["name"] = fmt.Sprintf("%s/%s", dc.processor.name, dc.name)
+	}
+
 	var atts []*common.Attachment
 
 	b, err := dc.template.RenderObject(m)

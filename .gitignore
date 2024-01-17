@@ -11,3 +11,4 @@ __debug_bin
 chatops
 .start.template
 .commands/
+.temp.file

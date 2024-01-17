@@ -124,15 +124,16 @@ func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []
 	}
 
 	duration := ""
-	if elapsed != nil {
-		duration = fmt.Sprintf(" [%s]", elapsed.Round(time.Millisecond))
+	if elapsed != nil && !error {
+		duration = fmt.Sprintf("[%s]", elapsed.Round(time.Millisecond))
 	}
 
 	elements := []slack.RichTextElement{
 		// add quote
 		&SlackRichTextQuote{Type: slack.RTEQuote, Elements: []*SlackRichTextQuoteElement{
+			{Type: "text", Text: fmt.Sprintf("%s ", duration)},
 			{Type: "user", UserID: userID},
-			{Type: "text", Text: fmt.Sprintf(" %s%s", text, duration)},
+			{Type: "text", Text: fmt.Sprintf(" %s", text)},
 		}},
 	}
 
@@ -326,6 +327,7 @@ func (s *Slack) start() {
 	s.helpDefinition = nil
 
 	items := s.processors.Items()
+	// add groups firstly
 	for _, p := range items {
 
 		pName := p.Name()
@@ -333,23 +335,35 @@ func (s *Slack) start() {
 		var group *slacker.CommandGroup
 
 		if utils.IsEmpty(pName) {
-			for _, c := range commands {
-				name := c.Name()
-				if name == s.options.DefaultCommand {
-					s.defaultDefinition = s.defaultCommandDefinition(c, name, true)
-				} else {
-					def := s.defaultCommandDefinition(c, name, false)
-					if name == s.options.HelpCommand {
-						s.helpDefinition = def
-						client.Help(def)
-					}
-					client.AddCommand(def)
+			continue
+		}
+		group = client.AddCommandGroup(pName)
+		for _, c := range commands {
+			group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name()), false))
+		}
+	}
+
+	group := client.AddCommandGroup("")
+	// add root secondly
+	for _, p := range items {
+
+		pName := p.Name()
+		commands := p.Commands()
+
+		if !utils.IsEmpty(pName) {
+			continue
+		}
+		for _, c := range commands {
+			name := c.Name()
+			if name == s.options.DefaultCommand {
+				s.defaultDefinition = s.defaultCommandDefinition(c, name, true)
+			} else {
+				def := s.defaultCommandDefinition(c, name, false)
+				if name == s.options.HelpCommand {
+					s.helpDefinition = def
+					client.Help(def)
 				}
-			}
-		} else {
-			group = client.AddCommandGroup(pName)
-			for _, c := range commands {
-				group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name()), false))
+				group.AddCommand(def)
 			}
 		}
 	}

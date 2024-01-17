@@ -6,7 +6,7 @@ replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.3
 
 require (
 	github.com/devopsext/sre v0.3.0
-	github.com/devopsext/tools v0.11.1
+	github.com/devopsext/tools v0.11.2
 	github.com/devopsext/utils v0.2.5
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0

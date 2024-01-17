@@ -125,31 +125,14 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 		return err
 	}
 
-	rootProcessor := processor.NewDefault("", options, obs, processors)
-	if utils.IsEmpty(rootProcessor) {
-		logger.Error("No default root processor")
-		return err
-	}
-	processors.Add(rootProcessor)
-
+	// scan dirs firstly
 	for _, de1 := range first {
 
 		name1 := de1.Name()
 		path1 := fmt.Sprintf("%s%c%s", options.Dir, os.PathSeparator, name1)
 
-		// file is there
-		if !de1.IsDir() {
-			ext := filepath.Ext(name1)
-			if ext != ".template" {
-				continue
-			}
-			err := rootProcessor.AddCommand(strings.TrimSuffix(name1, ext), path1)
-			if err != nil {
-				return err
-			}
-			continue
-		} else {
-
+		// dir is there
+		if de1.IsDir() {
 			second, err := os.ReadDir(path1)
 			if err != nil {
 				logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
@@ -181,6 +164,33 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 			processors.Add(dirProcessor)
 		}
 	}
+
+	rootProcessor := processor.NewDefault("", options, obs, processors)
+	if utils.IsEmpty(rootProcessor) {
+		logger.Error("No default root processor")
+		return err
+	}
+	processors.Add(rootProcessor)
+
+	// scan files secondly
+	for _, de1 := range first {
+
+		name1 := de1.Name()
+		path1 := fmt.Sprintf("%s%c%s", options.Dir, os.PathSeparator, name1)
+
+		// file is there
+		if !de1.IsDir() {
+			ext := filepath.Ext(name1)
+			if ext != ".template" {
+				continue
+			}
+			err := rootProcessor.AddCommand(strings.TrimSuffix(name1, ext), path1)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
