@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ type SlackOptions struct {
 	ReactionFailed string
 	DefaultCommand string
 	HelpCommand    string
+	Permisssions   string
 }
 
 type SlackUser struct {
@@ -36,6 +38,7 @@ type Slack struct {
 	options           SlackOptions
 	processors        *common.Processors
 	client            *slacker.Slacker
+	auth              *slack.AuthTestResponse
 	logger            sreCommon.Logger
 	defaultDefinition *slacker.CommandDefinition
 	helpDefinition    *slacker.CommandDefinition
@@ -76,15 +79,36 @@ func (s *Slack) Name() string {
 	return "Slack"
 }
 
-/*func (s *Slack) replyDefaultOptions() []slacker.ReplyOption {
+/*func (s *Slack) Info() interface{} {
 
-	opts := []slacker.ReplyOption{
-		slacker.WithInThread(s.options.ReplyInThread),
+	if s.auth == nil {
+		return nil
 	}
-	return opts
+
+	bytes, err := json.Marshal(s.auth)
+	if err != nil {
+		s.logger.Error("Slack marshal auth error: %s", err)
+		return nil
+	}
+
+	var r interface{}
+	err = json.Unmarshal(bytes, &r)
+	if err != nil {
+		s.logger.Error("Slack unmarshal auth error: %s", err)
+		return nil
+	}
+	return r
 }*/
 
-func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration, error bool) error {
+func (s *Slack) Info() interface{} {
+
+	if s.auth == nil {
+		return nil
+	}
+	return s.auth
+}
+
+func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration, error bool) error {
 
 	userID := cc.Event().UserID
 	channelID := cc.Event().ChannelID
@@ -123,18 +147,31 @@ func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []
 		opts = append(opts, slacker.SetThreadTS(threadTS))
 	}
 
-	duration := ""
-	if elapsed != nil && !error {
-		duration = fmt.Sprintf("[%s]", elapsed.Round(time.Millisecond))
+	// could be used to replace orignal message
+	//opts = append(opts, slacker.SetReplace(threadTS))
+
+	// could be visible only for user requested
+	//opts = append(opts, slacker.SetEphemeral(userID))
+
+	var quote = []*SlackRichTextQuoteElement{}
+
+	var durationElement *SlackRichTextQuoteElement
+	if elapsed != nil && !error && def != s.helpDefinition {
+		durationElement = &SlackRichTextQuoteElement{
+			Type: "text",
+			Text: fmt.Sprintf("[%s] ", elapsed.Round(time.Millisecond)),
+		}
+		quote = append(quote, durationElement)
 	}
+
+	quote = append(quote, []*SlackRichTextQuoteElement{
+		{Type: "user", UserID: userID},
+		{Type: "text", Text: fmt.Sprintf(" %s", text)},
+	}...)
 
 	elements := []slack.RichTextElement{
 		// add quote
-		&SlackRichTextQuote{Type: slack.RTEQuote, Elements: []*SlackRichTextQuoteElement{
-			{Type: "text", Text: fmt.Sprintf("%s ", duration)},
-			{Type: "user", UserID: userID},
-			{Type: "text", Text: fmt.Sprintf(" %s", text)},
-		}},
+		&SlackRichTextQuote{Type: slack.RTEQuote, Elements: quote},
 	}
 
 	blocks := []slack.Block{
@@ -156,12 +193,12 @@ func (s *Slack) reply(cc *slacker.CommandContext, message string, attachments []
 	return nil
 }
 
-func (s *Slack) replyMessage(cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration) error {
-	return s.reply(cc, message, attachments, elapsed, false)
+func (s *Slack) replyMessage(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration) error {
+	return s.reply(def, cc, message, attachments, elapsed, false)
 }
 
-func (s *Slack) replyError(cc *slacker.CommandContext, err error, attachments []slack.Attachment) error {
-	return s.reply(cc, err.Error(), attachments, nil, true)
+func (s *Slack) replyError(def *slacker.CommandDefinition, cc *slacker.CommandContext, err error, attachments []slack.Attachment) error {
+	return s.reply(def, cc, err.Error(), attachments, nil, true)
 }
 
 func (s *Slack) addReaction(cc *slacker.CommandContext, name string) {
@@ -171,7 +208,7 @@ func (s *Slack) addReaction(cc *slacker.CommandContext, name string) {
 	}
 	err := cc.SlackClient().AddReaction(name, slack.NewRefToMessage(cc.Event().ChannelID, cc.Event().TimeStamp))
 	if err != nil {
-		s.logger.Error(err)
+		s.logger.Error("Slack adding reaction error: %s", err)
 	}
 }
 
@@ -182,7 +219,7 @@ func (s *Slack) removeReaction(cc *slacker.CommandContext, name string) {
 	}
 	err := cc.SlackClient().RemoveReaction(name, slack.NewRefToMessage(cc.Event().ChannelID, cc.Event().TimeStamp))
 	if err != nil {
-		s.logger.Error(err)
+		s.logger.Error("Slack removing reaction error: %s", err)
 	}
 }
 
@@ -231,7 +268,59 @@ func (s *Slack) convertAttachmentType(typ common.AttachmentType) string {
 	default:
 		return "text"
 	}
+}
 
+func (s *Slack) findGroup(groups []slack.UserGroup, userID string, group *regexp.Regexp) *slack.UserGroup {
+
+	for _, g := range groups {
+
+		match := group.MatchString(g.Name)
+		if match && utils.Contains(g.Users, userID) {
+			return &g
+		}
+	}
+	return nil
+}
+
+// .*=^(help|news|app|application|catalog)$,some=^(escalate)$
+func (s *Slack) denyAccess(userID string, command string) bool {
+
+	if utils.IsEmpty(s.options.Permisssions) {
+		return false
+	}
+
+	groups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
+	if err != nil {
+		s.logger.Error("Slack getting user group error: %s", err)
+		return false
+	}
+
+	permissions := utils.MapGetKeyValues(s.options.Permisssions)
+	for group, value := range permissions {
+
+		reCommand, err := regexp.Compile(value)
+		if err != nil {
+			s.logger.Error("Slack command regex error: %s", err)
+			return true
+		}
+
+		mCommand := reCommand.MatchString(command)
+		if !mCommand {
+			continue
+		}
+
+		reGroup, err := regexp.Compile(group)
+		if err != nil {
+			s.logger.Error("Slack group regex error: %s", err)
+			return true
+		}
+
+		mGroup := s.findGroup(groups, userID, reGroup)
+		if mGroup != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, error bool) *slacker.CommandDefinition {
@@ -239,62 +328,70 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 	cName := cmd.Name()
 	params := cmd.Params()
 	def := &slacker.CommandDefinition{
-
 		Command:     s.buildCommand(cName, params),
 		Description: cmd.Description(),
 		HideHelp:    true,
-		Handler: func(cc *slacker.CommandContext) {
+	}
+	def.Handler = func(cc *slacker.CommandContext) {
 
-			s.addReaction(cc, s.options.ReactionDoing)
+		s.addReaction(cc, s.options.ReactionDoing)
 
-			r := cc.Request()
-			eParams := s.convertProperties(params, r.Properties())
-			event := cc.Event()
+		r := cc.Request()
+		eParams := s.convertProperties(params, r.Properties())
+		event := cc.Event()
+		userID := event.UserID
 
-			user := &SlackUser{
-				id: event.UserID,
-			}
-
-			profile, err := s.client.SlackClient().GetUserProfile(&slack.GetUserProfileParameters{UserID: event.UserID, IncludeLabels: false})
-			if err == nil && profile != nil {
-				user.name = profile.DisplayName
-			}
-
-			var replyAttachments []slack.Attachment
-
-			t1 := time.Now()
-			message, attachments, err := cmd.Execute(s, user, eParams)
-			if err != nil {
-				s.logger.Error("Slack command %s request execution error: %s", groupName, err)
-				s.replyError(cc, err, replyAttachments)
-				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
+		if (def != s.defaultDefinition) && (def != s.helpDefinition) {
+			if s.denyAccess(userID, groupName) {
+				s.logger.Debug("Slack user %s is not permitted to execute %s", userID, groupName)
+				s.unsupportedCommandHandler(cc)
 				return
 			}
+		}
 
-			// add attachements if some
-			if len(attachments) > 0 {
-				for _, a := range attachments {
-					replyAttachments = append(replyAttachments, slack.Attachment{
-						Pretext:    a.Text,
-						Title:      a.Title,
-						Text:       string(a.Data),
-						MarkdownIn: []string{s.convertAttachmentType(a.Type)},
-					})
-				}
+		user := &SlackUser{
+			id: userID,
+		}
+
+		profile, err := s.client.SlackClient().GetUserProfile(&slack.GetUserProfileParameters{UserID: userID, IncludeLabels: false})
+		if err == nil && profile != nil {
+			user.name = profile.DisplayName
+		}
+
+		var replyAttachments []slack.Attachment
+
+		t1 := time.Now()
+		message, attachments, err := cmd.Execute(s, user, eParams)
+		if err != nil {
+			s.logger.Error("Slack command %s request execution error: %s", groupName, err)
+			s.replyError(def, cc, err, replyAttachments)
+			s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
+			return
+		}
+
+		// add attachements if some
+		if len(attachments) > 0 {
+			for _, a := range attachments {
+				replyAttachments = append(replyAttachments, slack.Attachment{
+					Pretext:    a.Text,
+					Title:      a.Title,
+					Text:       string(a.Data),
+					MarkdownIn: []string{s.convertAttachmentType(a.Type)},
+				})
 			}
-			elapsed := time.Since(t1)
-			err = s.reply(cc, message, replyAttachments, &elapsed, false)
-			if err != nil {
-				s.replyError(cc, err, replyAttachments)
-				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
-				return
-			}
-			if error {
-				s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
-			} else {
-				s.addRemoveReactions(cc, s.options.ReactionDone, s.options.ReactionDoing)
-			}
-		},
+		}
+		elapsed := time.Since(t1)
+		err = s.reply(def, cc, message, replyAttachments, &elapsed, false)
+		if err != nil {
+			s.replyError(def, cc, err, replyAttachments)
+			s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
+			return
+		}
+		if error {
+			s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
+		} else {
+			s.addRemoveReactions(cc, s.options.ReactionDone, s.options.ReactionDoing)
+		}
 	}
 	return def
 }
@@ -368,13 +465,17 @@ func (s *Slack) start() {
 		}
 	}
 	s.client = client
+	auth, err := client.SlackClient().AuthTest()
+	if err == nil {
+		s.auth = auth
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := client.Listen(ctx)
+	err = client.Listen(ctx)
 	if err != nil {
-		s.logger.Error(err)
+		s.logger.Error("Slack listen error: %s", err)
 		return
 	}
 }

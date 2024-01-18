@@ -12,7 +12,7 @@ import (
 
 type DefaultOptions struct {
 	Dir         string
-	Pattern     string
+	Extension   string
 	Description string
 	Error       string
 }
@@ -52,16 +52,18 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	logger := dc.processor.observability.Logs()
 
 	m := make(map[string]interface{})
-	m["processors"] = dc.processor.processors.Items()
+	//m["processors"] = dc.processor.processors.Items()
 	m["params"] = params
-	m["bot"] = bot.Name()
+	m["bot"] = bot
 	m["user"] = user
 
-	if utils.IsEmpty(dc.processor.name) {
-		m["name"] = dc.name
-	} else {
-		m["name"] = fmt.Sprintf("%s/%s", dc.processor.name, dc.name)
+	name := dc.name
+	if !utils.IsEmpty(dc.processor.name) {
+		name = fmt.Sprintf("%s/%s", dc.processor.name, dc.name)
 	}
+	m["name"] = name
+
+	logger.Debug("Default is executing command %s...", name)
 
 	var atts []*common.Attachment
 

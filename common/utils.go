@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"text/template"
 
 	"github.com/devopsext/utils"
@@ -66,4 +67,18 @@ func LoadTemplate(name, tmpl string) (*template.Template, error) {
 		return nil, err
 	}
 	return t, nil
+}
+
+func RemoveEmptyStrings(items []string) []string {
+
+	r := []string{}
+
+	for _, v := range items {
+		if utils.IsEmpty(v) {
+			continue
+		}
+		r = append(r, strings.TrimSpace(v))
+	}
+
+	return r
 }

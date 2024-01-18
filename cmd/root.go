@@ -71,12 +71,13 @@ var slackOptions = bot.SlackOptions{
 	ReactionFailed: envGet("SLACK_REACTION_FAILED", "x").(string),
 	DefaultCommand: envGet("SLACK_DEFAULT_COMMAND", "").(string),
 	HelpCommand:    envGet("SLACK_HELP_COMMAND", "").(string),
+	Permisssions:   envGet("SLACK_PERMISSIONS", "").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{
-	Dir:     envGet("DEFAULT_DIR", "").(string),
-	Pattern: envGet("DEFAULT_PATTERN", "*.template").(string),
-	Error:   envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
+	Dir:       envGet("DEFAULT_DIR", "").(string),
+	Extension: envGet("DEFAULT_EXTENSION", ".tpl").(string),
+	Error:     envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
 }
 
 func getOnlyEnv(key string) string {
@@ -125,6 +126,11 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 		return err
 	}
 
+	extension := defaultOptions.Extension
+	if utils.IsEmpty(extension) {
+		extension = ".tpl"
+	}
+
 	// scan dirs firstly
 	for _, de1 := range first {
 
@@ -153,7 +159,7 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 					continue
 				}
 				ext := filepath.Ext(name2)
-				if ext != ".template" {
+				if ext != extension {
 					continue
 				}
 				err := dirProcessor.AddCommand(strings.TrimSuffix(name2, ext), path2)
@@ -181,7 +187,7 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 		// file is there
 		if !de1.IsDir() {
 			ext := filepath.Ext(name1)
-			if ext != ".template" {
+			if ext != extension {
 				continue
 			}
 			err := rootProcessor.AddCommand(strings.TrimSuffix(name1, ext), path1)
@@ -279,9 +285,10 @@ func Execute() {
 	flags.StringVar(&slackOptions.ReactionFailed, "slack-reaction-failed", slackOptions.ReactionFailed, "Slack reaction failed name")
 	flags.StringVar(&slackOptions.DefaultCommand, "slack-default-command", slackOptions.DefaultCommand, "Slack default command")
 	flags.StringVar(&slackOptions.HelpCommand, "slack-help-command", slackOptions.HelpCommand, "Slack help command")
+	flags.StringVar(&slackOptions.Permisssions, "slack-permissions", slackOptions.Permisssions, "Slack permissions")
 
 	flags.StringVar(&defaultOptions.Dir, "default-dir", defaultOptions.Dir, "Default dir")
-	flags.StringVar(&defaultOptions.Pattern, "default-pattern", defaultOptions.Pattern, "Default pattern")
+	flags.StringVar(&defaultOptions.Extension, "default-extension", defaultOptions.Extension, "Default extension")
 	flags.StringVar(&defaultOptions.Error, "default-error", defaultOptions.Error, "Default error")
 
 	interceptSyscall()
