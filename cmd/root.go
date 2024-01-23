@@ -75,9 +75,10 @@ var slackOptions = bot.SlackOptions{
 }
 
 var defaultOptions = processor.DefaultOptions{
-	Dir:       envGet("DEFAULT_DIR", "").(string),
-	Extension: envGet("DEFAULT_EXTENSION", ".tpl").(string),
-	Error:     envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
+	CommandsDir: envGet("DEFAULT_COMMANDS_DIR", "").(string),
+	CommandExt:  envGet("DEFAULT_COMMAND_EXT", ".tpl").(string),
+	ConfigExt:   envGet("DEFAULT_CONFIG_EXT", ".yml").(string),
+	Error:       envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
 }
 
 func getOnlyEnv(key string) string {
@@ -120,28 +121,33 @@ func interceptSyscall() {
 func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observability, processors *common.Processors) error {
 
 	logger := obs.Logs()
-	first, err := os.ReadDir(options.Dir)
+	first, err := os.ReadDir(options.CommandsDir)
 	if err != nil {
-		logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
+		logger.Error("Couldn't read default dir %s, error %s", options.CommandsDir, err)
 		return err
 	}
 
-	extension := defaultOptions.Extension
-	if utils.IsEmpty(extension) {
-		extension = ".tpl"
+	commandExt := defaultOptions.CommandExt
+	if utils.IsEmpty(commandExt) {
+		commandExt = ".tpl"
+	}
+
+	configExt := defaultOptions.ConfigExt
+	if utils.IsEmpty(configExt) {
+		configExt = ".yml"
 	}
 
 	// scan dirs firstly
 	for _, de1 := range first {
 
 		name1 := de1.Name()
-		path1 := fmt.Sprintf("%s%c%s", options.Dir, os.PathSeparator, name1)
+		path1 := fmt.Sprintf("%s%c%s", options.CommandsDir, os.PathSeparator, name1)
 
 		// dir is there
 		if de1.IsDir() {
 			second, err := os.ReadDir(path1)
 			if err != nil {
-				logger.Error("Couldn't read default dir %s, error %s", options.Dir, err)
+				logger.Error("Couldn't read default dir %s, error %s", options.CommandsDir, err)
 				return err
 			}
 
@@ -159,9 +165,10 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 					continue
 				}
 				ext := filepath.Ext(name2)
-				if ext != extension {
+				if ext != commandExt {
 					continue
 				}
+
 				err := dirProcessor.AddCommand(strings.TrimSuffix(name2, ext), path2)
 				if err != nil {
 					return err
@@ -182,12 +189,12 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 	for _, de1 := range first {
 
 		name1 := de1.Name()
-		path1 := fmt.Sprintf("%s%c%s", options.Dir, os.PathSeparator, name1)
+		path1 := fmt.Sprintf("%s%c%s", options.CommandsDir, os.PathSeparator, name1)
 
 		// file is there
 		if !de1.IsDir() {
 			ext := filepath.Ext(name1)
-			if ext != extension {
+			if ext != commandExt {
 				continue
 			}
 			err := rootProcessor.AddCommand(strings.TrimSuffix(name1, ext), path1)
@@ -287,8 +294,9 @@ func Execute() {
 	flags.StringVar(&slackOptions.HelpCommand, "slack-help-command", slackOptions.HelpCommand, "Slack help command")
 	flags.StringVar(&slackOptions.Permisssions, "slack-permissions", slackOptions.Permisssions, "Slack permissions")
 
-	flags.StringVar(&defaultOptions.Dir, "default-dir", defaultOptions.Dir, "Default dir")
-	flags.StringVar(&defaultOptions.Extension, "default-extension", defaultOptions.Extension, "Default extension")
+	flags.StringVar(&defaultOptions.CommandsDir, "default-commands-dir", defaultOptions.CommandsDir, "Default commands directory")
+	flags.StringVar(&defaultOptions.CommandExt, "default-command-ext", defaultOptions.CommandExt, "Default command extension")
+	flags.StringVar(&defaultOptions.ConfigExt, "default-config-ext", defaultOptions.ConfigExt, "Default config extension")
 	flags.StringVar(&defaultOptions.Error, "default-error", defaultOptions.Error, "Default error")
 
 	interceptSyscall()

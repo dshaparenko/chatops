@@ -11,7 +11,6 @@ import (
 	"github.com/devopsext/chatops/common"
 	sreCommon "github.com/devopsext/sre/common"
 	"github.com/devopsext/utils"
-	"github.com/shomali11/proper"
 	"github.com/slack-go/slack"
 	"github.com/slack-io/slacker"
 )
@@ -108,13 +107,14 @@ func (s *Slack) Info() interface{} {
 	return s.auth
 }
 
-func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration, error bool) error {
+func (s *Slack) eventText(event *slacker.MessageEvent) string {
 
-	userID := cc.Event().UserID
-	channelID := cc.Event().ChannelID
-	threadTS := cc.Event().ThreadTimeStamp
-	typ := cc.Event().Type
-	text := cc.Event().Text
+	if event == nil {
+		return ""
+	}
+
+	typ := event.Type
+	text := event.Text
 
 	if typ == "slash_commands" {
 		text = strings.TrimSpace(text)
@@ -124,6 +124,15 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 			text = strings.TrimSpace(items[1])
 		}
 	}
+	return text
+}
+
+func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration, error bool) error {
+
+	userID := cc.Event().UserID
+	channelID := cc.Event().ChannelID
+	threadTS := cc.Event().ThreadTimeStamp
+	text := s.eventText(cc.Event())
 
 	replyInThread := s.options.ReplyInThread
 	if utils.IsEmpty(threadTS) {
@@ -228,6 +237,7 @@ func (s *Slack) addRemoveReactions(cc *slacker.CommandContext, first, second str
 	s.removeReaction(cc, second)
 }
 
+/*
 func (s *Slack) buildCommand(name string, params []string) string {
 
 	r := name
@@ -255,6 +265,7 @@ func (s *Slack) convertProperties(params []string, props *proper.Properties) com
 	}
 	return r
 }
+*/
 
 func (s *Slack) convertAttachmentType(typ common.AttachmentType) string {
 
@@ -323,12 +334,59 @@ func (s *Slack) denyAccess(userID string, command string) bool {
 	return true
 }
 
+func (s *Slack) matchParam(text, param string) map[string]string {
+
+	r := make(map[string]string)
+	re := regexp.MustCompile(param)
+	match := re.FindStringSubmatch(text)
+	if len(match) == 0 {
+		return r
+	}
+
+	names := re.SubexpNames()
+	for i, name := range names {
+		if i != 0 && name != "" {
+			r[name] = match[i]
+		}
+	}
+	return r
+}
+
+func (s *Slack) findParams(command string, params []string, event *slacker.MessageEvent) common.ExecuteParams {
+
+	r := make(common.ExecuteParams)
+
+	if utils.IsEmpty(params) {
+		return r
+	}
+
+	if event == nil {
+		return r
+	}
+
+	text := s.eventText(event)
+	arr := strings.SplitAfter(text, command)
+	if len(arr) < 2 {
+		return r
+	}
+	text = strings.TrimSpace(arr[1])
+
+	for _, p := range params {
+		values := s.matchParam(text, p)
+		for k, v := range values {
+			r[k] = v
+		}
+	}
+
+	return r
+}
+
 func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, error bool) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
 	params := cmd.Params()
 	def := &slacker.CommandDefinition{
-		Command:     s.buildCommand(cName, params),
+		Command:     cName,
 		Description: cmd.Description(),
 		HideHelp:    true,
 	}
@@ -336,8 +394,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 
 		s.addReaction(cc, s.options.ReactionDoing)
 
-		r := cc.Request()
-		eParams := s.convertProperties(params, r.Properties())
+		eParams := s.findParams(cName, params, cc.Event())
 		event := cc.Event()
 		userID := event.UserID
 
@@ -353,8 +410,9 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 			id: userID,
 		}
 
-		profile, err := s.client.SlackClient().GetUserProfile(&slack.GetUserProfileParameters{UserID: userID, IncludeLabels: false})
-		if err == nil && profile != nil {
+		//profile, err := s.client.SlackClient().GetUserProfile(&slack.GetUserProfileParameters{UserID: userID, IncludeLabels: false})
+		profile := cc.Event().UserProfile
+		if profile != nil {
 			user.name = profile.DisplayName
 		}
 
