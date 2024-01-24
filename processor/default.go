@@ -21,12 +21,14 @@ type DefaultOptions struct {
 }
 
 type DefaultConfig struct {
-	Params []string
+	Description string
+	Params      []string
+	Aliases     []string
 }
 
 type DefaultCommand struct {
 	name        string
-	params      []string
+	config      *DefaultConfig
 	processor   *Default
 	template    *toolsRender.TextTemplate
 	attachments *sync.Map
@@ -47,12 +49,19 @@ func (dc *DefaultCommand) Name() string {
 }
 
 func (dc *DefaultCommand) Description() string {
-	return ""
+	if dc.config == nil {
+		return ""
+	}
+	return dc.config.Description
 }
 
 func (dc *DefaultCommand) Params() []string {
 
-	if utils.IsEmpty(dc.params) {
+	params := []string{}
+	if dc.config != nil {
+		params = dc.config.Params
+	}
+	if utils.IsEmpty(params) {
 		s := ""
 		r := []string{}
 		for i := 0; i < 10; i++ {
@@ -66,7 +75,14 @@ func (dc *DefaultCommand) Params() []string {
 		}
 		return r
 	}
-	return dc.params
+	return params
+}
+
+func (dc *DefaultCommand) Aliases() []string {
+	if dc.config == nil {
+		return []string{}
+	}
+	return dc.config.Aliases
 }
 
 func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params common.ExecuteParams) (string, []*common.Attachment, error) {
@@ -75,7 +91,6 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	logger := dc.processor.observability.Logs()
 
 	m := make(map[string]interface{})
-	//m["processors"] = dc.processor.processors.Items()
 	m["params"] = params
 	m["bot"] = bot
 	m["user"] = user
@@ -183,10 +198,7 @@ func (d *Default) AddCommand(name, path string) error {
 
 	dc := &DefaultCommand{
 		attachments: &sync.Map{},
-	}
-
-	if config != nil {
-		dc.params = config.Params
+		config:      config,
 	}
 
 	funcs := make(map[string]any)

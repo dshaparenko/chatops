@@ -22,6 +22,7 @@ type Command interface {
 	Name() string
 	Description() string
 	Params() []string
+	Aliases() []string
 	Execute(bot Bot, user User, params ExecuteParams) (string, []*Attachment, error)
 }
 

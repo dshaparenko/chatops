@@ -107,24 +107,32 @@ func (s *Slack) Info() interface{} {
 	return s.auth
 }
 
-func (s *Slack) eventText(event *slacker.MessageEvent) string {
+func (s *Slack) getEventTextCommand(def *slacker.CommandDefinition, event *slacker.MessageEvent) (string, string) {
 
 	if event == nil {
-		return ""
+		return "", ""
 	}
 
 	typ := event.Type
 	text := event.Text
+	command := def.Command
 
 	if typ == "slash_commands" {
 		text = strings.TrimSpace(text)
 	} else {
 		items := strings.Split(text, ">")
+
 		if len(items) > 1 {
 			text = strings.TrimSpace(items[1])
 		}
 	}
-	return text
+
+	arr := strings.Split(text, " ")
+	if len(arr) > 0 {
+		command = strings.TrimSpace(arr[0])
+	}
+
+	return text, command
 }
 
 func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration, error bool) error {
@@ -132,7 +140,7 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 	userID := cc.Event().UserID
 	channelID := cc.Event().ChannelID
 	threadTS := cc.Event().ThreadTimeStamp
-	text := s.eventText(cc.Event())
+	text, _ := s.getEventTextCommand(def, cc.Event())
 
 	replyInThread := s.options.ReplyInThread
 	if utils.IsEmpty(threadTS) {
@@ -352,7 +360,7 @@ func (s *Slack) matchParam(text, param string) map[string]string {
 	return r
 }
 
-func (s *Slack) findParams(command string, params []string, event *slacker.MessageEvent) common.ExecuteParams {
+func (s *Slack) findParams(def *slacker.CommandDefinition, params []string, event *slacker.MessageEvent) common.ExecuteParams {
 
 	r := make(common.ExecuteParams)
 
@@ -364,7 +372,7 @@ func (s *Slack) findParams(command string, params []string, event *slacker.Messa
 		return r
 	}
 
-	text := s.eventText(event)
+	text, command := s.getEventTextCommand(def, event)
 	arr := strings.SplitAfter(text, command)
 	if len(arr) < 2 {
 		return r
@@ -387,6 +395,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 	params := cmd.Params()
 	def := &slacker.CommandDefinition{
 		Command:     cName,
+		Aliases:     cmd.Aliases(),
 		Description: cmd.Description(),
 		HideHelp:    true,
 	}
@@ -394,7 +403,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 
 		s.addReaction(cc, s.options.ReactionDoing)
 
-		eParams := s.findParams(cName, params, cc.Event())
+		eParams := s.findParams(def, params, cc.Event())
 		event := cc.Event()
 		userID := event.UserID
 
