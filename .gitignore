@@ -13,3 +13,4 @@ chatops
 .commands/
 .templates/
 .temp.file
+.incident.json
