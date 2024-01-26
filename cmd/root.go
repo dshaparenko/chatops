@@ -51,7 +51,7 @@ var stdoutOptions = sreProvider.StdoutOptions{
 var prometheusOptions = sreProvider.PrometheusOptions{
 	URL:    envGet("PROMETHEUS_METRICS_URL", "/metrics").(string),
 	Listen: envGet("PROMETHEUS_METRICS_LISTEN", "127.0.0.1:8080").(string),
-	Prefix: envGet("PROMETHEUS_METRICS_PREFIX", "").(string),
+	Prefix: envGet("PROMETHEUS_METRICS_PREFIX", "chatops").(string),
 }
 
 var telegramOptions = bot.TelegramOptions{

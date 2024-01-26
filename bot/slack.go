@@ -39,6 +39,7 @@ type Slack struct {
 	client            *slacker.Slacker
 	auth              *slack.AuthTestResponse
 	logger            sreCommon.Logger
+	meter             sreCommon.Meter
 	defaultDefinition *slacker.CommandDefinition
 	helpDefinition    *slacker.CommandDefinition
 }
@@ -77,27 +78,6 @@ func (su *SlackUser) Name() string {
 func (s *Slack) Name() string {
 	return "Slack"
 }
-
-/*func (s *Slack) Info() interface{} {
-
-	if s.auth == nil {
-		return nil
-	}
-
-	bytes, err := json.Marshal(s.auth)
-	if err != nil {
-		s.logger.Error("Slack marshal auth error: %s", err)
-		return nil
-	}
-
-	var r interface{}
-	err = json.Unmarshal(bytes, &r)
-	if err != nil {
-		s.logger.Error("Slack unmarshal auth error: %s", err)
-		return nil
-	}
-	return r
-}*/
 
 func (s *Slack) Info() interface{} {
 
@@ -245,36 +225,6 @@ func (s *Slack) addRemoveReactions(cc *slacker.CommandContext, first, second str
 	s.removeReaction(cc, second)
 }
 
-/*
-func (s *Slack) buildCommand(name string, params []string) string {
-
-	r := name
-	if len(params) > 0 {
-		arr := []string{}
-		for _, v := range params {
-			arr = append(arr, fmt.Sprintf("{%s}", v))
-		}
-		r = fmt.Sprintf("%s %s", r, strings.Join(arr, " "))
-	}
-	return r
-}
-
-func (s *Slack) convertProperties(params []string, props *proper.Properties) common.ExecuteParams {
-
-	r := make(common.ExecuteParams)
-	if props == nil {
-		return r
-	}
-	for _, v := range params {
-		s := props.StringParam(v, "")
-		if !utils.IsEmpty(s) {
-			r[v] = s
-		}
-	}
-	return r
-}
-*/
-
 func (s *Slack) convertAttachmentType(typ common.AttachmentType) string {
 
 	switch typ {
@@ -389,7 +339,44 @@ func (s *Slack) findParams(def *slacker.CommandDefinition, params []string, even
 	return r
 }
 
-func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, error bool) *slacker.CommandDefinition {
+func (s *Slack) updateCounters(group, command, text string, event *slacker.MessageEvent) {
+
+	labels := make(map[string]string)
+	if !utils.IsEmpty(group) {
+		labels["group"] = group
+	}
+	if !utils.IsEmpty(text) {
+		labels["command"] = command
+	}
+	if !utils.IsEmpty(text) {
+		labels["text"] = text
+	}
+	labels["user_id"] = event.UserID
+
+	s.meter.Counter("requests", "Count of all requests", labels, "slack", "bot").Inc()
+}
+
+func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
+
+	text := cc.Event().Text
+	items := strings.Split(text, ">")
+	if len(items) > 1 {
+		text = strings.TrimSpace(items[1])
+	}
+
+	if utils.IsEmpty(text) && s.helpDefinition != nil {
+		s.helpDefinition.Handler(cc)
+		return
+	}
+
+	if s.defaultDefinition != nil {
+		s.defaultDefinition.Handler(cc)
+		return
+	}
+	s.updateCounters("", "", text, cc.Event())
+}
+
+func (s *Slack) defaultCommandDefinition(cmd common.Command, group string, error bool) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
 	params := cmd.Params()
@@ -401,11 +388,17 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 	}
 	def.Handler = func(cc *slacker.CommandContext) {
 
-		s.addReaction(cc, s.options.ReactionDoing)
-
-		eParams := s.findParams(def, params, cc.Event())
 		event := cc.Event()
+
+		text, _ := s.getEventTextCommand(def, event)
+		s.updateCounters(group, cName, text, event)
+
 		userID := event.UserID
+
+		groupName := cName
+		if !utils.IsEmpty(group) {
+			groupName = fmt.Sprintf("%s/%s", group, cName)
+		}
 
 		if (def != s.defaultDefinition) && (def != s.helpDefinition) {
 			if s.denyAccess(userID, groupName) {
@@ -414,6 +407,8 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 				return
 			}
 		}
+
+		s.addReaction(cc, s.options.ReactionDoing)
 
 		user := &SlackUser{
 			id: userID,
@@ -428,6 +423,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 		var replyAttachments []slack.Attachment
 
 		t1 := time.Now()
+		eParams := s.findParams(def, params, cc.Event())
 		message, attachments, err := cmd.Execute(s, user, eParams)
 		if err != nil {
 			s.logger.Error("Slack command %s request execution error: %s", groupName, err)
@@ -463,25 +459,6 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, groupName string, e
 	return def
 }
 
-func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
-
-	text := cc.Event().Text
-	items := strings.Split(text, ">")
-	if len(items) > 1 {
-		text = strings.TrimSpace(items[1])
-	}
-
-	if utils.IsEmpty(text) && s.helpDefinition != nil {
-		s.helpDefinition.Handler(cc)
-		return
-	}
-
-	if s.defaultDefinition != nil {
-		s.defaultDefinition.Handler(cc)
-		return
-	}
-}
-
 func (s *Slack) start() {
 
 	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, slacker.WithDebug(s.options.Debug))
@@ -503,7 +480,7 @@ func (s *Slack) start() {
 		}
 		group = client.AddCommandGroup(pName)
 		for _, c := range commands {
-			group.AddCommand(s.defaultCommandDefinition(c, fmt.Sprintf("%s/%s", pName, c.Name()), false))
+			group.AddCommand(s.defaultCommandDefinition(c, pName, false))
 		}
 	}
 
@@ -520,9 +497,9 @@ func (s *Slack) start() {
 		for _, c := range commands {
 			name := c.Name()
 			if name == s.options.DefaultCommand {
-				s.defaultDefinition = s.defaultCommandDefinition(c, name, true)
+				s.defaultDefinition = s.defaultCommandDefinition(c, "", true)
 			} else {
-				def := s.defaultCommandDefinition(c, name, false)
+				def := s.defaultCommandDefinition(c, "", false)
 				if name == s.options.HelpCommand {
 					s.helpDefinition = def
 					client.Help(def)
@@ -569,5 +546,6 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 		options:    options,
 		processors: processors,
 		logger:     observability.Logs(),
+		meter:      observability.Metrics(),
 	}
 }

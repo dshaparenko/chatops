@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/devopsext/chatops/common"
+	sreCommon "github.com/devopsext/sre/common"
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
 	"gopkg.in/yaml.v2"
@@ -39,6 +41,7 @@ type Default struct {
 	options       DefaultOptions
 	processors    *common.Processors
 	commands      []common.Command
+	meter         sreCommon.Meter
 	observability *common.Observability
 }
 
@@ -87,6 +90,24 @@ func (dc *DefaultCommand) Aliases() []string {
 
 func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params common.ExecuteParams) (string, []*common.Attachment, error) {
 
+	t1 := time.Now()
+
+	labels := make(map[string]string)
+	if !utils.IsEmpty(dc.processor.name) {
+		labels["group"] = dc.processor.name
+	}
+	labels["command"] = dc.name
+	labels["bot"] = bot.Name()
+	labels["user_id"] = user.ID()
+
+	prefixes := []string{"default", "processor"}
+
+	requests := dc.processor.meter.Counter("requests", "Count of all executiions", labels, prefixes...)
+	requests.Inc()
+
+	errors := dc.processor.meter.Counter("errors", "Count of all errors during execitions", labels, prefixes...)
+	timeCounter := dc.processor.meter.Counter("time", "Sum of all time executions", labels, prefixes...)
+
 	gid := utils.GoRoutineID()
 	logger := dc.processor.observability.Logs()
 
@@ -107,6 +128,7 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 
 	b, err := dc.template.RenderObject(m)
 	if err != nil {
+		errors.Inc()
 		logger.Error(err)
 		return "", atts, fmt.Errorf("%s", dc.processor.options.Error)
 	}
@@ -115,6 +137,9 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	if ok {
 		atts = r.([]*common.Attachment)
 	}
+
+	elapsed := time.Since(t1).Milliseconds()
+	timeCounter.Add(int(elapsed))
 
 	return strings.TrimSpace(string(b)), atts, nil
 }
@@ -229,6 +254,7 @@ func NewDefault(name string, options DefaultOptions, observability *common.Obser
 		name:          name,
 		options:       options,
 		processors:    processors,
+		meter:         observability.Metrics(),
 		observability: observability,
 	}
 }
