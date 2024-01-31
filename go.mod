@@ -8,11 +8,10 @@ replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.3
 
 require (
 	github.com/devopsext/sre v0.3.0
-	github.com/devopsext/tools v0.12.4
-	github.com/devopsext/utils v0.2.5
+	github.com/devopsext/tools v0.13.0
+	github.com/devopsext/utils v0.3.0
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0
-	github.com/shomali11/proper v0.0.0-20190608032528-6e70a05688e7
 	github.com/slack-go/slack v0.12.2
 	github.com/slack-io/slacker v0.1.0
 	github.com/spf13/cobra v1.8.0
@@ -48,6 +47,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rs/xid v1.3.0 // indirect
 	github.com/shomali11/commander v0.0.0-20230730023802-0b64f620037d // indirect
+	github.com/shomali11/proper v0.0.0-20190608032528-6e70a05688e7 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/cast v1.3.1 // indirect

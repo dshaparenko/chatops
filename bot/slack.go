@@ -1,9 +1,17 @@
 package bot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"mime/multipart"
+	"net/url"
+	"os"
+	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,11 +34,32 @@ type SlackOptions struct {
 	DefaultCommand string
 	HelpCommand    string
 	Permisssions   string
+	Timeout        int
 }
 
 type SlackUser struct {
 	id   string
 	name string
+}
+
+type SlackFileResponseFull struct {
+	slack.File   `json:"file"`
+	slack.Paging `json:"paging"`
+	Comments     []slack.Comment        `json:"comments"`
+	Files        []slack.File           `json:"files"`
+	Metadata     slack.ResponseMetadata `json:"response_metadata"`
+	slack.SlackResponse
+}
+
+type SlackUploadURLExternalResponse struct {
+	UploadURL string `json:"upload_url"`
+	FileID    string `json:"file_id"`
+	slack.SlackResponse
+}
+
+type SlackCompleteUploadExternalResponse struct {
+	Files []slack.FileSummary `json:"files"`
+	slack.SlackResponse
 }
 
 type Slack struct {
@@ -55,12 +84,37 @@ type SlackRichTextQuote struct {
 	Elements []*SlackRichTextQuoteElement `json:"elements"`
 }
 
+type SlackFile struct {
+	URL string `json:"url,omitempty"`
+	ID  string `json:"id,omitempty"`
+}
+
+type SlackImageBlock struct {
+	Type      slack.MessageBlockType `json:"type"`
+	SlackFile *SlackFile             `json:"slack_file"`
+	AltText   string                 `json:"alt_text"`
+	BlockID   string                 `json:"block_id,omitempty"`
+	Title     *slack.TextBlockObject `json:"title,omitempty"`
+}
+
+const (
+	slackAPIURL                      = "https://slack.com/api/"
+	slackFilesGetUploadURLExternal   = "files.getUploadURLExternal"
+	slackFilesCompleteUploadExternal = "files.completeUploadExternal"
+)
+
+// SlackRichTextQuote
 func (r SlackRichTextQuote) RichTextElementType() slack.RichTextElementType {
 	return r.Type
 }
 
 func (r SlackRichTextQuoteElement) RichTextElementType() slack.RichTextElementType {
 	return r.Type
+}
+
+// SlackImageBlock
+func (s SlackImageBlock) BlockType() slack.MessageBlockType {
+	return s.Type
 }
 
 // SlackUser
@@ -100,7 +154,7 @@ func (s *Slack) getEventTextCommand(def *slacker.CommandDefinition, event *slack
 	if typ == "slash_commands" {
 		text = strings.TrimSpace(text)
 	} else {
-		items := strings.Split(text, ">")
+		items := strings.SplitAfter(text, ">")
 
 		if len(items) > 1 {
 			text = strings.TrimSpace(items[1])
@@ -115,16 +169,189 @@ func (s *Slack) getEventTextCommand(def *slacker.CommandDefinition, event *slack
 	return text, command
 }
 
-func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration, error bool) error {
+func (s *Slack) getBotAuth() string {
 
-	userID := cc.Event().UserID
-	channelID := cc.Event().ChannelID
-	threadTS := cc.Event().ThreadTimeStamp
-	text, _ := s.getEventTextCommand(def, cc.Event())
+	auth := ""
+	if !utils.IsEmpty(s.options.BotToken) {
+		auth = fmt.Sprintf("Bearer %s", s.options.BotToken)
+		return auth
+	}
+	return auth
+}
+
+/*func (s *Slack) ShareFilePublicURL(file *slack.File) (*slack.File, error) {
+
+	client := utils.NewHttpSecureClient(15)
+
+	q := url.Values{}
+	q.Add("file", file.ID)
+
+	data, err := utils.HttpPostRaw(client, "https://slack.com/api/files.sharedPublicURL", "application/x-www-form-urlencoded", s.getBotAuth(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &SlackFileResponseFull{}
+	err = json.Unmarshal(data, r)
+	if err != nil {
+		return nil, err
+	}
+	if !r.SlackResponse.Ok {
+		return nil, errors.New(r.SlackResponse.Error)
+	}
+
+	return &r.File, nil
+}
+
+func (s *Slack) uploadFileV1(att *common.Attachment) (string, error) {
+
+	botID := "unknown"
+	if s.auth != nil {
+		botID = s.auth.BotID
+	}
+	stamp := time.Now().Format("20060102T150405")
+	fileParams := slack.FileUploadParameters{
+		Filename: fmt.Sprintf("%s-%s", botID, stamp),
+		Reader:   bytes.NewReader(att.Data),
+	}
+	private, err := s.client.SlackClient().UploadFile(fileParams)
+	if err != nil {
+		return "", err
+	}
+	return private.ID, nil
+}*/
+
+func (s *Slack) uploadFileV2(event *slacker.MessageEvent, att *common.Attachment) (string, error) {
+
+	client := utils.NewHttpSecureClient(s.options.Timeout)
+
+	botID := "unknown"
+	if s.auth != nil {
+		botID = s.auth.BotID
+	}
+	stamp := time.Now().Format("20060102T150405")
+	name := fmt.Sprintf("%s-%s", botID, stamp)
+
+	params := url.Values{}
+	params.Add("filename", name)
+	params.Add("length", strconv.Itoa(len(att.Data)))
+	params.Add("initial_comment", att.Text)
+
+	u, err := url.Parse(slackAPIURL)
+	if err != nil {
+		return "", err
+	}
+	u.Path = path.Join(u.Path, slackFilesGetUploadURLExternal)
+	u.RawQuery = params.Encode()
+
+	data, err := utils.HttpPostRaw(client, u.String(), "application/x-www-form-urlencoded", s.getBotAuth(), nil)
+	if err != nil {
+		return "", err
+	}
+
+	ru := &SlackUploadURLExternalResponse{}
+	err = json.Unmarshal(data, ru)
+	if err != nil {
+		return "", err
+	}
+	if !ru.SlackResponse.Ok {
+		return "", errors.New(ru.SlackResponse.Error)
+	}
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	defer func() {
+		w.Close()
+	}()
+
+	fw, err := w.CreateFormFile("file", name)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := fw.Write(att.Data); err != nil {
+		return "", err
+	}
+
+	if err := w.Close(); err != nil {
+		return "", err
+	}
+
+	_, err = utils.HttpPostRaw(client, ru.UploadURL, w.FormDataContentType(), s.getBotAuth(), body.Bytes())
+	if err != nil {
+		return "", err
+	}
+
+	params = url.Values{}
+
+	request := []slack.FileSummary{{ID: ru.FileID, Title: att.Title}}
+	rBytes, err := json.Marshal(request)
+	if err != nil {
+		return "", err
+	}
+	params.Add("files", string(rBytes))
+	params.Add("initial_comment", att.Text)
+	params.Add("channel_id", event.ChannelID)
+
+	u, err = url.Parse(slackAPIURL)
+	if err != nil {
+		return "", err
+	}
+	u.Path = path.Join(u.Path, slackFilesCompleteUploadExternal)
+	u.RawQuery = params.Encode()
+
+	data, err = utils.HttpPostRaw(client, u.String(), "application/x-www-form-urlencoded", s.getBotAuth(), nil)
+	if err != nil {
+		return "", err
+	}
+
+	rc := &SlackCompleteUploadExternalResponse{}
+	err = json.Unmarshal(data, rc)
+	if err != nil {
+		return "", err
+	}
+	if !ru.SlackResponse.Ok {
+		return "", errors.New(ru.SlackResponse.Error)
+	}
+	if len(rc.Files) == 0 {
+		return "", errors.New("no files completed")
+	}
+
+	return rc.Files[0].ID, nil
+}
+
+/*func (s *Slack) uploadFileV2(event *slacker.MessageEvent, att *common.Attachment) (string, error) {
+
+	botID := "unknown"
+	if s.auth != nil {
+		botID = s.auth.BotID
+	}
+	stamp := time.Now().Format("20060102T150405")
+	fileParams := slack.UploadFileV2Parameters{
+		Filename: fmt.Sprintf("%s-%s", botID, stamp),
+		FileSize: len(att.Data),
+		Reader:   bytes.NewReader(att.Data),
+		Channel:  event.ChannelID,
+	}
+	f, err := s.client.SlackClient().UploadFileV2(fileParams)
+	if err != nil {
+		return "", err
+	}
+	return f.ID, nil
+}*/
+
+func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string,
+	attachments []*common.Attachment, elapsed *time.Duration, error bool) error {
+
+	event := cc.Event()
+	userID := event.UserID
+	channelID := event.ChannelID
+	threadTS := event.ThreadTimeStamp
+	text, _ := s.getEventTextCommand(def, event)
 
 	replyInThread := s.options.ReplyInThread
 	if utils.IsEmpty(threadTS) {
-		threadTS = cc.Event().TimeStamp
+		threadTS = event.TimeStamp
 	} else {
 		replyInThread = true
 	}
@@ -133,12 +360,16 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 	opts := []slacker.PostOption{}
 	if error {
 		atts = append(atts, slack.Attachment{
-			Color: "danger",
-			Text:  message,
+			Color: "FF0000",
+			Blocks: slack.Blocks{
+				BlockSet: []slack.Block{
+					slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", message, false, false),
+						[]*slack.TextBlockObject{}, nil),
+				},
+			},
 		})
+		opts = append(opts, slacker.SetAttachments(atts))
 	}
-	atts = append(atts, attachments...)
-	opts = append(opts, slacker.SetAttachments(atts))
 
 	if replyInThread {
 		opts = append(opts, slacker.SetThreadTS(threadTS))
@@ -176,11 +407,62 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 	}
 
 	if !error {
+
 		blocks = append(blocks, slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn", message, false, false),
-			[]*slack.TextBlockObject{},
-			nil,
+			[]*slack.TextBlockObject{}, nil,
 		))
+
+		for _, a := range attachments {
+
+			blks := []slack.Block{}
+
+			switch a.Type {
+			case common.AttachmentTypeImage:
+
+				os.WriteFile(".image.png", a.Data, 0644)
+				// uploading image
+				id, err := s.uploadFileV2(event, a)
+				if err != nil {
+					return err
+				}
+
+				blks = append(blks, &SlackImageBlock{
+					Type:    slack.MBTImage,
+					AltText: a.Text,
+					Title: &slack.TextBlockObject{
+						Type: slack.PlainTextType, // only
+						Text: a.Title,
+					},
+					SlackFile: &SlackFile{ID: id},
+				})
+
+			default:
+
+				// title
+				if !utils.IsEmpty(a.Title) {
+					blks = append(blks, slack.NewSectionBlock(
+						slack.NewTextBlockObject("mrkdwn", a.Title, false, false),
+						[]*slack.TextBlockObject{}, nil,
+					))
+				}
+
+				// body
+				if !utils.IsEmpty(a.Data) {
+					blks = append(blks, slack.NewSectionBlock(
+						slack.NewTextBlockObject("mrkdwn", string(a.Data), false, false),
+						[]*slack.TextBlockObject{}, nil,
+					))
+				}
+			}
+			atts = append(atts, slack.Attachment{
+				Color: "808080",
+				Blocks: slack.Blocks{
+					BlockSet: blks,
+				},
+			})
+		}
+		opts = append(opts, slacker.SetAttachments(atts))
 	}
 
 	_, err := cc.Response().PostBlocks(channelID, blocks, opts...)
@@ -190,11 +472,12 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 	return nil
 }
 
-func (s *Slack) replyMessage(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []slack.Attachment, elapsed *time.Duration) error {
+func (s *Slack) replyMessage(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []*common.Attachment, elapsed *time.Duration) error {
 	return s.reply(def, cc, message, attachments, elapsed, false)
 }
 
-func (s *Slack) replyError(def *slacker.CommandDefinition, cc *slacker.CommandContext, err error, attachments []slack.Attachment) error {
+func (s *Slack) replyError(def *slacker.CommandDefinition, cc *slacker.CommandContext, err error, attachments []*common.Attachment) error {
+	s.logger.Error("Slack reply error: %s", err)
 	return s.reply(def, cc, err.Error(), attachments, nil, true)
 }
 
@@ -223,20 +506,6 @@ func (s *Slack) removeReaction(cc *slacker.CommandContext, name string) {
 func (s *Slack) addRemoveReactions(cc *slacker.CommandContext, first, second string) {
 	s.addReaction(cc, first)
 	s.removeReaction(cc, second)
-}
-
-func (s *Slack) convertAttachmentType(typ common.AttachmentType) string {
-
-	switch typ {
-	case common.AttachmentTypeUnknown:
-		return ""
-	case common.AttachmentTypeText:
-		return "text"
-	case common.AttachmentTypeImage:
-		return "image"
-	default:
-		return "text"
-	}
 }
 
 func (s *Slack) findGroup(groups []slack.UserGroup, userID string, group *regexp.Regexp) *slack.UserGroup {
@@ -334,6 +603,9 @@ func (s *Slack) findParams(def *slacker.CommandDefinition, params []string, even
 		for k, v := range values {
 			r[k] = v
 		}
+		if len(r) > 0 {
+			return r
+		}
 	}
 
 	return r
@@ -414,39 +686,26 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, group string, error
 			id: userID,
 		}
 
-		//profile, err := s.client.SlackClient().GetUserProfile(&slack.GetUserProfileParameters{UserID: userID, IncludeLabels: false})
 		profile := cc.Event().UserProfile
 		if profile != nil {
 			user.name = profile.DisplayName
 		}
 
-		var replyAttachments []slack.Attachment
-
 		t1 := time.Now()
 		eParams := s.findParams(def, params, cc.Event())
 		message, attachments, err := cmd.Execute(s, user, eParams)
+
 		if err != nil {
 			s.logger.Error("Slack command %s request execution error: %s", groupName, err)
-			s.replyError(def, cc, err, replyAttachments)
+			s.replyError(def, cc, err, attachments)
 			s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 			return
 		}
 
-		// add attachements if some
-		if len(attachments) > 0 {
-			for _, a := range attachments {
-				replyAttachments = append(replyAttachments, slack.Attachment{
-					Pretext:    a.Text,
-					Title:      a.Title,
-					Text:       string(a.Data),
-					MarkdownIn: []string{s.convertAttachmentType(a.Type)},
-				})
-			}
-		}
 		elapsed := time.Since(t1)
-		err = s.reply(def, cc, message, replyAttachments, &elapsed, false)
+		err = s.reply(def, cc, message, attachments, &elapsed, false)
 		if err != nil {
-			s.replyError(def, cc, err, replyAttachments)
+			s.replyError(def, cc, err, attachments)
 			s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
 			return
 		}
