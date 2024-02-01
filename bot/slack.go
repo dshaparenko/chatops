@@ -3,15 +3,8 @@ package bot
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"mime/multipart"
-	"net/url"
-	"os"
-	"path"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +28,7 @@ type SlackOptions struct {
 	HelpCommand    string
 	Permisssions   string
 	Timeout        int
+	PublicChannel  string
 }
 
 type SlackUser struct {
@@ -101,6 +95,7 @@ const (
 	slackAPIURL                      = "https://slack.com/api/"
 	slackFilesGetUploadURLExternal   = "files.getUploadURLExternal"
 	slackFilesCompleteUploadExternal = "files.completeUploadExternal"
+	slackFilesSharedPublicURL        = "files.sharedPublicURL"
 )
 
 // SlackRichTextQuote
@@ -169,6 +164,7 @@ func (s *Slack) getEventTextCommand(def *slacker.CommandDefinition, event *slack
 	return text, command
 }
 
+/*
 func (s *Slack) getBotAuth() string {
 
 	auth := ""
@@ -179,14 +175,32 @@ func (s *Slack) getBotAuth() string {
 	return auth
 }
 
-/*func (s *Slack) ShareFilePublicURL(file *slack.File) (*slack.File, error) {
+func (s *Slack) getUserAuth() string {
+
+	auth := ""
+	if !utils.IsEmpty(s.options.UserToken) {
+		auth = fmt.Sprintf("Bearer %s", s.options.UserToken)
+		return auth
+	}
+	return auth
+}
+
+
+func (s *Slack) ShareFilePublicURL(file *slack.File) (*slack.File, error) {
 
 	client := utils.NewHttpSecureClient(15)
 
-	q := url.Values{}
-	q.Add("file", file.ID)
+	params := url.Values{}
+	params.Add("file", file.ID)
 
-	data, err := utils.HttpPostRaw(client, "https://slack.com/api/files.sharedPublicURL", "application/x-www-form-urlencoded", s.getBotAuth(), nil)
+	u, err := url.Parse(slackAPIURL)
+	if err != nil {
+		return nil, err
+	}
+	u.Path = path.Join(u.Path, slackFilesSharedPublicURL)
+	u.RawQuery = params.Encode()
+
+	data, err := utils.HttpPostRaw(client, u.String(), "application/x-www-form-urlencoded", s.getUserAuth(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -202,28 +216,9 @@ func (s *Slack) getBotAuth() string {
 
 	return &r.File, nil
 }
+*/
 
-func (s *Slack) uploadFileV1(att *common.Attachment) (string, error) {
-
-	botID := "unknown"
-	if s.auth != nil {
-		botID = s.auth.BotID
-	}
-	stamp := time.Now().Format("20060102T150405")
-	fileParams := slack.FileUploadParameters{
-		Filename: fmt.Sprintf("%s-%s", botID, stamp),
-		Reader:   bytes.NewReader(att.Data),
-	}
-	private, err := s.client.SlackClient().UploadFile(fileParams)
-	if err != nil {
-		return "", err
-	}
-	return private.ID, nil
-}*/
-
-func (s *Slack) uploadFileV2(event *slacker.MessageEvent, att *common.Attachment) (string, error) {
-
-	client := utils.NewHttpSecureClient(s.options.Timeout)
+func (s *Slack) uploadFileV1(event *slacker.MessageEvent, att *common.Attachment) (string, error) {
 
 	botID := "unknown"
 	if s.auth != nil {
@@ -231,117 +226,79 @@ func (s *Slack) uploadFileV2(event *slacker.MessageEvent, att *common.Attachment
 	}
 	stamp := time.Now().Format("20060102T150405")
 	name := fmt.Sprintf("%s-%s", botID, stamp)
-
-	params := url.Values{}
-	params.Add("filename", name)
-	params.Add("length", strconv.Itoa(len(att.Data)))
-	params.Add("initial_comment", att.Text)
-
-	u, err := url.Parse(slackAPIURL)
+	fileParams := slack.FileUploadParameters{
+		Filename: name,
+		Reader:   bytes.NewReader(att.Data),
+		Channels: []string{s.options.PublicChannel},
+	}
+	private, err := s.client.SlackClient().UploadFile(fileParams)
 	if err != nil {
 		return "", err
 	}
-	u.Path = path.Join(u.Path, slackFilesGetUploadURLExternal)
-	u.RawQuery = params.Encode()
-
-	data, err := utils.HttpPostRaw(client, u.String(), "application/x-www-form-urlencoded", s.getBotAuth(), nil)
+	/*public, err := s.ShareFilePublicURL(private)
 	if err != nil {
 		return "", err
 	}
-
-	ru := &SlackUploadURLExternalResponse{}
-	err = json.Unmarshal(data, ru)
-	if err != nil {
-		return "", err
-	}
-	if !ru.SlackResponse.Ok {
-		return "", errors.New(ru.SlackResponse.Error)
-	}
-
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
-	defer func() {
-		w.Close()
-	}()
-
-	fw, err := w.CreateFormFile("file", name)
-	if err != nil {
-		return "", err
-	}
-
-	if _, err := fw.Write(att.Data); err != nil {
-		return "", err
-	}
-
-	if err := w.Close(); err != nil {
-		return "", err
-	}
-
-	_, err = utils.HttpPostRaw(client, ru.UploadURL, w.FormDataContentType(), s.getBotAuth(), body.Bytes())
-	if err != nil {
-		return "", err
-	}
-
-	params = url.Values{}
-
-	request := []slack.FileSummary{{ID: ru.FileID, Title: att.Title}}
-	rBytes, err := json.Marshal(request)
-	if err != nil {
-		return "", err
-	}
-	params.Add("files", string(rBytes))
-	params.Add("initial_comment", att.Text)
-	params.Add("channel_id", event.ChannelID)
-
-	u, err = url.Parse(slackAPIURL)
-	if err != nil {
-		return "", err
-	}
-	u.Path = path.Join(u.Path, slackFilesCompleteUploadExternal)
-	u.RawQuery = params.Encode()
-
-	data, err = utils.HttpPostRaw(client, u.String(), "application/x-www-form-urlencoded", s.getBotAuth(), nil)
-	if err != nil {
-		return "", err
-	}
-
-	rc := &SlackCompleteUploadExternalResponse{}
-	err = json.Unmarshal(data, rc)
-	if err != nil {
-		return "", err
-	}
-	if !ru.SlackResponse.Ok {
-		return "", errors.New(ru.SlackResponse.Error)
-	}
-	if len(rc.Files) == 0 {
-		return "", errors.New("no files completed")
-	}
-
-	return rc.Files[0].ID, nil
+	return public.ID, nil*/
+	return private.ID, nil
 }
 
-/*func (s *Slack) uploadFileV2(event *slacker.MessageEvent, att *common.Attachment) (string, error) {
+func (s *Slack) buildAttachmentBlocks(event *slacker.MessageEvent, attachments []*common.Attachment) ([]slack.Attachment, error) {
 
-	botID := "unknown"
-	if s.auth != nil {
-		botID = s.auth.BotID
+	r := []slack.Attachment{}
+	for _, a := range attachments {
+
+		blks := []slack.Block{}
+
+		switch a.Type {
+		case common.AttachmentTypeImage:
+
+			// uploading image
+			id, err := s.uploadFileV1(event, a)
+			if err != nil {
+				return r, err
+			}
+
+			blks = append(blks, &SlackImageBlock{
+				Type:    slack.MBTImage,
+				AltText: a.Text,
+				Title: &slack.TextBlockObject{
+					Type: slack.PlainTextType, // only
+					Text: a.Title,
+				},
+				SlackFile: &SlackFile{ID: id},
+			})
+
+		default:
+
+			// title
+			if !utils.IsEmpty(a.Title) {
+				blks = append(blks, slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn", a.Title, false, false),
+					[]*slack.TextBlockObject{}, nil,
+				))
+			}
+
+			// body
+			if !utils.IsEmpty(a.Data) {
+				blks = append(blks, slack.NewSectionBlock(
+					slack.NewTextBlockObject("mrkdwn", string(a.Data), false, false),
+					[]*slack.TextBlockObject{}, nil,
+				))
+			}
+		}
+		r = append(r, slack.Attachment{
+			Color: "808080",
+			Blocks: slack.Blocks{
+				BlockSet: blks,
+			},
+		})
 	}
-	stamp := time.Now().Format("20060102T150405")
-	fileParams := slack.UploadFileV2Parameters{
-		Filename: fmt.Sprintf("%s-%s", botID, stamp),
-		FileSize: len(att.Data),
-		Reader:   bytes.NewReader(att.Data),
-		Channel:  event.ChannelID,
-	}
-	f, err := s.client.SlackClient().UploadFileV2(fileParams)
-	if err != nil {
-		return "", err
-	}
-	return f.ID, nil
-}*/
+	return r, nil
+}
 
 func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string,
-	attachments []*common.Attachment, elapsed *time.Duration, error bool) error {
+	attachments []*common.Attachment, start *time.Time, error bool) error {
 
 	event := cc.Event()
 	userID := event.UserID
@@ -369,6 +326,12 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 			},
 		})
 		opts = append(opts, slacker.SetAttachments(atts))
+	} else {
+		batts, err := s.buildAttachmentBlocks(event, attachments)
+		if err != nil {
+			return err
+		}
+		opts = append(opts, slacker.SetAttachments(batts))
 	}
 
 	if replyInThread {
@@ -384,7 +347,9 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 	var quote = []*SlackRichTextQuoteElement{}
 
 	var durationElement *SlackRichTextQuoteElement
-	if elapsed != nil && !error && def != s.helpDefinition {
+	if start != nil && !error && def != s.helpDefinition {
+
+		elapsed := time.Since(*start)
 		durationElement = &SlackRichTextQuoteElement{
 			Type: "text",
 			Text: fmt.Sprintf("[%s] ", elapsed.Round(time.Millisecond)),
@@ -407,62 +372,10 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 	}
 
 	if !error {
-
 		blocks = append(blocks, slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn", message, false, false),
 			[]*slack.TextBlockObject{}, nil,
 		))
-
-		for _, a := range attachments {
-
-			blks := []slack.Block{}
-
-			switch a.Type {
-			case common.AttachmentTypeImage:
-
-				os.WriteFile(".image.png", a.Data, 0644)
-				// uploading image
-				id, err := s.uploadFileV2(event, a)
-				if err != nil {
-					return err
-				}
-
-				blks = append(blks, &SlackImageBlock{
-					Type:    slack.MBTImage,
-					AltText: a.Text,
-					Title: &slack.TextBlockObject{
-						Type: slack.PlainTextType, // only
-						Text: a.Title,
-					},
-					SlackFile: &SlackFile{ID: id},
-				})
-
-			default:
-
-				// title
-				if !utils.IsEmpty(a.Title) {
-					blks = append(blks, slack.NewSectionBlock(
-						slack.NewTextBlockObject("mrkdwn", a.Title, false, false),
-						[]*slack.TextBlockObject{}, nil,
-					))
-				}
-
-				// body
-				if !utils.IsEmpty(a.Data) {
-					blks = append(blks, slack.NewSectionBlock(
-						slack.NewTextBlockObject("mrkdwn", string(a.Data), false, false),
-						[]*slack.TextBlockObject{}, nil,
-					))
-				}
-			}
-			atts = append(atts, slack.Attachment{
-				Color: "808080",
-				Blocks: slack.Blocks{
-					BlockSet: blks,
-				},
-			})
-		}
-		opts = append(opts, slacker.SetAttachments(atts))
 	}
 
 	_, err := cc.Response().PostBlocks(channelID, blocks, opts...)
@@ -472,8 +385,8 @@ func (s *Slack) reply(def *slacker.CommandDefinition, cc *slacker.CommandContext
 	return nil
 }
 
-func (s *Slack) replyMessage(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []*common.Attachment, elapsed *time.Duration) error {
-	return s.reply(def, cc, message, attachments, elapsed, false)
+func (s *Slack) replyMessage(def *slacker.CommandDefinition, cc *slacker.CommandContext, message string, attachments []*common.Attachment, start *time.Time) error {
+	return s.reply(def, cc, message, attachments, start, false)
 }
 
 func (s *Slack) replyError(def *slacker.CommandDefinition, cc *slacker.CommandContext, err error, attachments []*common.Attachment) error {
@@ -691,7 +604,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, group string, error
 			user.name = profile.DisplayName
 		}
 
-		t1 := time.Now()
+		start := time.Now()
 		eParams := s.findParams(def, params, cc.Event())
 		message, attachments, err := cmd.Execute(s, user, eParams)
 
@@ -702,8 +615,7 @@ func (s *Slack) defaultCommandDefinition(cmd common.Command, group string, error
 			return
 		}
 
-		elapsed := time.Since(t1)
-		err = s.reply(def, cc, message, attachments, &elapsed, false)
+		err = s.reply(def, cc, message, attachments, &start, false)
 		if err != nil {
 			s.replyError(def, cc, err, attachments)
 			s.addRemoveReactions(cc, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -767,6 +679,43 @@ func (s *Slack) start() {
 			}
 		}
 	}
+
+	client.AddCommand(&slacker.CommandDefinition{
+		Command: "some",
+		Handler: func(cc *slacker.CommandContext) {
+
+			happyBtn := slack.NewButtonBlockElement("happy", "true", slack.NewTextBlockObject("plain_text", "Happy 🙂", true, false))
+			happyBtn.Style = slack.StylePrimary
+			sadBtn := slack.NewButtonBlockElement("sad", "false", slack.NewTextBlockObject("plain_text", "Sad ☹️", true, false))
+			sadBtn.Style = slack.StyleDanger
+
+			cc.Response().ReplyBlocks([]slack.Block{
+				slack.NewSectionBlock(slack.NewTextBlockObject(slack.PlainTextType, "What is your mood today?", true, false), nil, nil),
+				slack.NewActionBlock("some", happyBtn, sadBtn),
+			})
+		},
+	})
+
+	client.AddInteraction(&slacker.InteractionDefinition{
+		InteractionID: "some",
+		Type:          slack.InteractionTypeBlockActions,
+		Handler: func(ic *slacker.InteractionContext) {
+
+			text := ""
+			action := ic.Callback().ActionCallback.BlockActions[0]
+			switch action.ActionID {
+			case "happy":
+				text = "I'm happy to hear you are happy!"
+			case "sad":
+				text = "I'm sorry to hear you are sad."
+			default:
+				text = "I don't understand your mood..."
+			}
+
+			ic.Response().Reply(text, slacker.WithReplace(ic.Callback().Message.Timestamp))
+		},
+	})
+
 	s.client = client
 	auth, err := client.SlackClient().AuthTest()
 	if err == nil {

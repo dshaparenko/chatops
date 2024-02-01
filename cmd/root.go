@@ -73,6 +73,7 @@ var slackOptions = bot.SlackOptions{
 	HelpCommand:    envGet("SLACK_HELP_COMMAND", "").(string),
 	Permisssions:   envGet("SLACK_PERMISSIONS", "").(string),
 	Timeout:        envGet("SLACK_TIMEOUT", 5).(int),
+	PublicChannel:  envGet("SLACK_PUBLIC_CHANNEL", "").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{
@@ -295,6 +296,7 @@ func Execute() {
 	flags.StringVar(&slackOptions.HelpCommand, "slack-help-command", slackOptions.HelpCommand, "Slack help command")
 	flags.StringVar(&slackOptions.Permisssions, "slack-permissions", slackOptions.Permisssions, "Slack permissions")
 	flags.IntVar(&slackOptions.Timeout, "slack-timeout", slackOptions.Timeout, "Slack timeout")
+	flags.StringVar(&slackOptions.PublicChannel, "slack-public-channel", slackOptions.PublicChannel, "Slack public channel")
 
 	flags.StringVar(&defaultOptions.CommandsDir, "default-commands-dir", defaultOptions.CommandsDir, "Default commands directory")
 	flags.StringVar(&defaultOptions.CommandExt, "default-command-ext", defaultOptions.CommandExt, "Default command extension")

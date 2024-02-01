@@ -12,7 +12,7 @@ require (
 	github.com/devopsext/utils v0.3.0
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0
-	github.com/slack-go/slack v0.12.2
+	github.com/slack-go/slack v0.12.3
 	github.com/slack-io/slacker v0.1.0
 	github.com/spf13/cobra v1.8.0
 	gopkg.in/yaml.v2 v2.4.0
