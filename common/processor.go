@@ -18,11 +18,30 @@ type Attachment struct {
 
 type ExecuteParams = map[string]string
 
+type Response struct {
+	Visible  bool // visible for others, not only you
+	Duration bool // show duration in replay
+	//Replace  bool // replace oroginal message
+	Original bool // show orignal as quote
+}
+
+type FieldType string
+
+type Field struct {
+	Name    string
+	Type    FieldType
+	Label   string
+	Default string
+	Hint    string
+}
+
 type Command interface {
 	Name() string
 	Description() string
 	Params() []string
 	Aliases() []string
+	Response() Response
+	Fields() []Field
 	Execute(bot Bot, user User, params ExecuteParams) (string, []*Attachment, error)
 }
 
@@ -39,6 +58,15 @@ const (
 	AttachmentTypeUnknown = ""
 	AttachmentTypeText    = "text"
 	AttachmentTypeImage   = "image"
+)
+
+const (
+	FieldTypeUnknown   = ""
+	FieldTypeEdit      = "edit"
+	FieldTypeMultiEdit = "multiedit"
+	FieldTypeURL       = "url"
+	FieldTypeDate      = "date"
+	FieldTypeSelect    = "select"
 )
 
 func (ps *Processors) Add(p Processor) {

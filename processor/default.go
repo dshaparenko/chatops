@@ -26,6 +26,8 @@ type DefaultConfig struct {
 	Description string
 	Params      []string
 	Aliases     []string
+	Response    common.Response
+	Fields      []common.Field
 }
 
 type DefaultCommand struct {
@@ -86,6 +88,20 @@ func (dc *DefaultCommand) Aliases() []string {
 		return []string{}
 	}
 	return dc.config.Aliases
+}
+
+func (dc *DefaultCommand) Response() common.Response {
+	if dc.config != nil {
+		return dc.config.Response
+	}
+	return common.Response{}
+}
+
+func (dc *DefaultCommand) Fields() []common.Field {
+	if dc.config != nil {
+		return dc.config.Fields
+	}
+	return []common.Field{}
 }
 
 func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params common.ExecuteParams) (string, []*common.Attachment, error) {

@@ -4,7 +4,7 @@ go 1.21
 
 replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.31.2
 
-//replace github.com/devopsext/tools => ./../tools
+replace github.com/devopsext/tools => ./../tools
 
 require (
 	github.com/devopsext/sre v0.3.0
@@ -27,6 +27,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.2 // indirect
 	github.com/Microsoft/go-winio v0.5.0 // indirect
 	github.com/VictoriaMetrics/metrics v1.25.3 // indirect
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
 	github.com/blues/jsonata-go v1.5.4 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.2 // indirect
 	github.com/go-logr/logr v1.2.1 // indirect
