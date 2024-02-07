@@ -149,13 +149,13 @@ func (s *Slack) Name() string {
 	return "Slack"
 }
 
-func (s *Slack) Info() interface{} {
+/*func (s *Slack) Info() interface{} {
 
 	if s.auth == nil {
 		return nil
 	}
 	return s.auth
-}
+}*/
 
 func (s *Slack) getEventTextCommand(command string, m *slackMessageInfo) (string, string) {
 
@@ -295,7 +295,7 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 			if !utils.IsEmpty(a.Title) {
 				blks = append(blks,
 					slack.NewSectionBlock(
-						slack.NewTextBlockObject("mrkdwn", string(a.Title), false, false),
+						slack.NewTextBlockObject(slack.MarkdownType, string(a.Title), false, false),
 						[]*slack.TextBlockObject{}, nil,
 					))
 			}
@@ -305,7 +305,7 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 
 				blks = append(blks,
 					slack.NewSectionBlock(
-						slack.NewTextBlockObject("mrkdwn", s.limitText(string(a.Data), slackMaxTextBlockLength), false, false),
+						slack.NewTextBlockObject(slack.MarkdownType, s.limitText(string(a.Data), slackMaxTextBlockLength), false, false),
 						[]*slack.TextBlockObject{}, nil,
 					))
 			}
@@ -501,7 +501,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 			Color: s.options.ErrorColor,
 			Blocks: slack.Blocks{
 				BlockSet: []slack.Block{
-					slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", message, false, false),
+					slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, message, false, false),
 						[]*slack.TextBlockObject{}, nil),
 				},
 			},
@@ -554,7 +554,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 
 	if !error {
 		blocks = append(blocks, slack.NewSectionBlock(
-			slack.NewTextBlockObject("mrkdwn", message, false, false),
+			slack.NewTextBlockObject(slack.MarkdownType, message, false, false),
 			[]*slack.TextBlockObject{}, nil,
 		))
 	}
@@ -603,10 +603,10 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 			def = field.Default
 		}
 
-		l := slack.NewTextBlockObject("plain_text", field.Label, false, false)
+		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
 		var h *slack.TextBlockObject
 		if !utils.IsEmpty(field.Hint) {
-			h = slack.NewTextBlockObject("plain_text", field.Hint, false, false)
+			h = slack.NewTextBlockObject(slack.PlainTextType, field.Hint, false, false)
 		}
 
 		var b *slack.InputBlock
@@ -625,6 +625,37 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 		case common.FieldTypeDate:
 			e := slack.NewDatePickerBlockElement(actionID)
 			e.InitialDate = time.Now().Format("2006-01-02")
+			el = e
+		case common.FieldTypeSelect:
+			options := []*slack.OptionBlockObject{}
+			var dBlock *slack.OptionBlockObject
+			for _, v := range field.Values {
+				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
+				if v == def {
+					dBlock = block
+				}
+				options = append(options, block)
+			}
+			e := slack.NewOptionsSelectBlockElement(slack.OptTypeStatic, h, actionID, options...)
+			if dBlock != nil {
+				e.InitialOption = dBlock
+			}
+			el = e
+		case common.FieldTypeMultiSelect:
+			options := []*slack.OptionBlockObject{}
+			dBlocks := []*slack.OptionBlockObject{}
+			arr := common.RemoveEmptyStrings(strings.Split(def, ","))
+			for _, v := range field.Values {
+				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
+				if utils.Contains(arr, v) {
+					dBlocks = append(dBlocks, block)
+				}
+				options = append(options, block)
+			}
+			e := slack.NewOptionsMultiSelectBlockElement(slack.MultiOptTypeStatic, h, actionID, options...)
+			if len(dBlocks) > 0 {
+				e.InitialOptions = dBlocks
+			}
 			el = e
 		default:
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
@@ -653,14 +684,13 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	}
 	sv := base64.StdEncoding.EncodeToString(data)
 
-	submit := slack.NewButtonBlockElement(slackSubmitAction, sv, slack.NewTextBlockObject("plain_text", "Submit", false, false))
-	cancel := slack.NewButtonBlockElement(slackCancelAction, sv, slack.NewTextBlockObject("plain_text", "Cancel", false, false))
+	submit := slack.NewButtonBlockElement(slackSubmitAction, sv, slack.NewTextBlockObject(slack.PlainTextType, "Submit", false, false))
+	cancel := slack.NewButtonBlockElement(slackCancelAction, sv, slack.NewTextBlockObject(slack.PlainTextType, "Cancel", false, false))
 
 	ab := slack.NewActionBlock(interactionID, submit, cancel)
 	blocks = append(blocks, ab)
 
 	s.addReaction(m, s.options.ReactionDialog)
-
 	_, err = replier.PostBlocks(m.channelID, blocks, opts...)
 	if err != nil {
 		s.removeReaction(m, s.options.ReactionDialog)
@@ -846,6 +876,14 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 						switch v2.Type {
 						case "datepicker":
 							v = v2.SelectedDate
+						case "static_select":
+							v = v2.SelectedOption.Value
+						case "multi_static_select":
+							arr := []string{}
+							for _, v2 := range v2.SelectedOptions {
+								arr = append(arr, v2.Value)
+							}
+							v = strings.Join(arr, ",")
 						}
 						params[name] = v
 					}
@@ -860,9 +898,29 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 	return def
 }
 
+func (s *Slack) Debug(msg string, args ...any) {
+	s.logger.Debug(msg, args...)
+}
+
+func (s *Slack) Info(msg string, args ...any) {
+	s.logger.Info(msg, args...)
+}
+
+func (s *Slack) Warn(msg string, args ...any) {
+	s.logger.Warn(msg, args...)
+}
+
+func (s *Slack) Error(msg string, args ...any) {
+	s.logger.Error(msg, args...)
+}
+
 func (s *Slack) start() {
 
-	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, slacker.WithDebug(s.options.Debug))
+	options := []slacker.ClientOption{
+		slacker.WithDebug(s.options.Debug),
+		slacker.WithLogger(s),
+	}
+	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, options...)
 	client.UnsupportedCommandHandler(s.unsupportedCommandHandler)
 
 	s.defaultDefinition = nil

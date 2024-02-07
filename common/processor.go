@@ -21,7 +21,6 @@ type ExecuteParams = map[string]string
 type Response struct {
 	Visible  bool // visible for others, not only you
 	Duration bool // show duration in replay
-	//Replace  bool // replace oroginal message
 	Original bool // show orignal as quote
 }
 
@@ -33,6 +32,7 @@ type Field struct {
 	Label   string
 	Default string
 	Hint    string
+	Values  []string
 }
 
 type Command interface {
@@ -61,12 +61,13 @@ const (
 )
 
 const (
-	FieldTypeUnknown   = ""
-	FieldTypeEdit      = "edit"
-	FieldTypeMultiEdit = "multiedit"
-	FieldTypeURL       = "url"
-	FieldTypeDate      = "date"
-	FieldTypeSelect    = "select"
+	FieldTypeUnknown     = ""
+	FieldTypeEdit        = "edit"
+	FieldTypeMultiEdit   = "multiedit"
+	FieldTypeURL         = "url"
+	FieldTypeDate        = "date"
+	FieldTypeSelect      = "select"
+	FieldTypeMultiSelect = "multiselect"
 )
 
 func (ps *Processors) Add(p Processor) {

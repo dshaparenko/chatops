@@ -9,7 +9,7 @@ import (
 type Bot interface {
 	Start(wg *sync.WaitGroup)
 	Name() string
-	Info() interface{}
+	//Info() interface{}
 }
 
 type Bots struct {
