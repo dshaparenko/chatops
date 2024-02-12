@@ -618,13 +618,33 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 			e.Multiline = true
 			e.InitialValue = def
 			el = e
+		case common.FieldTypeInteger:
+			e := slack.NewNumberInputBlockElement(h, actionID, false)
+			e.InitialValue = def
+			el = e
+		case common.FieldTypeFloat:
+			e := slack.NewNumberInputBlockElement(h, actionID, true)
+			e.InitialValue = def
+			el = e
 		case common.FieldTypeURL:
 			e := slack.NewURLTextInputBlockElement(h, actionID)
 			e.InitialValue = def
 			el = e
 		case common.FieldTypeDate:
 			e := slack.NewDatePickerBlockElement(actionID)
-			e.InitialDate = time.Now().Format("2006-01-02")
+			if utils.IsEmpty(def) {
+				e.InitialDate = time.Now().Format("2006-01-02")
+			} else {
+				e.InitialDate = def
+			}
+			el = e
+		case common.FieldTypeTime:
+			e := slack.NewTimePickerBlockElement(actionID)
+			if utils.IsEmpty(def) {
+				e.InitialTime = time.Now().Format("15:04")
+			} else {
+				e.InitialTime = def
+			}
 			el = e
 		case common.FieldTypeSelect:
 			options := []*slack.OptionBlockObject{}
@@ -665,6 +685,7 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 
 		b = slack.NewInputBlock("", l, nil, el)
 		if b != nil {
+			b.Optional = !field.Required
 			blocks = append(blocks, b)
 		}
 	}
@@ -738,6 +759,34 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, userProfile
 	return true
 }
 
+func (s *Slack) interactionNeeded(fields []common.Field, params map[string]string) bool {
+
+	if params == nil {
+		return len(fields) > 0
+	}
+
+	arr := []string{}
+	keys := common.GetStringKeys(params)
+
+	required := []common.Field{}
+	for _, f := range fields {
+		if f.Required {
+			required = append(required, f)
+		}
+	}
+
+	for _, f := range required {
+
+		if utils.Contains(keys, f.Name) {
+			v := params[f.Name]
+			if !utils.IsEmpty(v) {
+				arr = append(arr, v)
+			}
+		}
+	}
+	return len(required) > len(arr)
+}
+
 func (s *Slack) defCommandDefinition(cmd common.Command, group string, error bool) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
@@ -780,7 +829,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string, error boo
 		}
 
 		eParams := s.findParams(cName, params, m)
-		if len(fields) > len(eParams) {
+		if s.interactionNeeded(fields, eParams) {
 			shown, err := s.replyInteraction(cName, group, fields, eParams, m, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
@@ -874,8 +923,12 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 
 						v := v2.Value
 						switch v2.Type {
+						case "number_input":
+							v = v2.Value
 						case "datepicker":
 							v = v2.SelectedDate
+						case "timepicker":
+							v = v2.SelectedTime
 						case "static_select":
 							v = v2.SelectedOption.Value
 						case "multi_static_select":

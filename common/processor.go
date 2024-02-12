@@ -27,12 +27,13 @@ type Response struct {
 type FieldType string
 
 type Field struct {
-	Name    string
-	Type    FieldType
-	Label   string
-	Default string
-	Hint    string
-	Values  []string
+	Name     string
+	Type     FieldType
+	Label    string
+	Default  string
+	Hint     string
+	Required bool
+	Values   []string
 }
 
 type Command interface {
@@ -64,8 +65,11 @@ const (
 	FieldTypeUnknown     = ""
 	FieldTypeEdit        = "edit"
 	FieldTypeMultiEdit   = "multiedit"
+	FieldTypeInteger     = "integer"
+	FieldTypeFloat       = "float"
 	FieldTypeURL         = "url"
 	FieldTypeDate        = "date"
+	FieldTypeTime        = "time"
 	FieldTypeSelect      = "select"
 	FieldTypeMultiSelect = "multiselect"
 )
