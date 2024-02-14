@@ -5,6 +5,7 @@ import "github.com/devopsext/utils"
 type User interface {
 	ID() string
 	Name() string
+	TimeZone() string
 }
 
 type AttachmentType string

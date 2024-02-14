@@ -36,8 +36,9 @@ type SlackOptions struct {
 }
 
 type SlackUser struct {
-	id   string
-	name string
+	id       string
+	name     string
+	timezone string
 }
 
 type SlackFileResponseFull struct {
@@ -141,6 +142,10 @@ func (su *SlackUser) ID() string {
 
 func (su *SlackUser) Name() string {
 	return su.name
+}
+
+func (su *SlackUser) TimeZone() string {
+	return su.timezone
 }
 
 // Slack
@@ -643,6 +648,13 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 			if utils.IsEmpty(def) {
 				e.InitialTime = time.Now().Format("15:04")
 			} else {
+				first := strings.TrimSpace(def)
+				if utils.Contains([]string{"+", "-"}, first[:1]) {
+					d, err := time.ParseDuration(def)
+					if err == nil {
+						def = time.Now().Add(d).Format("15:04")
+					}
+				}
 				e.InitialTime = def
 			}
 			el = e
@@ -720,7 +732,7 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	return true, nil
 }
 
-func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, userProfile *slack.UserProfile,
+func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
 	replier *slacker.ResponseReplier, params common.ExecuteParams, error bool) bool {
 
 	cName := cmd.Name()
@@ -729,8 +741,9 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, userProfile
 	user := &SlackUser{
 		id: m.userID,
 	}
-	if userProfile != nil {
-		user.name = userProfile.DisplayName
+	if u != nil {
+		user.name = u.Profile.DisplayName
+		user.timezone = u.TZ
 	}
 
 	s.addReaction(m, s.options.ReactionDoing)
@@ -812,6 +825,11 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string, error boo
 
 		replier := cc.Response()
 
+		user, err := cc.SlackClient().GetUserInfo(m.userID)
+		if err != nil {
+			s.logger.Error("Slack couldn't get user for %s: %s", m.userID, err)
+		}
+
 		text, _ := s.getEventTextCommand(cName, m)
 		s.updateCounters(group, cName, text, m.userID)
 
@@ -841,7 +859,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string, error boo
 			}
 		}
 
-		s.postCommand(cmd, m, event.UserProfile, replier, eParams, error)
+		s.postCommand(cmd, m, user, replier, eParams, error)
 	}
 	return def
 }
@@ -905,12 +923,10 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 
 		switch action.ActionID {
 		case slackSubmitAction:
-			userProfileParams := &slack.GetUserProfileParameters{
-				UserID: m.userID,
-			}
-			userProfile, err := s.client.SlackClient().GetUserProfile(userProfileParams)
+
+			user, err := s.client.SlackClient().GetUserInfo(m.userID)
 			if err != nil {
-				s.logger.Error("Slack couldn't get user profile for %s: %s", m.userID, err)
+				s.logger.Error("Slack couldn't get user for %s: %s", m.userID, err)
 			}
 
 			params := make(common.ExecuteParams)
@@ -943,7 +959,7 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 				}
 			}
 
-			s.postCommand(cmd, m, userProfile, replier, params, false)
+			s.postCommand(cmd, m, user, replier, params, false)
 		default:
 			s.addReaction(m, s.options.ReactionFailed)
 		}
