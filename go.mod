@@ -4,11 +4,11 @@ go 1.21
 
 replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.31.2
 
-replace github.com/devopsext/tools => ./../tools
+//replace github.com/devopsext/tools => ./../tools
 
 require (
 	github.com/devopsext/sre v0.3.0
-	github.com/devopsext/tools v0.13.3
+	github.com/devopsext/tools v0.13.4
 	github.com/devopsext/utils v0.3.3
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0
