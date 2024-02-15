@@ -587,7 +587,7 @@ func (s *Slack) getInteractionID(command, group string) string {
 }
 
 func (s *Slack) replyInteraction(command, group string, fields []common.Field, params common.ExecuteParams,
-	m *slackMessageInfo, replier *slacker.ResponseReplier) (bool, error) {
+	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
 	threadTS := m.threadTimestamp
 	opts := []slacker.PostOption{}
@@ -638,24 +638,67 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 		case common.FieldTypeDate:
 			e := slack.NewDatePickerBlockElement(actionID)
 			if utils.IsEmpty(def) {
-				e.InitialDate = time.Now().Format("2006-01-02")
+				dateS := time.Now().Format("2006-01-02")
+				if u != nil {
+					loc, err := time.LoadLocation(u.TZ)
+					if err != nil {
+						s.logger.Error("Slack couldn't find location: %s", err)
+					} else {
+						dateS = time.Now().In(loc).Format("2006-01-02")
+					}
+				}
+				e.InitialDate = dateS
 			} else {
-				e.InitialDate = def
+				dateS := def
+				first := strings.TrimSpace(def)
+				if utils.Contains([]string{"+", "-"}, first[:1]) {
+					d, err := time.ParseDuration(def)
+					if err == nil {
+						dateS = time.Now().Add(d).Format("2006-01-02")
+						if u != nil {
+							loc, err := time.LoadLocation(u.TZ)
+							if err != nil {
+								s.logger.Error("Slack couldn't find location: %s", err)
+							} else {
+								dateS = time.Now().Add(d).In(loc).Format("2006-01-02")
+							}
+						}
+					}
+				}
+				e.InitialDate = dateS
 			}
 			el = e
 		case common.FieldTypeTime:
 			e := slack.NewTimePickerBlockElement(actionID)
 			if utils.IsEmpty(def) {
-				e.InitialTime = time.Now().Format("15:04")
+				timeS := time.Now().Format("15:04")
+				if u != nil {
+					loc, err := time.LoadLocation(u.TZ)
+					if err != nil {
+						s.logger.Error("Slack couldn't find location: %s", err)
+					} else {
+						timeS = time.Now().In(loc).Format("15:04")
+					}
+				}
+				e.InitialTime = timeS
 			} else {
+				timeS := def
 				first := strings.TrimSpace(def)
 				if utils.Contains([]string{"+", "-"}, first[:1]) {
 					d, err := time.ParseDuration(def)
 					if err == nil {
-						def = time.Now().Add(d).Format("15:04")
+						timeS = time.Now().Add(d).Format("15:04")
+						if u != nil {
+							loc, err := time.LoadLocation(u.TZ)
+							if err != nil {
+								s.logger.Error("Slack couldn't find location: %s", err)
+							} else {
+								timeS = time.Now().Add(d).In(loc).Format("15:04")
+							}
+						}
 					}
 				}
-				e.InitialTime = def
+				e.InitialTime = timeS
 			}
 			el = e
 		case common.FieldTypeSelect:
@@ -848,7 +891,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string, error boo
 
 		eParams := s.findParams(cName, params, m)
 		if s.interactionNeeded(fields, eParams) {
-			shown, err := s.replyInteraction(cName, group, fields, eParams, m, replier)
+			shown, err := s.replyInteraction(cName, group, fields, eParams, m, user, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
