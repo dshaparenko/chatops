@@ -41,6 +41,14 @@ type SlackUser struct {
 	timezone string
 }
 
+type SlackMessage struct {
+	id string
+}
+
+type SlackChannel struct {
+	id string
+}
+
 type SlackFileResponseFull struct {
 	slack.File   `json:"file"`
 	slack.Paging `json:"paging"`
@@ -146,6 +154,18 @@ func (su *SlackUser) Name() string {
 
 func (su *SlackUser) TimeZone() string {
 	return su.timezone
+}
+
+// SlackMessage
+
+func (sm *SlackMessage) ID() string {
+	return sm.id
+}
+
+// SlackChannel
+
+func (sc *SlackChannel) ID() string {
+	return sc.id
 }
 
 // Slack
@@ -493,7 +513,7 @@ func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 
 func (s *Slack) reply(command string, m *slackMessageInfo,
 	replier *slacker.ResponseReplier, message string, attachments []*common.Attachment,
-	response common.Response, start *time.Time, error bool) error {
+	response common.Response, start *time.Time, error bool) (string, error) {
 
 	threadTS := m.threadTimestamp
 	text, _ := s.getEventTextCommand(command, m)
@@ -515,7 +535,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	} else {
 		batts, err := s.buildAttachmentBlocks(attachments)
 		if err != nil {
-			return err
+			return "", err
 		}
 		opts = append(opts, slacker.SetAttachments(batts))
 	}
@@ -564,15 +584,15 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 		))
 	}
 
-	_, err := replier.PostBlocks(m.channelID, blocks, opts...)
+	ts, err := replier.PostBlocks(m.channelID, blocks, opts...)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return ts, nil
 }
 
 func (s *Slack) replyError(command string, m *slackMessageInfo,
-	replier *slacker.ResponseReplier, err error, attachments []*common.Attachment) error {
+	replier *slacker.ResponseReplier, err error, attachments []*common.Attachment) (string, error) {
 
 	s.logger.Error("Slack reply error: %s", err)
 	return s.reply(command, m, replier, err.Error(), attachments, common.Response{Visible: false}, nil, true)
@@ -776,7 +796,7 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 }
 
 func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
-	replier *slacker.ResponseReplier, params common.ExecuteParams, error bool) bool {
+	replier *slacker.ResponseReplier, params common.ExecuteParams, error bool) error {
 
 	cName := cmd.Name()
 	response := cmd.Response()
@@ -796,14 +816,14 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 	if err != nil {
 		s.replyError(cName, m, replier, err, attachments)
 		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
-		return false
+		return err
 	}
 
-	err = s.reply(cName, m, replier, message, attachments, response, &start, false)
+	id, err := s.reply(cName, m, replier, message, attachments, response, &start, false)
 	if err != nil {
 		s.replyError(cName, m, replier, err, attachments)
 		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
-		return false
+		return err
 	}
 
 	if error {
@@ -812,7 +832,14 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 		s.addRemoveReactions(m, s.options.ReactionDone, s.options.ReactionDoing)
 	}
 
-	return true
+	msg := &SlackMessage{
+		id: id,
+	}
+
+	channel := &SlackChannel{
+		id: m.channelID,
+	}
+	return cmd.After(s, user, params, msg, channel)
 }
 
 func (s *Slack) interactionNeeded(fields []common.Field, params map[string]string) bool {
@@ -848,6 +875,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string, error boo
 	cName := cmd.Name()
 	params := cmd.Params()
 	fields := cmd.Fields()
+
 	def := &slacker.CommandDefinition{
 		Command:     cName,
 		Aliases:     cmd.Aliases(),
@@ -902,7 +930,12 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string, error boo
 			}
 		}
 
-		s.postCommand(cmd, m, user, replier, eParams, error)
+		err = s.postCommand(cmd, m, user, replier, eParams, error)
+		if err != nil {
+			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+			return
+		}
+
 	}
 	return def
 }
@@ -912,6 +945,38 @@ func (s *Slack) hideInteraction(m *slackMessageInfo, responseURL string) {
 		slack.MsgOptionReplaceOriginal(responseURL),
 		slack.MsgOptionDeleteOriginal(responseURL),
 	)
+}
+
+func (s *Slack) Post(channel common.Channel, message string, attachments []*common.Attachment, parent common.Message) error {
+
+	channelID := channel.ID()
+
+	threadTS := ""
+	if !utils.IsEmpty(parent) {
+		threadTS = parent.ID()
+	}
+
+	atts, err := s.buildAttachmentBlocks(attachments)
+	if err != nil {
+		return err
+	}
+
+	blocks := []slack.Block{}
+	blocks = append(blocks, slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, message, false, false),
+		[]*slack.TextBlockObject{}, nil,
+	))
+
+	options := []slack.MsgOption{}
+	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionAttachments(atts...))
+
+	if !utils.IsEmpty(threadTS) {
+		options = append(options, slack.MsgOptionTS(threadTS))
+	}
+
+	client := s.client.SlackClient()
+	_, _, err = client.PostMessage(channelID, options...)
+	return err
 }
 
 func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slacker.InteractionDefinition {
@@ -1002,7 +1067,12 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 				}
 			}
 
-			s.postCommand(cmd, m, user, replier, params, false)
+			err = s.postCommand(cmd, m, user, replier, params, false)
+			if err != nil {
+				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+				return
+			}
+
 		default:
 			s.addReaction(m, s.options.ReactionFailed)
 		}

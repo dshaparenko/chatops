@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,11 +16,12 @@ import (
 )
 
 type DefaultOptions struct {
-	CommandsDir string
-	CommandExt  string
-	ConfigExt   string
-	Description string
-	Error       string
+	CommandsDir  string
+	TemplatesDir string
+	CommandExt   string
+	ConfigExt    string
+	Description  string
+	Error        string
 }
 
 type DefaultConfig struct {
@@ -36,6 +38,12 @@ type DefaultCommand struct {
 	processor   *Default
 	template    *toolsRender.TextTemplate
 	attachments *sync.Map
+	posts       *sync.Map
+}
+
+type DefaultPost struct {
+	File string
+	Obj  interface{}
 }
 
 type Default struct {
@@ -118,10 +126,10 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 
 	prefixes := []string{"default", "processor"}
 
-	requests := dc.processor.meter.Counter("requests", "Count of all executiions", labels, prefixes...)
+	requests := dc.processor.meter.Counter("requests", "Count of all executions", labels, prefixes...)
 	requests.Inc()
 
-	errors := dc.processor.meter.Counter("errors", "Count of all errors during execitions", labels, prefixes...)
+	errors := dc.processor.meter.Counter("errors", "Count of all errors during executions", labels, prefixes...)
 	timeCounter := dc.processor.meter.Counter("time", "Sum of all time executions", labels, prefixes...)
 
 	gid := utils.GoRoutineID()
@@ -144,6 +152,8 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 
 	b, err := dc.template.RenderObject(m)
 	if err != nil {
+		dc.attachments.Delete(gid) // cleanup attachments
+		dc.posts.Delete(gid)       // cleanup posts
 		errors.Inc()
 		logger.Error(err)
 		return "", atts, fmt.Errorf("%s", dc.processor.options.Error)
@@ -160,10 +170,70 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	return strings.TrimSpace(string(b)), atts, nil
 }
 
+func (dc *DefaultCommand) After(bot common.Bot, user common.User, params common.ExecuteParams,
+	message common.Message, channel common.Channel) error {
+
+	gid := utils.GoRoutineID()
+	var posts []*DefaultPost
+
+	r, ok := dc.posts.LoadAndDelete(gid)
+	if ok {
+		posts = r.([]*DefaultPost)
+	}
+
+	for _, p := range posts {
+		go func(post *DefaultPost) {
+
+			logger := dc.processor.observability.Logs()
+
+			dNew, err := dc.processor.CreateCommand(dc.name, post.File)
+			if err != nil {
+				logger.Error(err)
+				return
+			}
+
+			text, atts, err := dNew.Execute(bot, user, params)
+			if err != nil {
+				logger.Error(err)
+				return
+			}
+
+			err = bot.Post(channel, text, atts, message)
+			if err != nil {
+				logger.Error(err)
+				return
+			}
+
+		}(p)
+	}
+	return nil
+}
+
+func (dc *DefaultCommand) fileFullName(dir, file string) string {
+	return fmt.Sprintf("%s%s%s", dir, string(os.PathSeparator), file)
+}
+
+func (dc *DefaultCommand) fPostTemplate(file string, obj interface{}) error {
+
+	gid := utils.GoRoutineID()
+	var posts []*DefaultPost
+
+	r, ok := dc.posts.Load(gid)
+	if ok {
+		posts = r.([]*DefaultPost)
+	}
+
+	posts = append(posts, &DefaultPost{
+		File: dc.fileFullName(dc.processor.options.TemplatesDir, file),
+		Obj:  obj,
+	})
+	dc.posts.Store(gid, posts)
+	return nil
+}
+
 func (dc *DefaultCommand) fAddAttachment(title, text string, data interface{}, typ string) error {
 
 	gid := utils.GoRoutineID()
-
 	var atts []*common.Attachment
 
 	r, ok := dc.attachments.Load(gid)
@@ -185,6 +255,16 @@ func (dc *DefaultCommand) fAddAttachment(title, text string, data interface{}, t
 	})
 	dc.attachments.Store(gid, atts)
 	return nil
+}
+
+func (dc *DefaultCommand) fRunCommand(file string, obj interface{}) (string, error) {
+
+	return dc.template.TemplateRenderFile(dc.fileFullName(dc.processor.options.CommandsDir, file), obj)
+}
+
+func (dc *DefaultCommand) fRunTemplate(file string, obj interface{}) (string, error) {
+
+	return dc.template.TemplateRenderFile(dc.fileFullName(dc.processor.options.TemplatesDir, file), obj)
 }
 
 // Default
@@ -216,14 +296,14 @@ func (d *Default) loadConfig(path string) (*DefaultConfig, error) {
 	return &v, nil
 }
 
-func (d *Default) AddCommand(name, path string) error {
+func (d *Default) CreateCommand(name, path string) (common.Command, error) {
 
 	logger := d.observability.Logs()
 
 	content, err := utils.Content(path)
 	if err != nil {
 		logger.Error("Default couldn't read template %s, error %s", path, err)
-		return err
+		return nil, err
 	}
 
 	var config *DefaultConfig
@@ -239,11 +319,15 @@ func (d *Default) AddCommand(name, path string) error {
 
 	dc := &DefaultCommand{
 		attachments: &sync.Map{},
+		posts:       &sync.Map{},
 		config:      config,
 	}
 
 	funcs := make(map[string]any)
 	funcs["addAttachment"] = dc.fAddAttachment
+	funcs["runCommand"] = dc.fRunCommand
+	funcs["runTemplate"] = dc.fRunTemplate
+	funcs["postTemplate"] = dc.fPostTemplate
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default_%s_template", name),
@@ -253,13 +337,21 @@ func (d *Default) AddCommand(name, path string) error {
 	template, err := toolsRender.NewTextTemplate(templateOpts, d.observability)
 	if err != nil {
 		logger.Error("Default template %s in file %s has error: %s", name, path, err)
-		return err
+		return nil, err
 	}
 
 	dc.name = name
 	dc.processor = d
 	dc.template = template
+	return dc, nil
+}
 
+func (d *Default) AddCommand(name, path string) error {
+
+	dc, err := d.CreateCommand(name, path)
+	if err != nil {
+		return err
+	}
 	d.commands = append(d.commands, dc)
 	return nil
 }

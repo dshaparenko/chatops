@@ -8,6 +8,14 @@ type User interface {
 	TimeZone() string
 }
 
+type Message interface {
+	ID() string
+}
+
+type Channel interface {
+	ID() string
+}
+
 type AttachmentType string
 
 type Attachment struct {
@@ -45,6 +53,7 @@ type Command interface {
 	Response() Response
 	Fields() []Field
 	Execute(bot Bot, user User, params ExecuteParams) (string, []*Attachment, error)
+	After(bot Bot, user User, params ExecuteParams, message Message, channel Channel) error
 }
 
 type Processor interface {

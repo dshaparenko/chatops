@@ -79,10 +79,11 @@ var slackOptions = bot.SlackOptions{
 }
 
 var defaultOptions = processor.DefaultOptions{
-	CommandsDir: envGet("DEFAULT_COMMANDS_DIR", "").(string),
-	CommandExt:  envGet("DEFAULT_COMMAND_EXT", ".tpl").(string),
-	ConfigExt:   envGet("DEFAULT_CONFIG_EXT", ".yml").(string),
-	Error:       envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
+	CommandsDir:  envGet("DEFAULT_COMMANDS_DIR", "").(string),
+	TemplatesDir: envGet("DEFAULT_TEMPLATES_DIR", "").(string),
+	CommandExt:   envGet("DEFAULT_COMMAND_EXT", ".tpl").(string),
+	ConfigExt:    envGet("DEFAULT_CONFIG_EXT", ".yml").(string),
+	Error:        envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
 }
 
 func getOnlyEnv(key string) string {
@@ -302,6 +303,7 @@ func Execute() {
 	flags.StringVar(&slackOptions.ErrorColor, "slack-error-color", slackOptions.ErrorColor, "Slack error color")
 
 	flags.StringVar(&defaultOptions.CommandsDir, "default-commands-dir", defaultOptions.CommandsDir, "Default commands directory")
+	flags.StringVar(&defaultOptions.TemplatesDir, "default-templates-dir", defaultOptions.TemplatesDir, "Default templates directory")
 	flags.StringVar(&defaultOptions.CommandExt, "default-command-ext", defaultOptions.CommandExt, "Default command extension")
 	flags.StringVar(&defaultOptions.ConfigExt, "default-config-ext", defaultOptions.ConfigExt, "Default config extension")
 	flags.StringVar(&defaultOptions.Error, "default-error", defaultOptions.Error, "Default error")
