@@ -9,7 +9,7 @@ import (
 type Bot interface {
 	Start(wg *sync.WaitGroup)
 	Name() string
-	Post(channel Channel, message string, attachments []*Attachment, parent Message) error
+	Post(channel string, message string, attachments []*Attachment, parent Message) error
 }
 
 type Bots struct {

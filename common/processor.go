@@ -10,6 +10,8 @@ type User interface {
 
 type Message interface {
 	ID() string
+	Visible() bool
+	User() User
 }
 
 type Channel interface {
@@ -25,7 +27,7 @@ type Attachment struct {
 	Type  AttachmentType
 }
 
-type ExecuteParams = map[string]string
+type ExecuteParams = map[string]interface{}
 
 type Response struct {
 	Visible  bool // visible for others, not only you
@@ -45,6 +47,10 @@ type Field struct {
 	Values   []string
 }
 
+type Executor interface {
+	After(message Message, channel Channel) error
+}
+
 type Command interface {
 	Name() string
 	Description() string
@@ -52,8 +58,7 @@ type Command interface {
 	Aliases() []string
 	Response() Response
 	Fields() []Field
-	Execute(bot Bot, user User, params ExecuteParams) (string, []*Attachment, error)
-	After(bot Bot, user User, params ExecuteParams, message Message, channel Channel) error
+	Execute(bot Bot, user User, params ExecuteParams) (Executor, string, []*Attachment, error)
 }
 
 type Processor interface {

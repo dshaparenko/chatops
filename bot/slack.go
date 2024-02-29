@@ -42,7 +42,10 @@ type SlackUser struct {
 }
 
 type SlackMessage struct {
-	id string
+	id              string
+	visible         bool
+	user            *SlackUser
+	threadTimestamp string
 }
 
 type SlackChannel struct {
@@ -160,6 +163,14 @@ func (su *SlackUser) TimeZone() string {
 
 func (sm *SlackMessage) ID() string {
 	return sm.id
+}
+
+func (sm *SlackMessage) Visible() bool {
+	return sm.visible
+}
+
+func (sm *SlackMessage) User() common.User {
+	return sm.user
 }
 
 // SlackChannel
@@ -623,7 +634,7 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	for _, field := range fields {
 
 		actionID := fmt.Sprintf("%s-%s", interactionID, field.Name)
-		def := params[field.Name]
+		def := fmt.Sprintf("%s", params[field.Name])
 		if utils.IsEmpty(def) {
 			def = field.Default
 		}
@@ -812,14 +823,14 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 	s.addReaction(m, s.options.ReactionDoing)
 
 	start := time.Now()
-	message, attachments, err := cmd.Execute(s, user, params)
+	executor, message, attachments, err := cmd.Execute(s, user, params)
 	if err != nil {
 		s.replyError(cName, m, replier, err, attachments)
 		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 		return err
 	}
 
-	id, err := s.reply(cName, m, replier, message, attachments, response, &start, false)
+	ts, err := s.reply(cName, m, replier, message, attachments, response, &start, false)
 	if err != nil {
 		s.replyError(cName, m, replier, err, attachments)
 		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -833,16 +844,19 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 	}
 
 	msg := &SlackMessage{
-		id: id,
+		id:              ts,
+		visible:         response.Visible,
+		user:            user,
+		threadTimestamp: m.threadTimestamp,
 	}
 
 	channel := &SlackChannel{
 		id: m.channelID,
 	}
-	return cmd.After(s, user, params, msg, channel)
+	return executor.After(msg, channel)
 }
 
-func (s *Slack) interactionNeeded(fields []common.Field, params map[string]string) bool {
+func (s *Slack) interactionNeeded(fields []common.Field, params map[string]interface{}) bool {
 
 	if params == nil {
 		return len(fields) > 0
@@ -863,7 +877,7 @@ func (s *Slack) interactionNeeded(fields []common.Field, params map[string]strin
 		if utils.Contains(keys, f.Name) {
 			v := params[f.Name]
 			if !utils.IsEmpty(v) {
-				arr = append(arr, v)
+				arr = append(arr, fmt.Sprintf("%s", v))
 			}
 		}
 	}
@@ -947,13 +961,29 @@ func (s *Slack) hideInteraction(m *slackMessageInfo, responseURL string) {
 	)
 }
 
-func (s *Slack) Post(channel common.Channel, message string, attachments []*common.Attachment, parent common.Message) error {
+func (s *Slack) Post(channel string, message string, attachments []*common.Attachment, parent common.Message) error {
 
-	channelID := channel.ID()
-
+	channelID := channel
 	threadTS := ""
+	visible := true
+	userID := ""
+
 	if !utils.IsEmpty(parent) {
+
 		threadTS = parent.ID()
+		p, ok := parent.(*SlackMessage)
+		if ok {
+			ts := p.threadTimestamp
+			if !utils.IsEmpty(ts) {
+				threadTS = ts
+			}
+		}
+
+		user := parent.User()
+		if !utils.IsEmpty(user) {
+			userID = user.ID()
+			visible = parent.Visible()
+		}
 	}
 
 	atts, err := s.buildAttachmentBlocks(attachments)
@@ -972,6 +1002,10 @@ func (s *Slack) Post(channel common.Channel, message string, attachments []*comm
 
 	if !utils.IsEmpty(threadTS) {
 		options = append(options, slack.MsgOptionTS(threadTS))
+	}
+
+	if !visible && !utils.IsEmpty(userID) {
+		options = append(options, slack.MsgOptionPostEphemeral(userID))
 	}
 
 	client := s.client.SlackClient()

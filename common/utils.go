@@ -83,7 +83,7 @@ func RemoveEmptyStrings(items []string) []string {
 	return r
 }
 
-func GetStringKeys(arr map[string]string) []string {
+func GetStringKeys(arr map[string]interface{}) []string {
 	var keys []string
 	for k := range arr {
 		keys = append(keys, k)
