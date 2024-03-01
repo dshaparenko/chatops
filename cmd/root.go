@@ -65,7 +65,7 @@ var slackOptions = bot.SlackOptions{
 	BotToken:        envGet("SLACK_BOT_TOKEN", "").(string),
 	AppToken:        envGet("SLACK_APP_TOKEN", "").(string),
 	Debug:           envGet("SLACK_DEBUG", false).(bool),
-	ReactionDoing:   envGet("SLACK_REACTION_DOING", "eyes").(string),
+	ReactionDoing:   envGet("SLACK_REACTION_DOING", "spinner").(string),
 	ReactionDone:    envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
 	ReactionFailed:  envGet("SLACK_REACTION_FAILED", "x").(string),
 	ReactionDialog:  envGet("SLACK_REACTION_DIALOG", "question").(string),

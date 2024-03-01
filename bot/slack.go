@@ -634,7 +634,10 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	for _, field := range fields {
 
 		actionID := fmt.Sprintf("%s-%s", interactionID, field.Name)
-		def := fmt.Sprintf("%s", params[field.Name])
+		def := ""
+		if !utils.IsEmpty(params[field.Name]) {
+			def = fmt.Sprintf("%v", params[field.Name])
+		}
 		if utils.IsEmpty(def) {
 			def = field.Default
 		}
