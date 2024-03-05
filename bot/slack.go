@@ -107,6 +107,13 @@ type SlackImageBlock struct {
 	Title     *slack.TextBlockObject `json:"title,omitempty"`
 }
 
+type SlackFileBlock struct {
+	Type       slack.MessageBlockType `json:"type"`
+	ExternalID string                 `json:"external_id"`
+	Source     string                 `json:"source"`
+	BlockID    string                 `json:"block_id,omitempty"`
+}
+
 type SlackButtonValue struct {
 	Timestamp string
 	Text      string
@@ -142,6 +149,11 @@ func (r SlackRichTextQuoteElement) RichTextElementType() slack.RichTextElementTy
 
 // SlackImageBlock
 func (s SlackImageBlock) BlockType() slack.MessageBlockType {
+	return s.Type
+}
+
+// SlackFileBlock
+func (s SlackFileBlock) BlockType() slack.MessageBlockType {
 	return s.Type
 }
 
@@ -268,7 +280,7 @@ func (s *Slack) ShareFilePublicURL(file *slack.File) (*slack.File, error) {
 }
 */
 
-func (s *Slack) uploadFileV1(att *common.Attachment) (string, error) {
+func (s *Slack) uploadFileV1(att *common.Attachment) (*slack.File, error) {
 
 	botID := "unknown"
 	if s.auth != nil {
@@ -276,16 +288,39 @@ func (s *Slack) uploadFileV1(att *common.Attachment) (string, error) {
 	}
 	stamp := time.Now().Format("20060102T150405")
 	name := fmt.Sprintf("%s-%s", botID, stamp)
-	fileParams := slack.FileUploadParameters{
+	params := slack.FileUploadParameters{
 		Filename: name,
 		Reader:   bytes.NewReader(att.Data),
 		Channels: []string{s.options.PublicChannel},
 	}
-	private, err := s.client.SlackClient().UploadFile(fileParams)
+	r, err := s.client.SlackClient().UploadFile(params)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return private.ID, nil
+	return r, nil
+}
+
+func (s *Slack) shareFilePublicURL(file *slack.File) (*slack.File, error) {
+
+	r, _, _, err := s.client.SlackClient().ShareFilePublicURL(file.ID)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (s *Slack) addRemoteFile(att *common.Attachment, file *slack.File) (*slack.RemoteFile, error) {
+
+	params := slack.RemoteFileParameters{
+		ExternalID:  file.ID,
+		ExternalURL: file.PermalinkPublic,
+		Title:       att.Title,
+	}
+	r, err := s.client.SlackClient().AddRemoteFile(params)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 func (s *Slack) limitText(text string, max int) string {
@@ -309,8 +344,8 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 		switch a.Type {
 		case common.AttachmentTypeImage:
 
-			// uploading image
-			id, err := s.uploadFileV1(a)
+			// uploading image or file
+			f, err := s.uploadFileV1(a)
 			if err != nil {
 				return r, err
 			}
@@ -322,9 +357,31 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 					Type: slack.PlainTextType, // only
 					Text: a.Title,
 				},
-				SlackFile: &SlackFile{ID: id},
+				SlackFile: &SlackFile{ID: f.ID},
 			})
+		case common.AttachmentTypeFile:
 
+			// uploading image or file
+			f1, err := s.uploadFileV1(a)
+			if err != nil {
+				return r, err
+			}
+
+			f2, err := s.shareFilePublicURL(f1)
+			if err != nil {
+				return r, err
+			}
+
+			rf, err := s.addRemoteFile(a, f2)
+			if err != nil {
+				return r, err
+			}
+
+			blks = append(blks, &SlackFileBlock{
+				Type:       slack.MBTFile,
+				ExternalID: rf.ID,
+				Source:     "remote",
+			})
 		default:
 
 			// title
@@ -766,6 +823,21 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 				e.InitialOptions = dBlocks
 			}
 			el = e
+		case common.FieldTypeBool:
+			options := []*slack.OptionBlockObject{}
+			dBlocks := []*slack.OptionBlockObject{}
+			strue := fmt.Sprintf("%v", true)
+			block := slack.NewOptionBlockObject(strue, l, nil)
+			l = slack.NewTextBlockObject(slack.PlainTextType, " ", false, false)
+			options = append(options, block)
+			if strue == def {
+				dBlocks = append(dBlocks, block)
+			}
+			e := slack.NewCheckboxGroupsBlockElement(actionID, options...)
+			if len(dBlocks) > 0 {
+				e.InitialOptions = dBlocks
+			}
+			el = e
 		default:
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
 			e.InitialValue = def
@@ -1098,6 +1170,15 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 								arr = append(arr, v2.Value)
 							}
 							v = strings.Join(arr, ",")
+						case "checkboxes":
+							arr := []string{}
+							for _, v2 := range v2.SelectedOptions {
+								arr = append(arr, v2.Value)
+							}
+							v = strings.Join(arr, ",")
+							if utils.IsEmpty(v) {
+								v = fmt.Sprintf("%v", false)
+							}
 						}
 						params[name] = v
 					}

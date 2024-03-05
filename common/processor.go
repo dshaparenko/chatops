@@ -74,6 +74,7 @@ const (
 	AttachmentTypeUnknown = ""
 	AttachmentTypeText    = "text"
 	AttachmentTypeImage   = "image"
+	AttachmentTypeFile    = "file"
 )
 
 const (
@@ -87,6 +88,7 @@ const (
 	FieldTypeTime        = "time"
 	FieldTypeSelect      = "select"
 	FieldTypeMultiSelect = "multiselect"
+	FieldTypeBool        = "bool"
 )
 
 func (ps *Processors) Add(p Processor) {
