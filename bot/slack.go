@@ -587,6 +587,15 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	text, _ := s.getEventTextCommand(command, m)
 	replyInThread := !utils.IsEmpty(threadTS)
 
+	visible := false
+	original := false
+	duration := false
+	if !utils.IsEmpty(response) {
+		visible = response.Visible()
+		original = response.Original()
+		duration = response.Duration()
+	}
+
 	atts := []slack.Attachment{}
 	opts := []slacker.PostOption{}
 	if error {
@@ -612,14 +621,14 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 		opts = append(opts, slacker.SetThreadTS(threadTS))
 	}
 
-	if !response.Visible {
+	if !visible {
 		opts = append(opts, slacker.SetEphemeral(m.userID))
 	}
 
 	var quote = []*SlackRichTextQuoteElement{}
 
 	var durationElement *SlackRichTextQuoteElement
-	if start != nil && !error && response.Duration {
+	if start != nil && !error && duration {
 
 		elapsed := time.Since(*start)
 		durationElement = &SlackRichTextQuoteElement{
@@ -631,7 +640,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 
 	blocks := []slack.Block{}
 
-	if response.Original {
+	if original {
 
 		quote = append(quote, []*SlackRichTextQuoteElement{
 			{Type: "user", UserID: m.userID},
@@ -663,7 +672,7 @@ func (s *Slack) replyError(command string, m *slackMessageInfo,
 	replier *slacker.ResponseReplier, err error, attachments []*common.Attachment) (string, error) {
 
 	s.logger.Error("Slack reply error: %s", err)
-	return s.reply(command, m, replier, err.Error(), attachments, common.Response{Visible: false}, nil, true)
+	return s.reply(command, m, replier, err.Error(), attachments, nil, nil, true)
 }
 
 func (s *Slack) getInteractionID(command, group string) string {
@@ -920,7 +929,7 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 
 	msg := &SlackMessage{
 		id:              ts,
-		visible:         response.Visible,
+		visible:         response.Visible(),
 		user:            user,
 		threadTimestamp: m.threadTimestamp,
 	}

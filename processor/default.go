@@ -24,17 +24,24 @@ type DefaultOptions struct {
 	Error        string
 }
 
+type DefaultReposne struct {
+	Visible  bool
+	Original bool
+	Duration bool
+}
+
 type DefaultConfig struct {
 	Description string
 	Params      []string
 	Aliases     []string
-	Response    common.Response
+	Response    DefaultReposne
 	Fields      []common.Field
 }
 
 type DefaultCommand struct {
 	name      string
 	path      string
+	visible   *bool
 	config    *DefaultConfig
 	processor *Default
 	logger    sreCommon.Logger
@@ -73,7 +80,7 @@ func (de *DefaultExecutor) filePath(dir, fileName string) string {
 	return fmt.Sprintf("%s%s%s", dir, string(os.PathSeparator), fileName)
 }
 
-func (de *DefaultExecutor) fPostFile(path string, obj interface{}) error {
+func (de *DefaultExecutor) fPostFile(path string, obj interface{}) string {
 
 	gid := utils.GoRoutineID()
 	var posts []*DefaultPost
@@ -92,15 +99,15 @@ func (de *DefaultExecutor) fPostFile(path string, obj interface{}) error {
 		Obj:  obj,
 	})
 	de.posts.Store(gid, posts)
-	return nil
+	return ""
 }
 
-func (de *DefaultExecutor) fPostCommand(fileName string, obj interface{}) error {
+func (de *DefaultExecutor) fPostCommand(fileName string, obj interface{}) string {
 	s := de.filePath(de.command.processor.options.CommandsDir, fileName)
 	return de.fPostFile(s, obj)
 }
 
-func (de *DefaultExecutor) fPostTemplate(fileName string, obj interface{}) error {
+func (de *DefaultExecutor) fPostTemplate(fileName string, obj interface{}) string {
 	s := de.filePath(de.command.processor.options.TemplatesDir, fileName)
 	return de.fPostFile(s, obj)
 }
@@ -122,7 +129,7 @@ func (de *DefaultExecutor) fCreateAttachment(title, text string, data interface{
 	return att
 }
 
-func (de *DefaultExecutor) fAddAttachment(title, text string, data interface{}, typ string) error {
+func (de *DefaultExecutor) fAddAttachment(title, text string, data interface{}, typ string) string {
 
 	gid := utils.GoRoutineID()
 	var atts []*common.Attachment
@@ -146,7 +153,7 @@ func (de *DefaultExecutor) fAddAttachment(title, text string, data interface{}, 
 	}
 	atts = append(atts, att)
 	de.attachments.Store(gid, atts)
-	return nil
+	return ""
 }
 
 func (de *DefaultExecutor) fRunFile(path string, obj interface{}) (string, error) {
@@ -210,8 +217,15 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 }
 
 func (de *DefaultExecutor) fSendMessage(message, channels string) error {
-
 	return de.fSendMessageEx(message, channels, nil)
+}
+
+func (de *DefaultExecutor) fSetInvisible() string {
+	if de.command != nil {
+		v := false
+		de.command.visible = &v
+	}
+	return ""
 }
 
 func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, error) {
@@ -338,6 +352,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	funcs["postTemplate"] = executor.fPostTemplate
 	funcs["sendMessage"] = executor.fSendMessage
 	funcs["sendMessageEx"] = executor.fSendMessageEx
+	funcs["setInvisible"] = executor.fSetInvisible
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -422,11 +437,34 @@ func (dc *DefaultCommand) Aliases() []string {
 	return dc.config.Aliases
 }
 
-func (dc *DefaultCommand) Response() common.Response {
-	if dc.config != nil {
-		return dc.config.Response
+// common.Response
+
+func (dc *DefaultCommand) Visible() bool {
+	if dc.visible != nil {
+		return *dc.visible
 	}
-	return common.Response{}
+	if dc.config != nil {
+		return dc.config.Response.Visible
+	}
+	return false
+}
+
+func (dc *DefaultCommand) Duration() bool {
+	if dc.config != nil {
+		return dc.config.Response.Duration
+	}
+	return false
+}
+
+func (dc *DefaultCommand) Original() bool {
+	if dc.config != nil {
+		return dc.config.Response.Original
+	}
+	return false
+}
+
+func (dc *DefaultCommand) Response() common.Response {
+	return dc
 }
 
 func (dc *DefaultCommand) Fields() []common.Field {
