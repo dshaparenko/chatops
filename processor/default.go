@@ -208,21 +208,21 @@ func (de *DefaultExecutor) fRunTemplate(fileName string, obj interface{}) (strin
 	return de.template.TemplateRenderFile(s, obj)
 }
 
-func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[string]interface{}) error {
+func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[string]interface{}) (string, error) {
 
 	if utils.IsEmpty(message) {
-		return fmt.Errorf("SendMessageEx err => %s", "empty message")
+		return "", fmt.Errorf("SendMessageEx err => %s", "empty message")
 	}
 
 	if utils.IsEmpty(channels) {
-		return fmt.Errorf("SendMessageEx err => %s", "no channels")
+		return "", fmt.Errorf("SendMessageEx err => %s", "no channels")
 	}
 
 	chnls := strings.Split(channels, ",")
 	chnls = common.RemoveEmptyStrings(chnls)
 
 	if len(chnls) == 0 {
-		return fmt.Errorf("SendMessageEx err => %s", "no channels")
+		return "", fmt.Errorf("SendMessageEx err => %s", "no channels")
 	}
 
 	atts := []*common.Attachment{}
@@ -251,10 +251,10 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 		}
 	}
 
-	return err
+	return "", err
 }
 
-func (de *DefaultExecutor) fSendMessage(message, channels string) error {
+func (de *DefaultExecutor) fSendMessage(message, channels string) (string, error) {
 	return de.fSendMessageEx(message, channels, nil)
 }
 
@@ -268,6 +268,26 @@ func (de *DefaultExecutor) fSetError() string {
 	e := true
 	de.error = &e
 	return ""
+}
+
+func (de *DefaultExecutor) fGetBot() interface{} {
+	return de.bot
+}
+
+func (de *DefaultExecutor) fGetUser() interface{} {
+	return de.user
+}
+
+func (de *DefaultExecutor) fGetParams() interface{} {
+	return de.params
+}
+
+func (de *DefaultExecutor) fGetMessage() interface{} {
+	return de.message
+}
+
+func (de *DefaultExecutor) fGetChannel() interface{} {
+	return de.channel
 }
 
 func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, error) {
@@ -384,6 +404,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	}
 
 	funcs := make(map[string]any)
+
 	funcs["addAttachment"] = executor.fAddAttachment
 	funcs["createAttachment"] = executor.fCreateAttachment
 	funcs["runFile"] = executor.fRunFile
@@ -396,6 +417,12 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	funcs["sendMessageEx"] = executor.fSendMessageEx
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
+
+	funcs["getBot"] = executor.fGetBot
+	funcs["getUser"] = executor.fGetUser
+	funcs["getParams"] = executor.fGetParams
+	funcs["getMessage"] = executor.fGetMessage
+	funcs["getChannel"] = executor.fGetChannel
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),

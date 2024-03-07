@@ -981,7 +981,7 @@ func (s *Slack) interactionNeeded(fields []common.Field, params map[string]inter
 	return len(required) > len(arr)
 }
 
-func (s *Slack) defCommandDefinition(cmd common.Command, group string, error bool) *slacker.CommandDefinition {
+func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
 	params := cmd.Params()
@@ -1261,7 +1261,7 @@ func (s *Slack) start() {
 		}
 		group = client.AddCommandGroup(pName)
 		for _, c := range commands {
-			group.AddCommand(s.defCommandDefinition(c, pName, false))
+			group.AddCommand(s.defCommandDefinition(c, pName))
 			if len(c.Fields()) > 0 {
 				client.AddInteraction(s.defInteractionDefinition(c, pName))
 			}
@@ -1281,9 +1281,9 @@ func (s *Slack) start() {
 		for _, c := range commands {
 			name := c.Name()
 			if name == s.options.DefaultCommand {
-				s.defaultDefinition = s.defCommandDefinition(c, "", true)
+				s.defaultDefinition = s.defCommandDefinition(c, "")
 			} else {
-				def := s.defCommandDefinition(c, "", false)
+				def := s.defCommandDefinition(c, "")
 				if name == s.options.HelpCommand {
 					s.helpDefinition = def
 					client.Help(def)
