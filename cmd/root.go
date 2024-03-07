@@ -74,8 +74,8 @@ var slackOptions = bot.SlackOptions{
 	Permisssions:    envGet("SLACK_PERMISSIONS", "").(string),
 	Timeout:         envGet("SLACK_TIMEOUT", 5).(int),
 	PublicChannel:   envGet("SLACK_PUBLIC_CHANNEL", "").(string),
-	AttachmentColor: envGet("SLACK_ATTACHMENT_COLOR", "333333").(string),
-	ErrorColor:      envGet("SLACK_ERROR_COLOR", "FF00000").(string),
+	AttachmentColor: envGet("SLACK_ATTACHMENT_COLOR", "#555555").(string),
+	ErrorColor:      envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{

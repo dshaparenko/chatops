@@ -581,7 +581,7 @@ func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 
 func (s *Slack) reply(command string, m *slackMessageInfo,
 	replier *slacker.ResponseReplier, message string, attachments []*common.Attachment,
-	response common.Response, start *time.Time, error bool) (string, error) {
+	executor common.Executor, start *time.Time, error bool) (string, error) {
 
 	threadTS := m.threadTimestamp
 	text, _ := s.getEventTextCommand(command, m)
@@ -590,10 +590,16 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	visible := false
 	original := false
 	duration := false
-	if !utils.IsEmpty(response) {
-		visible = response.Visible()
-		original = response.Original()
-		duration = response.Duration()
+
+	if !utils.IsEmpty(executor) {
+
+		response := executor.Response()
+
+		if !utils.IsEmpty(response) {
+			visible = response.Visible()
+			original = response.Original()
+			duration = response.Duration()
+		}
 	}
 
 	atts := []slack.Attachment{}
@@ -891,10 +897,9 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 }
 
 func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
-	replier *slacker.ResponseReplier, params common.ExecuteParams, error bool) error {
+	replier *slacker.ResponseReplier, params common.ExecuteParams) error {
 
 	cName := cmd.Name()
-	response := cmd.Response()
 
 	user := &SlackUser{
 		id: m.userID,
@@ -914,7 +919,15 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 		return err
 	}
 
-	ts, err := s.reply(cName, m, replier, message, attachments, response, &start, false)
+	visible := false
+	error := false
+	response := executor.Response()
+	if !utils.IsEmpty(response) {
+		visible = response.Visible()
+		error = response.Error()
+	}
+
+	ts, err := s.reply(cName, m, replier, message, attachments, executor, &start, error)
 	if err != nil {
 		s.replyError(cName, m, replier, err, attachments)
 		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -929,7 +942,7 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 
 	msg := &SlackMessage{
 		id:              ts,
-		visible:         response.Visible(),
+		visible:         visible,
 		user:            user,
 		threadTimestamp: m.threadTimestamp,
 	}
@@ -1028,7 +1041,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string, error boo
 			}
 		}
 
-		err = s.postCommand(cmd, m, user, replier, eParams, error)
+		err = s.postCommand(cmd, m, user, replier, eParams)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
@@ -1194,7 +1207,7 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 				}
 			}
 
-			err = s.postCommand(cmd, m, user, replier, params, false)
+			err = s.postCommand(cmd, m, user, replier, params)
 			if err != nil {
 				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 				return

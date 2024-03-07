@@ -33,6 +33,7 @@ type Response interface {
 	Visible() bool  // visible for others, not only you
 	Duration() bool // show duration in replay
 	Original() bool // show orignal as quote
+	Error() bool    // show as error
 }
 
 type FieldType string
@@ -48,6 +49,7 @@ type Field struct {
 }
 
 type Executor interface {
+	Response() Response
 	After(message Message, channel Channel) error
 }
 
@@ -56,7 +58,6 @@ type Command interface {
 	Description() string
 	Params() []string
 	Aliases() []string
-	Response() Response
 	Fields() []Field
 	Execute(bot Bot, user User, params ExecuteParams) (Executor, string, []*Attachment, error)
 }

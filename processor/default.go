@@ -41,7 +41,6 @@ type DefaultConfig struct {
 type DefaultCommand struct {
 	name      string
 	path      string
-	visible   *bool
 	config    *DefaultConfig
 	processor *Default
 	logger    sreCommon.Logger
@@ -55,6 +54,8 @@ type DefaultPost struct {
 
 type DefaultExecutor struct {
 	command     *DefaultCommand
+	visible     *bool
+	error       *bool
 	attachments *sync.Map
 	posts       *sync.Map
 	bot         common.Bot
@@ -75,6 +76,43 @@ type Default struct {
 }
 
 // Default executor
+
+// common.Response
+
+func (de *DefaultExecutor) Error() bool {
+	if de.error != nil {
+		return *de.error
+	}
+	return false
+}
+
+func (de *DefaultExecutor) Visible() bool {
+	if de.visible != nil {
+		return *de.visible
+	}
+	if de.command.config != nil {
+		return de.command.config.Response.Visible
+	}
+	return false
+}
+
+func (de *DefaultExecutor) Duration() bool {
+	if de.command.config != nil {
+		return de.command.config.Response.Duration
+	}
+	return false
+}
+
+func (de *DefaultExecutor) Original() bool {
+	if de.command.config != nil {
+		return de.command.config.Response.Original
+	}
+	return false
+}
+
+func (de *DefaultExecutor) Response() common.Response {
+	return de
+}
 
 func (de *DefaultExecutor) filePath(dir, fileName string) string {
 	return fmt.Sprintf("%s%s%s", dir, string(os.PathSeparator), fileName)
@@ -221,10 +259,14 @@ func (de *DefaultExecutor) fSendMessage(message, channels string) error {
 }
 
 func (de *DefaultExecutor) fSetInvisible() string {
-	if de.command != nil {
-		v := false
-		de.command.visible = &v
-	}
+	v := false
+	de.visible = &v
+	return ""
+}
+
+func (de *DefaultExecutor) fSetError() string {
+	e := true
+	de.error = &e
 	return ""
 }
 
@@ -353,6 +395,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	funcs["sendMessage"] = executor.fSendMessage
 	funcs["sendMessageEx"] = executor.fSendMessageEx
 	funcs["setInvisible"] = executor.fSetInvisible
+	funcs["setError"] = executor.fSetError
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -435,36 +478,6 @@ func (dc *DefaultCommand) Aliases() []string {
 		return []string{}
 	}
 	return dc.config.Aliases
-}
-
-// common.Response
-
-func (dc *DefaultCommand) Visible() bool {
-	if dc.visible != nil {
-		return *dc.visible
-	}
-	if dc.config != nil {
-		return dc.config.Response.Visible
-	}
-	return false
-}
-
-func (dc *DefaultCommand) Duration() bool {
-	if dc.config != nil {
-		return dc.config.Response.Duration
-	}
-	return false
-}
-
-func (dc *DefaultCommand) Original() bool {
-	if dc.config != nil {
-		return dc.config.Response.Original
-	}
-	return false
-}
-
-func (dc *DefaultCommand) Response() common.Response {
-	return dc
 }
 
 func (dc *DefaultCommand) Fields() []common.Field {
