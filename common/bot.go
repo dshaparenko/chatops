@@ -10,6 +10,7 @@ type Bot interface {
 	Start(wg *sync.WaitGroup)
 	Name() string
 	Post(channel string, message string, attachments []*Attachment, parent Message) error
+	Delete(channel, message string) error
 }
 
 type Bots struct {

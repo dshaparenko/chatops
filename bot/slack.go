@@ -211,11 +211,13 @@ func (s *Slack) getEventTextCommand(command string, m *slackMessageInfo) (string
 	if m.typ == "slash_commands" {
 		text = strings.TrimSpace(text)
 	} else {
-		items := strings.SplitAfter(text, ">")
+		re := regexp.MustCompile(`<(.*?)>`)
+		text = re.ReplaceAllStringFunc(text, func(match string) string {
 
-		if len(items) > 1 {
-			text = strings.TrimSpace(items[1])
-		}
+			i := re.ReplaceAllString(match, "$1")
+
+			return i
+		})
 	}
 
 	arr := strings.Split(text, " ")
@@ -557,6 +559,19 @@ func (s *Slack) updateCounters(group, command, text, userID string) {
 	labels["user_id"] = userID
 
 	s.meter.Counter("requests", "Count of all requests", labels, "slack", "bot").Inc()
+}
+
+func (s *Slack) Delete(channel, message string) error {
+
+	_, _, err := s.client.SlackClient().DeleteMessage(channel, message)
+
+	if err != nil {
+		s.logger.Error("Failed to delete message: ", err)
+		return err
+	}
+
+	s.logger.Info("Message deleted successfully")
+	return nil
 }
 
 func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
