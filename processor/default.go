@@ -266,6 +266,22 @@ func (de *DefaultExecutor) fSetInvisible() string {
 	return ""
 }
 
+func (de *DefaultExecutor) fDeleteMessage(channelID, messageTimestamp string) string {
+
+	err := de.bot.Delete(channelID, messageTimestamp)
+
+	if err != nil {
+		e := true
+		de.error = &e
+		errorMessage := err.Error()
+
+		return errorMessage
+	}
+
+	return ""
+
+}
+
 func (de *DefaultExecutor) fSetError() string {
 	e := true
 	de.error = &e
@@ -419,6 +435,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	funcs["sendMessageEx"] = executor.fSendMessageEx
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
+	funcs["deleteMessage"] = executor.fDeleteMessage
 
 	funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
