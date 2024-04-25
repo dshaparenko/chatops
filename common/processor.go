@@ -59,6 +59,8 @@ type Command interface {
 	Params() []string
 	Aliases() []string
 	Fields() []Field
+	Priority() int
+	Wrapper() bool
 	Execute(bot Bot, user User, params ExecuteParams) (Executor, string, []*Attachment, error)
 }
 

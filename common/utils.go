@@ -90,3 +90,14 @@ func GetStringKeys(arr map[string]interface{}) []string {
 	}
 	return keys
 }
+
+func MergeInterfaceMaps(maps ...map[string]interface{}) map[string]interface{} {
+
+	r := make(map[string]interface{})
+	for _, m := range maps {
+		for k, v := range m {
+			r[k] = v
+		}
+	}
+	return r
+}

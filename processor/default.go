@@ -36,6 +36,8 @@ type DefaultConfig struct {
 	Aliases     []string
 	Response    DefaultReposne
 	Fields      []common.Field
+	Priority    int
+	Wrapper     bool
 }
 
 type DefaultCommand struct {
@@ -512,6 +514,20 @@ func (dc *DefaultCommand) Fields() []common.Field {
 		return dc.config.Fields
 	}
 	return []common.Field{}
+}
+
+func (dc *DefaultCommand) Priority() int {
+	if dc.config != nil {
+		return dc.config.Priority
+	}
+	return 0
+}
+
+func (dc *DefaultCommand) Wrapper() bool {
+	if dc.config != nil {
+		return dc.config.Wrapper
+	}
+	return false
 }
 
 func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params common.ExecuteParams) (common.Executor, string, []*common.Attachment, error) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,7 @@ type SlackFileBlock struct {
 type SlackButtonValue struct {
 	Timestamp string
 	Text      string
+	Wrapper   string
 }
 
 type slackMessageInfo struct {
@@ -126,6 +128,7 @@ type slackMessageInfo struct {
 	channelID       string
 	timestamp       string
 	threadTimestamp string
+	wrapper         string
 }
 
 const (
@@ -496,13 +499,13 @@ func (s *Slack) denyAccess(userID string, command string) bool {
 	return true
 }
 
-func (s *Slack) matchParam(text, param string) map[string]string {
+func (s *Slack) matchParam(text, param string) (map[string]string, []string) {
 
 	r := make(map[string]string)
 	re := regexp.MustCompile(param)
 	match := re.FindStringSubmatch(text)
 	if len(match) == 0 {
-		return r
+		return r, []string{}
 	}
 
 	names := re.SubexpNames()
@@ -511,35 +514,99 @@ func (s *Slack) matchParam(text, param string) map[string]string {
 			r[name] = match[i]
 		}
 	}
-	return r
+	return r, names
 }
 
-func (s *Slack) findParams(command string, params []string, m *slackMessageInfo) common.ExecuteParams {
+func (s *Slack) findCommand(group, command string) common.Command {
+
+	items := s.processors.Items()
+	for _, v := range items {
+		g := v.Name()
+		if g == group {
+			for _, v1 := range v.Commands() {
+				c := v1.Name()
+				if c == command {
+					return v1
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Slack) findParams(wrapper bool, command string, params []string, m *slackMessageInfo) (common.ExecuteParams, common.ExecuteParams, common.Command, string) {
 
 	r := make(common.ExecuteParams)
+	rw := make(common.ExecuteParams)
 
 	if utils.IsEmpty(params) {
-		return r
+		return r, rw, nil, ""
 	}
 
 	text, command := s.getEventTextCommand(command, m)
 	arr := strings.SplitAfter(text, command)
 	if len(arr) < 2 {
-		return r
+		return r, rw, nil, ""
 	}
 	text = strings.TrimSpace(arr[1])
 
+	var keys []string
+
 	for _, p := range params {
-		values := s.matchParam(text, p)
+		values, ks := s.matchParam(text, p)
 		for k, v := range values {
 			r[k] = v
 		}
 		if len(r) > 0 {
-			return r
+			keys = ks
+			break
 		}
 	}
+	if !wrapper {
+		return r, rw, nil, ""
+	}
 
-	return r
+	// wrapper code
+	// show app org params
+	if len(keys) > 0 {
+		keys := common.RemoveEmptyStrings(keys)
+
+		group := ""
+		cmd := ""
+		if len(keys) == 1 {
+			cmd = fmt.Sprintf("%v", r[keys[0]])
+		}
+		if len(keys) > 1 {
+			group = fmt.Sprintf("%v", r[keys[0]])
+			cmd = fmt.Sprintf("%v", r[keys[1]])
+		}
+
+		c := s.findCommand(group, cmd)
+		if c == nil {
+			return r, rw, nil, group
+		}
+		arr := strings.SplitAfter(text, c.Name())
+		if len(arr) < 2 {
+			return r, rw, c, group
+		}
+		text = strings.TrimSpace(arr[1])
+
+		r2 := make(common.ExecuteParams)
+
+		for _, p := range c.Params() {
+			values, _ := s.matchParam(text, p)
+			for k, v := range values {
+				r2[k] = v
+			}
+			if len(r2) > 0 {
+				break
+			}
+		}
+		r = common.MergeInterfaceMaps(r, r2)
+		return r, r2, c, group
+	}
+
+	return r, rw, nil, ""
 }
 
 func (s *Slack) updateCounters(group, command, text, userID string) {
@@ -874,6 +941,7 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	value := &SlackButtonValue{
 		Timestamp: m.timestamp,
 		Text:      m.text,
+		Wrapper:   m.wrapper,
 	}
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -1027,10 +1095,23 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 				return
 			}
 		}
+		wrapper := cmd.Wrapper()
+		eParams, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, cName, params, m)
 
-		eParams := s.findParams(cName, params, m)
-		if s.interactionNeeded(fields, eParams) {
-			shown, err := s.replyInteraction(cName, group, fields, eParams, m, user, replier)
+		rCmd := cName
+		rGroup := group
+		rFields := fields
+		rParams := eParams
+		if wrappedCmd != nil {
+			rCmd = wrappedCmd.Name()
+			rGroup = wrappedGroup
+			rFields = wrappedCmd.Fields()
+			rParams = wrappedParams
+			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
+		}
+
+		if s.interactionNeeded(rFields, rParams) {
+			shown, err := s.replyInteraction(rCmd, rGroup, rFields, rParams, m, user, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -1207,7 +1288,19 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 				}
 			}
 
-			err = s.postCommand(cmd, m, user, replier, params)
+			// do unwrap
+			rCmd := cmd
+			rParams := params
+			if !utils.IsEmpty(value.Wrapper) {
+				arr := strings.Split(value.Wrapper, "/")
+				if len(arr) == 2 {
+					rCmd = s.findCommand(arr[0], arr[1])
+					prs, _, _, _ := s.findParams(false, arr[1], rCmd.Params(), m)
+					rParams = common.MergeInterfaceMaps(prs, params)
+				}
+			}
+
+			err = s.postCommand(rCmd, m, user, replier, rParams)
 			if err != nil {
 				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 				return
@@ -1260,6 +1353,11 @@ func (s *Slack) start() {
 			continue
 		}
 		group = client.AddCommandGroup(pName)
+
+		sort.Slice(commands, func(i, j int) bool {
+			return commands[i].Priority() < commands[j].Priority()
+		})
+
 		for _, c := range commands {
 			group.AddCommand(s.defCommandDefinition(c, pName))
 			if len(c.Fields()) > 0 {
@@ -1278,6 +1376,11 @@ func (s *Slack) start() {
 		if !utils.IsEmpty(pName) {
 			continue
 		}
+
+		sort.Slice(commands, func(i, j int) bool {
+			return commands[i].Priority() < commands[j].Priority()
+		})
+
 		for _, c := range commands {
 			name := c.Name()
 			if name == s.options.DefaultCommand {
