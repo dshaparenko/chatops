@@ -211,16 +211,30 @@ func (s *Slack) Name() string {
 func (s *Slack) getEventTextCommand(command string, m *slackMessageInfo) (string, string) {
 
 	text := m.text
-	if m.typ == "slash_commands" {
+	switch m.typ {
+	case "slash_commands":
 		text = strings.TrimSpace(text)
-	} else {
-		re := regexp.MustCompile(`<(.*?)>`)
-		text = re.ReplaceAllStringFunc(text, func(match string) string {
+	case "app_mention":
+		// <@Uq131312> command <param1>  => @bot command param1 param2
+		items := strings.SplitN(text, ">", 2)
+		if len(items) > 1 {
+			text = strings.TrimSpace(items[1])
+		}
+	case "message":
+		// command <param1> param2 => command <param1> param2
+		// <@Uq131312> command <param1>  => @bot command param1 param2
+		items := strings.SplitN(text, ">", 2)
+		if len(items) > 1 && text[0] == '<' {
+			text = strings.TrimSpace(items[1])
+		}
+		/*
+			re := regexp.MustCompile(`<(.*?)>`)
+			text = re.ReplaceAllStringFunc(text, func(match string) string {
 
-			i := re.ReplaceAllString(match, "$1")
+				i := re.ReplaceAllString(match, "$1")
 
-			return i
-		})
+				return i
+			})*/
 	}
 
 	arr := strings.Split(text, " ")
@@ -1310,7 +1324,7 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 				arr := strings.Split(value.Wrapper, "/")
 				if len(arr) == 2 {
 					rCmd = s.findCommand(arr[0], arr[1])
-					prs, _, _, _ := s.findParams(false, arr[1], rCmd.Params(), m)
+					prs, _, _, _ := s.findParams(false, rCmd.Name(), rCmd.Params(), m)
 					rParams = common.MergeInterfaceMaps(prs, params)
 				}
 			}
@@ -1357,7 +1371,36 @@ func (s *Slack) start() {
 	s.helpDefinition = nil
 
 	items := s.processors.Items()
-	// add groups firstly
+
+	// add wrappers firstly
+	groupRoot := client.AddCommandGroup("")
+	for _, p := range items {
+
+		pName := p.Name()
+		commands := p.Commands()
+
+		if !utils.IsEmpty(pName) {
+			continue
+		}
+
+		sort.Slice(commands, func(i, j int) bool {
+			return commands[i].Priority() < commands[j].Priority()
+		})
+
+		for _, c := range commands {
+			if !c.Wrapper() {
+				continue
+			}
+
+			def := s.defCommandDefinition(c, "")
+			groupRoot.AddCommand(def)
+			if len(c.Fields()) > 0 {
+				client.AddInteraction(s.defInteractionDefinition(c, ""))
+			}
+		}
+	}
+
+	// add groups secondly
 	for _, p := range items {
 
 		pName := p.Name()
@@ -1381,8 +1424,7 @@ func (s *Slack) start() {
 		}
 	}
 
-	group := client.AddCommandGroup("")
-	// add root secondly
+	// add root thirdly
 	for _, p := range items {
 
 		pName := p.Name()
@@ -1397,7 +1439,12 @@ func (s *Slack) start() {
 		})
 
 		for _, c := range commands {
+
 			name := c.Name()
+			if c.Wrapper() {
+				continue
+			}
+
 			if name == s.options.DefaultCommand {
 				s.defaultDefinition = s.defCommandDefinition(c, "")
 			} else {
@@ -1406,7 +1453,7 @@ func (s *Slack) start() {
 					s.helpDefinition = def
 					client.Help(def)
 				}
-				group.AddCommand(def)
+				groupRoot.AddCommand(def)
 				if len(c.Fields()) > 0 {
 					client.AddInteraction(s.defInteractionDefinition(c, ""))
 				}
