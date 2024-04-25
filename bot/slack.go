@@ -588,18 +588,27 @@ func (s *Slack) findParams(wrapper bool, command string, params []string, m *sla
 		keys := common.RemoveEmptyStrings(keys)
 
 		group := ""
-		cmd := ""
+		var c common.Command
 		if len(keys) == 1 {
-			cmd = fmt.Sprintf("%v", r[keys[0]])
+			cmd := fmt.Sprintf("%v", r[keys[0]])
+			c = s.findCommand("", cmd)
 		}
 		if len(keys) > 1 {
-			group = fmt.Sprintf("%v", r[keys[0]])
-			cmd = fmt.Sprintf("%v", r[keys[1]])
+			v1 := fmt.Sprintf("%v", r[keys[0]])
+			v2 := fmt.Sprintf("%v", r[keys[1]])
+			c = s.findCommand("", v1)
+			if c != nil {
+				group = ""
+				delete(r, keys[0])
+				r[keys[1]] = c.Name()
+			} else {
+				group = v1
+				c = s.findCommand(group, v2)
+			}
 		}
 
-		c := s.findCommand(group, cmd)
 		if c == nil {
-			return r, rw, nil, group
+			return r, rw, nil, ""
 		}
 		arr := strings.SplitAfter(text, c.Name())
 		if len(arr) < 2 {
@@ -1131,9 +1140,23 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 		rGroup := group
 		rFields := fields
 		rParams := eParams
+
 		if wrappedCmd != nil {
+
 			rCmd = wrappedCmd.Name()
 			rGroup = wrappedGroup
+
+			wrapperGroupName := rCmd
+			if !utils.IsEmpty(rGroup) {
+				wrapperGroupName = fmt.Sprintf("%s/%s", rGroup, rCmd)
+			}
+
+			if s.denyAccess(m.userID, wrapperGroupName) {
+				s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
+				s.unsupportedCommandHandler(cc)
+				return
+			}
+
 			rFields = wrappedCmd.Fields()
 			rParams = wrappedParams
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
