@@ -533,6 +533,18 @@ func (s *Slack) matchParam(text, param string) (map[string]string, []string) {
 	return r, names
 }
 
+func (s *Slack) findCommandGroup(group string) bool {
+
+	items := s.processors.Items()
+	for _, v := range items {
+		g := v.Name()
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Slack) findCommand(group, command string) common.Command {
 
 	items := s.processors.Items()
@@ -596,6 +608,7 @@ func (s *Slack) findParams(wrapper bool, command string, params []string, m *sla
 		if len(keys) > 1 {
 			v1 := fmt.Sprintf("%v", r[keys[0]])
 			v2 := fmt.Sprintf("%v", r[keys[1]])
+
 			c = s.findCommand("", v1)
 			if c != nil {
 				group = ""
@@ -1396,7 +1409,6 @@ func (s *Slack) start() {
 	items := s.processors.Items()
 
 	// add wrappers firstly
-	groupRoot := client.AddCommandGroup("")
 	for _, p := range items {
 
 		pName := p.Name()
@@ -1416,7 +1428,7 @@ func (s *Slack) start() {
 			}
 
 			def := s.defCommandDefinition(c, "")
-			groupRoot.AddCommand(def)
+			client.AddCommand(def)
 			if len(c.Fields()) > 0 {
 				client.AddInteraction(s.defInteractionDefinition(c, ""))
 			}
@@ -1448,6 +1460,7 @@ func (s *Slack) start() {
 	}
 
 	// add root thirdly
+	groupRoot := client.AddCommandGroup("")
 	for _, p := range items {
 
 		pName := p.Name()
