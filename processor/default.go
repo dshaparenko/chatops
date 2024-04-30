@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -277,9 +278,7 @@ func (de *DefaultExecutor) fDeleteMessage(channelID, messageTimestamp string) st
 
 		return errorMessage
 	}
-
 	return ""
-
 }
 
 func (de *DefaultExecutor) fSetError() string {
@@ -418,7 +417,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 
 	content, err := utils.Content(path)
 	if err != nil {
-		return nil, fmt.Errorf("Default couldn't read template %s, error %s", path, err)
+		return nil, fmt.Errorf("Default couldn't read template %s, error: %s", path, err)
 	}
 
 	funcs := make(map[string]any)
@@ -436,7 +435,6 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
-
 	funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
 	funcs["getParams"] = executor.fGetParams
@@ -526,9 +524,104 @@ func (dc *DefaultCommand) Aliases() []string {
 	return dc.config.Aliases
 }
 
-func (dc *DefaultCommand) Fields() []common.Field {
+func (dc *DefaultCommand) Fields(evaluate bool) []common.Field {
+
 	if dc.config != nil {
-		return dc.config.Fields
+		if !evaluate {
+			return dc.config.Fields
+		}
+
+		fields := &sync.Map{}
+		wGroup := &sync.WaitGroup{}
+
+		for _, field := range dc.config.Fields {
+
+			fPath := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), field.Template)
+			if utils.FileExists(fPath) {
+
+				wGroup.Add(1)
+				go func(wg *sync.WaitGroup, path string, f common.Field, fs *sync.Map) {
+					defer wGroup.Done()
+
+					name := fmt.Sprintf("%s-%s", dc.name, f.Name)
+					content, err := utils.Content(path)
+					if err != nil {
+						dc.logger.Error("Default template %s command %s field %s error: %s", path, dc.name, f.Name, err)
+						return
+					}
+
+					tOpts := toolsRender.TemplateOptions{
+						Name:    fmt.Sprintf("default-internal-%s", name),
+						Content: string(content),
+					}
+
+					t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
+					if err != nil {
+						dc.logger.Error("Default template %s command %s field %s create error: %s", path, dc.name, f.Name, err)
+						return
+					}
+
+					b, err := t.RenderObject(f)
+					if err != nil {
+						dc.logger.Error("Default template %s command %s field %s render error: %s", path, dc.name, f.Name, err)
+						return
+					}
+
+					var fnew = common.Field{}
+					err = json.Unmarshal(b, &fnew)
+					if err != nil {
+						dc.logger.Error("Default template %s command %s unmarshall field %s error: %s", path, dc.name, f.Name, err)
+						return
+					}
+					fields.Store(f.Name, fnew)
+
+				}(wGroup, fPath, field, fields)
+			}
+		}
+		wGroup.Wait()
+
+		newFields := []common.Field{}
+		for _, field := range dc.config.Fields {
+
+			newField := common.Field{
+				Name:     field.Name,
+				Type:     field.Type,
+				Label:    field.Label,
+				Default:  field.Default,
+				Hint:     field.Hint,
+				Required: field.Required,
+				Values:   field.Values,
+				Template: field.Template,
+			}
+			r, ok := fields.Load(field.Name)
+			if ok {
+				f, ok := r.(common.Field)
+				if !ok {
+					continue
+				}
+				if f.Type != "" {
+					newField.Type = f.Type
+				}
+				if !utils.IsEmpty(f.Label) {
+					newField.Label = f.Label
+				}
+				if !utils.IsEmpty(f.Default) {
+					newField.Default = f.Default
+				}
+				if !utils.IsEmpty(f.Hint) {
+					newField.Hint = f.Hint
+				}
+				if f.Required && !newField.Required {
+					newField.Required = f.Required
+				}
+				if len(f.Values) != 0 {
+					newField.Values = f.Values
+				}
+			}
+			newFields = append(newFields, newField)
+		}
+
+		return newFields
 	}
 	return []common.Field{}
 }
@@ -612,7 +705,7 @@ func (d *Default) createCommand(name, path string) (*DefaultCommand, error) {
 		pConfig := filepath.Join(dFile, fmt.Sprintf("%s%s", name, d.options.ConfigExt))
 		config, err = d.loadConfig(pConfig)
 		if err != nil {
-			logger.Error("Default couldn't read config %s, error %s", path, err)
+			logger.Error("Default couldn't read config %s, error: %s", path, err)
 		}
 	}
 
@@ -626,7 +719,7 @@ func (d *Default) createCommand(name, path string) (*DefaultCommand, error) {
 
 	_, err = NewExecutorTemplate(name, path, &DefaultExecutor{}, dc.processor.observability)
 	if err != nil {
-		return nil, fmt.Errorf("Default file %s %s", path, err)
+		return nil, fmt.Errorf("Default file %s error: %s", path, err)
 	}
 
 	return dc, nil

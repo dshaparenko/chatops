@@ -101,3 +101,10 @@ func MergeInterfaceMaps(maps ...map[string]interface{}) map[string]interface{} {
 	}
 	return r
 }
+
+func IfDef(cond bool, v1, v2 interface{}) interface{} {
+	if cond {
+		return v1
+	}
+	return v2
+}

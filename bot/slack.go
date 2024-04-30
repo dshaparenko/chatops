@@ -807,6 +807,23 @@ func (s *Slack) getInteractionID(command, group string) string {
 	return fmt.Sprintf("%s-%s", command, group)
 }
 
+/*func (s *Slack) findParamValue(re *regexp.Regexp, name, text string) string {
+
+	if re == nil {
+		return text
+	}
+	match := re.FindStringSubmatch(text)
+	if len(match) != 0 {
+		names := re.SubexpNames()
+		for i, n := range names {
+			if i != 0 && n == name {
+				return match[i]
+			}
+		}
+	}
+	return text
+}*/
+
 func (s *Slack) replyInteraction(command, group string, fields []common.Field, params common.ExecuteParams,
 	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
@@ -1104,7 +1121,6 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 
 	cName := cmd.Name()
 	params := cmd.Params()
-	fields := cmd.Fields()
 
 	def := &slacker.CommandDefinition{
 		Command:     cName,
@@ -1151,7 +1167,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 
 		rCmd := cName
 		rGroup := group
-		rFields := fields
+		rFields := cmd.Fields(true)
 		rParams := eParams
 
 		if wrappedCmd != nil {
@@ -1170,7 +1186,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 				return
 			}
 
-			rFields = wrappedCmd.Fields()
+			rFields = wrappedCmd.Fields(true)
 			rParams = wrappedParams
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
@@ -1322,7 +1338,8 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 					for k2, v2 := range v1 {
 						name := strings.Replace(k2, fmt.Sprintf("%s-", interactionID), "", 1)
 
-						v := v2.Value
+						var v interface{}
+						v = v2.Value
 						switch v2.Type {
 						case "number_input":
 							v = v2.Value
@@ -1337,7 +1354,7 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 							for _, v2 := range v2.SelectedOptions {
 								arr = append(arr, v2.Value)
 							}
-							v = strings.Join(arr, ",")
+							v = arr
 						case "checkboxes":
 							arr := []string{}
 							for _, v2 := range v2.SelectedOptions {
@@ -1429,7 +1446,7 @@ func (s *Slack) start() {
 
 			def := s.defCommandDefinition(c, "")
 			client.AddCommand(def)
-			if len(c.Fields()) > 0 {
+			if len(c.Fields(false)) > 0 {
 				client.AddInteraction(s.defInteractionDefinition(c, ""))
 			}
 		}
@@ -1453,7 +1470,7 @@ func (s *Slack) start() {
 
 		for _, c := range commands {
 			group.AddCommand(s.defCommandDefinition(c, pName))
-			if len(c.Fields()) > 0 {
+			if len(c.Fields(false)) > 0 {
 				client.AddInteraction(s.defInteractionDefinition(c, pName))
 			}
 		}
@@ -1490,7 +1507,7 @@ func (s *Slack) start() {
 					client.Help(def)
 				}
 				groupRoot.AddCommand(def)
-				if len(c.Fields()) > 0 {
+				if len(c.Fields(false)) > 0 {
 					client.AddInteraction(s.defInteractionDefinition(c, ""))
 				}
 			}

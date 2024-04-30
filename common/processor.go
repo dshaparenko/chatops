@@ -46,6 +46,7 @@ type Field struct {
 	Hint     string
 	Required bool
 	Values   []string
+	Template string
 }
 
 type Executor interface {
@@ -58,7 +59,7 @@ type Command interface {
 	Description() string
 	Params() []string
 	Aliases() []string
-	Fields() []Field
+	Fields(evaluate bool) []Field
 	Priority() int
 	Wrapper() bool
 	Execute(bot Bot, user User, params ExecuteParams) (Executor, string, []*Attachment, error)
