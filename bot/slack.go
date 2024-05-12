@@ -572,7 +572,8 @@ func (s *Slack) findParams(wrapper bool, command string, params []string, m *sla
 	}
 
 	text, command := s.getEventTextCommand(command, m)
-	arr := strings.SplitAfter(text, command)
+	delimiter := command + " "
+	arr := strings.SplitN(text, delimiter, 2)
 	if len(arr) < 2 {
 		return r, rw, nil, ""
 	}
