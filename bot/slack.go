@@ -363,7 +363,7 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 		switch a.Type {
 		case common.AttachmentTypeImage:
 
-			// uploading image or file
+			// uploading image
 			f, err := s.uploadFileV1(a)
 			if err != nil {
 				return r, err
@@ -380,27 +380,17 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 			})
 		case common.AttachmentTypeFile:
 
-			// uploading image or file
-			f1, err := s.uploadFileV1(a)
-			if err != nil {
-				return r, err
-			}
-
-			f2, err := s.shareFilePublicURL(f1)
-			if err != nil {
-				return r, err
-			}
-
-			rf, err := s.addRemoteFile(a, f2)
+			// uploading file
+			/*f, err := s.uploadFileV1(a)
 			if err != nil {
 				return r, err
 			}
 
 			blks = append(blks, &SlackFileBlock{
 				Type:       slack.MBTFile,
-				ExternalID: rf.ID,
+				ExternalID: f.ID,
 				Source:     "remote",
-			})
+			})*/
 		default:
 
 			// title
@@ -1201,6 +1191,21 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 			}
 			if shown {
 				return
+			}
+		} else {
+			// fix string to appropriate value
+			for _, f := range rFields {
+
+				p := eParams[f.Name]
+				if p == nil {
+					continue
+				}
+
+				switch f.Type {
+				case common.FieldTypeMultiSelect:
+					v := fmt.Sprintf("%v", p)
+					eParams[f.Name] = common.RemoveEmptyStrings(strings.Split(v, ","))
+				}
 			}
 		}
 

@@ -23,7 +23,6 @@ import (
 
 var version = "unknown"
 var APPNAME = "CHATOPS"
-var appName = strings.ToLower(APPNAME)
 
 var logs = sreCommon.NewLogs()
 var metrics = sreCommon.NewMetrics()
@@ -86,30 +85,8 @@ var defaultOptions = processor.DefaultOptions{
 	Error:        envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
 }
 
-func getOnlyEnv(key string) string {
-	value, ok := os.LookupEnv(key)
-	if ok {
-		return value
-	}
-	return fmt.Sprintf("$%s", key)
-}
-
 func envGet(s string, def interface{}) interface{} {
 	return utils.EnvGet(fmt.Sprintf("%s_%s", APPNAME, s), def)
-}
-
-func envStringExpand(s string, def string) string {
-	snew := envGet(s, def).(string)
-	return os.Expand(snew, getOnlyEnv)
-}
-
-func envFileContentExpand(s string, def string) string {
-	snew := envGet(s, def).(string)
-	bytes, err := utils.Content(snew)
-	if err != nil {
-		return def
-	}
-	return os.Expand(string(bytes), getOnlyEnv)
 }
 
 func interceptSyscall() {
