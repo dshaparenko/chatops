@@ -1422,6 +1422,7 @@ func (s *Slack) start() {
 	options := []slacker.ClientOption{
 		slacker.WithDebug(s.options.Debug),
 		slacker.WithLogger(s),
+		slacker.WithBotMode(slacker.BotModeIgnoreNone),
 	}
 	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, options...)
 	client.UnsupportedCommandHandler(s.unsupportedCommandHandler)
