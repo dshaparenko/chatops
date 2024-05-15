@@ -227,14 +227,6 @@ func (s *Slack) getEventTextCommand(command string, m *slackMessageInfo) (string
 		if len(items) > 1 && text[0] == '<' {
 			text = strings.TrimSpace(items[1])
 		}
-		/*
-			re := regexp.MustCompile(`<(.*?)>`)
-			text = re.ReplaceAllStringFunc(text, func(match string) string {
-
-				i := re.ReplaceAllString(match, "$1")
-
-				return i
-			})*/
 	}
 
 	arr := strings.Split(text, " ")
@@ -319,6 +311,27 @@ func (s *Slack) uploadFileV1(att *common.Attachment) (*slack.File, error) {
 	return r, nil
 }
 
+func (s *Slack) uploadFileV2(att *common.Attachment) (*slack.FileSummary, error) {
+
+	botID := "unknown"
+	if s.auth != nil {
+		botID = s.auth.BotID
+	}
+	stamp := time.Now().Format("20060102T150405")
+	name := fmt.Sprintf("%s-%s", botID, stamp)
+	params := slack.UploadFileV2Parameters{
+		Filename: name,
+		FileSize: len(att.Data),
+		Reader:   bytes.NewReader(att.Data),
+		Channel:  s.options.PublicChannel,
+	}
+	r, err := s.client.SlackClient().UploadFileV2(params)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
 func (s *Slack) shareFilePublicURL(file *slack.File) (*slack.File, error) {
 
 	r, _, _, err := s.client.SlackClient().ShareFilePublicURL(file.ID)
@@ -364,7 +377,7 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 		case common.AttachmentTypeImage:
 
 			// uploading image
-			f, err := s.uploadFileV1(a)
+			f, err := s.uploadFileV2(a)
 			if err != nil {
 				return r, err
 			}
@@ -1158,7 +1171,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 
 		rCmd := cName
 		rGroup := group
-		rFields := cmd.Fields(true)
+		rFields := cmd.Fields(s, true)
 		rParams := eParams
 
 		if wrappedCmd != nil {
@@ -1177,7 +1190,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 				return
 			}
 
-			rFields = wrappedCmd.Fields(true)
+			rFields = wrappedCmd.Fields(s, true)
 			rParams = wrappedParams
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
@@ -1453,7 +1466,7 @@ func (s *Slack) start() {
 
 			def := s.defCommandDefinition(c, "")
 			client.AddCommand(def)
-			if len(c.Fields(false)) > 0 {
+			if len(c.Fields(s, false)) > 0 {
 				client.AddInteraction(s.defInteractionDefinition(c, ""))
 			}
 		}
@@ -1477,7 +1490,7 @@ func (s *Slack) start() {
 
 		for _, c := range commands {
 			group.AddCommand(s.defCommandDefinition(c, pName))
-			if len(c.Fields(false)) > 0 {
+			if len(c.Fields(s, false)) > 0 {
 				client.AddInteraction(s.defInteractionDefinition(c, pName))
 			}
 		}
@@ -1514,7 +1527,7 @@ func (s *Slack) start() {
 					client.Help(def)
 				}
 				groupRoot.AddCommand(def)
-				if len(c.Fields(false)) > 0 {
+				if len(c.Fields(s, false)) > 0 {
 					client.AddInteraction(s.defInteractionDefinition(c, ""))
 				}
 			}

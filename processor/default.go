@@ -197,6 +197,33 @@ func (de *DefaultExecutor) fAddAttachment(title, text string, data interface{}, 
 	return ""
 }
 
+func (de *DefaultExecutor) fAddFile(name string, data interface{}, typ string) string {
+
+	/*gid := utils.GoRoutineID()
+	var atts []*common.Attachment
+
+	r, ok := de.attachments.Load(gid)
+	if ok {
+		atts = r.([]*common.Attachment)
+	}
+
+	dBytes, ok := data.([]byte)
+	if !ok {
+		s := fmt.Sprintf("%v", data)
+		dBytes = []byte(s)
+	}
+
+	att := &common.Attachment{
+		Title: title,
+		Text:  text,
+		Data:  dBytes,
+		Type:  common.AttachmentType(typ),
+	}
+	atts = append(atts, att)
+	de.attachments.Store(gid, atts)*/
+	return ""
+}
+
 func (de *DefaultExecutor) fRunFile(path string, obj interface{}) (string, error) {
 	return de.template.TemplateRenderFile(path, obj)
 }
@@ -422,6 +449,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 
 	funcs := make(map[string]any)
 
+	funcs["addFile"] = executor.fAddFile
 	funcs["addAttachment"] = executor.fAddAttachment
 	funcs["createAttachment"] = executor.fCreateAttachment
 	funcs["runFile"] = executor.fRunFile
@@ -524,7 +552,7 @@ func (dc *DefaultCommand) Aliases() []string {
 	return dc.config.Aliases
 }
 
-func (dc *DefaultCommand) Fields(evaluate bool) []common.Field {
+func (dc *DefaultCommand) Fields(bot common.Bot, evaluate bool) []common.Field {
 
 	if dc.config != nil {
 		if !evaluate {
@@ -561,7 +589,11 @@ func (dc *DefaultCommand) Fields(evaluate bool) []common.Field {
 						return
 					}
 
-					b, err := t.RenderObject(f)
+					m := make(map[string]interface{})
+					m["bot"] = bot
+					m["field"] = f
+
+					b, err := t.RenderObject(m)
 					if err != nil {
 						dc.logger.Error("Default template %s command %s field %s render error: %s", path, dc.name, f.Name, err)
 						return

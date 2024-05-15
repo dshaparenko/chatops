@@ -59,7 +59,7 @@ type Command interface {
 	Description() string
 	Params() []string
 	Aliases() []string
-	Fields(evaluate bool) []Field
+	Fields(bot Bot, evaluate bool) []Field
 	Priority() int
 	Wrapper() bool
 	Execute(bot Bot, user User, params ExecuteParams) (Executor, string, []*Attachment, error)
@@ -79,6 +79,12 @@ const (
 	AttachmentTypeText    = "text"
 	AttachmentTypeImage   = "image"
 	AttachmentTypeFile    = "file"
+)
+
+const (
+	FileTypeUnknown = ""
+	FileTypeText    = "text"
+	FileTypeImage   = "image"
 )
 
 const (
