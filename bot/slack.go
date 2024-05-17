@@ -1135,12 +1135,8 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 	replier interface{}) error {
 
 	cName := cmd.Name()
-
-	var channel *SlackChannel
-	if !utils.IsEmpty(s.options.PublicChannel) {
-		channel = &SlackChannel{
-			id: s.options.PublicChannel,
-		}
+	channel := &SlackChannel{
+		id: m.channelID,
 	}
 
 	msg1 := &SlackMessage{
@@ -1531,8 +1527,9 @@ func (s *Slack) jobDefinition(cmd common.Command) *slacker.JobDefinition {
 	}
 	def.Handler = func(cc *slacker.JobContext) {
 
-		m := &slackMessageInfo{
-			channelID: "#sre-tsv",
+		m := &slackMessageInfo{}
+		if !utils.IsEmpty(s.options.PublicChannel) {
+			m.channelID = s.options.PublicChannel
 		}
 
 		replier := cc.Response()
