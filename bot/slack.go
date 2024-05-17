@@ -383,7 +383,7 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 		case common.AttachmentTypeImage:
 
 			// uploading image via V1 - important !!!
-			f, err := s.uploadFileV2(a)
+			f, err := s.uploadFileV1(a)
 			if err != nil {
 				return r, err
 			}
