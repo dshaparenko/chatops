@@ -39,6 +39,7 @@ type DefaultConfig struct {
 	Fields      []common.Field
 	Priority    int
 	Wrapper     bool
+	Schedule    string
 }
 
 type DefaultCommand struct {
@@ -62,10 +63,8 @@ type DefaultExecutor struct {
 	attachments *sync.Map
 	posts       *sync.Map
 	bot         common.Bot
-	user        common.User
 	params      common.ExecuteParams
 	message     common.Message
-	channel     common.Channel
 	template    *toolsRender.TextTemplate
 }
 
@@ -319,7 +318,10 @@ func (de *DefaultExecutor) fGetBot() interface{} {
 }
 
 func (de *DefaultExecutor) fGetUser() interface{} {
-	return de.user
+	if utils.IsEmpty(de.message) {
+		return nil
+	}
+	return de.message.User()
 }
 
 func (de *DefaultExecutor) fGetParams() interface{} {
@@ -331,7 +333,10 @@ func (de *DefaultExecutor) fGetMessage() interface{} {
 }
 
 func (de *DefaultExecutor) fGetChannel() interface{} {
-	return de.channel
+	if utils.IsEmpty(de.message) {
+		return nil
+	}
+	return de.message.Channel()
 }
 
 func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, error) {
@@ -369,7 +374,11 @@ func (de *DefaultExecutor) execute(obj interface{}) (string, []*common.Attachmen
 	}
 	labels["command"] = command.name
 	labels["bot"] = de.bot.Name()
-	labels["user_id"] = de.user.ID()
+
+	user := de.message.User()
+	if !utils.IsEmpty(user) {
+		labels["user_id"] = user.ID()
+	}
 
 	prefixes := []string{"default", "processor"}
 
@@ -394,7 +403,7 @@ func (de *DefaultExecutor) execute(obj interface{}) (string, []*common.Attachmen
 	return text, atts, nil
 }
 
-func (de *DefaultExecutor) After(message common.Message, channel common.Channel) error {
+func (de *DefaultExecutor) After(message common.Message) error {
 
 	gid := utils.GoRoutineID()
 	var posts []*DefaultPost
@@ -410,14 +419,11 @@ func (de *DefaultExecutor) After(message common.Message, channel common.Channel)
 			command := de.command
 			logger := command.logger
 
-			executor, err := NewExecutor(post.Name, post.Path, command, de.bot, de.user, de.params)
+			executor, err := NewExecutor(post.Name, post.Path, command, de.bot, message, de.params)
 			if err != nil {
 				logger.Error(err)
 				return
 			}
-
-			executor.message = message
-			executor.channel = channel
 
 			text, atts, err := executor.execute(post.Obj)
 			if err != nil {
@@ -426,6 +432,11 @@ func (de *DefaultExecutor) After(message common.Message, channel common.Channel)
 			}
 
 			if utils.IsEmpty(text) {
+				return
+			}
+
+			channel := message.Channel()
+			if utils.IsEmpty(channel) {
 				return
 			}
 
@@ -481,14 +492,14 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	return template, nil
 }
 
-func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, user common.User, params common.ExecuteParams) (*DefaultExecutor, error) {
+func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams) (*DefaultExecutor, error) {
 
 	executor := &DefaultExecutor{
 		command:     command,
 		attachments: &sync.Map{},
 		posts:       &sync.Map{},
 		bot:         bot,
-		user:        user,
+		message:     message,
 		params:      params,
 	}
 
@@ -552,10 +563,10 @@ func (dc *DefaultCommand) Aliases() []string {
 	return dc.config.Aliases
 }
 
-func (dc *DefaultCommand) Fields(bot common.Bot, evaluate bool) []common.Field {
+func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message) []common.Field {
 
 	if dc.config != nil {
-		if !evaluate {
+		if utils.IsEmpty(message) {
 			return dc.config.Fields
 		}
 
@@ -591,6 +602,9 @@ func (dc *DefaultCommand) Fields(bot common.Bot, evaluate bool) []common.Field {
 
 					m := make(map[string]interface{})
 					m["bot"] = bot
+					m["message"] = message
+					m["channel"] = message.Channel()
+					m["user"] = message.User()
 					m["field"] = f
 
 					b, err := t.RenderObject(m)
@@ -672,11 +686,18 @@ func (dc *DefaultCommand) Wrapper() bool {
 	return false
 }
 
-func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params common.ExecuteParams) (common.Executor, string, []*common.Attachment, error) {
+func (dc *DefaultCommand) Schedule() string {
+	if dc.config != nil {
+		return dc.config.Schedule
+	}
+	return ""
+}
+
+func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params common.ExecuteParams) (common.Executor, string, []*common.Attachment, error) {
 
 	name := dc.getNameWithGroup("_")
 
-	executor, err := NewExecutor(name, dc.path, dc, bot, user, params)
+	executor, err := NewExecutor(name, dc.path, dc, bot, message, params)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -684,16 +705,18 @@ func (dc *DefaultCommand) Execute(bot common.Bot, user common.User, params commo
 	m := make(map[string]interface{})
 	m["params"] = params
 	m["bot"] = bot
-	m["user"] = user
+	m["message"] = message
+	m["user"] = message.User()
+	m["channel"] = message.Channel()
 	m["name"] = dc.getNameWithGroup("/")
 
-	message, atts, err := executor.execute(m)
+	msg, atts, err := executor.execute(m)
 	if err != nil {
 		dc.logger.Error(err)
 		err = fmt.Errorf("%s", dc.processor.options.Error)
 		return nil, "", nil, err
 	}
-	return executor, message, atts, err
+	return executor, msg, atts, err
 }
 
 // Default

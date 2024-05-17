@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -42,15 +43,16 @@ type SlackUser struct {
 	timezone string
 }
 
+type SlackChannel struct {
+	id string
+}
+
 type SlackMessage struct {
 	id              string
 	visible         bool
-	user            *SlackUser
 	threadTimestamp string
-}
-
-type SlackChannel struct {
-	id string
+	user            *SlackUser
+	channel         *SlackChannel
 }
 
 type SlackFileResponseFull struct {
@@ -174,6 +176,12 @@ func (su *SlackUser) TimeZone() string {
 	return su.timezone
 }
 
+// SlackChannel
+
+func (sc *SlackChannel) ID() string {
+	return sc.id
+}
+
 // SlackMessage
 
 func (sm *SlackMessage) ID() string {
@@ -188,10 +196,8 @@ func (sm *SlackMessage) User() common.User {
 	return sm.user
 }
 
-// SlackChannel
-
-func (sc *SlackChannel) ID() string {
-	return sc.id
+func (sm *SlackMessage) Channel() common.Channel {
+	return sm.channel
 }
 
 // Slack
@@ -376,7 +382,7 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 		switch a.Type {
 		case common.AttachmentTypeImage:
 
-			// uploading image
+			// uploading image via V1 - important !!!
 			f, err := s.uploadFileV2(a)
 			if err != nil {
 				return r, err
@@ -702,7 +708,7 @@ func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 }
 
 func (s *Slack) reply(command string, m *slackMessageInfo,
-	replier *slacker.ResponseReplier, message string, attachments []*common.Attachment,
+	replier interface{}, message string, attachments []*common.Attachment,
 	executor common.Executor, start *time.Time, error bool) (string, error) {
 
 	threadTS := m.threadTimestamp
@@ -770,13 +776,20 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 
 	if original {
 
+		if utils.IsEmpty(text) {
+			text = command
+		}
+
+		if !utils.IsEmpty(m.userID) {
+			quote = append(quote, []*SlackRichTextQuoteElement{
+				{Type: "user", UserID: m.userID},
+			}...)
+		}
 		quote = append(quote, []*SlackRichTextQuoteElement{
-			{Type: "user", UserID: m.userID},
 			{Type: "text", Text: fmt.Sprintf(" %s", text)},
 		}...)
 
 		elements := []slack.RichTextElement{
-			// add quote
 			&SlackRichTextQuote{Type: slack.RTEQuote, Elements: quote},
 		}
 		blocks = append(blocks, slack.NewRichTextBlock("quote", elements...))
@@ -789,15 +802,31 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 		))
 	}
 
-	ts, err := replier.PostBlocks(m.channelID, blocks, opts...)
-	if err != nil {
-		return "", err
+	// ResponseReplier => commands
+	rr, ok := replier.(*slacker.ResponseReplier)
+	if ok {
+		ts, err := rr.PostBlocks(m.channelID, blocks, opts...)
+		if err != nil {
+			return "", err
+		}
+		return ts, nil
 	}
-	return ts, nil
+
+	// ResponseWriter => jobs
+	rw, ok := replier.(*slacker.ResponseWriter)
+	if ok {
+		ts, err := rw.PostBlocks(m.channelID, blocks, opts...)
+		if err != nil {
+			return "", err
+		}
+		return ts, nil
+	}
+
+	return "", errors.New("replier is not defined")
 }
 
 func (s *Slack) replyError(command string, m *slackMessageInfo,
-	replier *slacker.ResponseReplier, err error, attachments []*common.Attachment) (string, error) {
+	replier interface{}, err error, attachments []*common.Attachment) (string, error) {
 
 	s.logger.Error("Slack reply error: %s", err)
 	return s.reply(command, m, replier, err.Error(), attachments, nil, nil, true)
@@ -1036,8 +1065,8 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	return true, nil
 }
 
-func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
-	replier *slacker.ResponseReplier, params common.ExecuteParams) error {
+func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
+	replier interface{}, params common.ExecuteParams) error {
 
 	cName := cmd.Name()
 
@@ -1049,10 +1078,21 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 		user.timezone = u.TZ
 	}
 
+	channel := &SlackChannel{
+		id: m.channelID,
+	}
+
+	msg1 := &SlackMessage{
+		id:              m.timestamp,
+		user:            user,
+		threadTimestamp: m.threadTimestamp,
+		channel:         channel,
+	}
+
 	s.addReaction(m, s.options.ReactionDoing)
 
 	start := time.Now()
-	executor, message, attachments, err := cmd.Execute(s, user, params)
+	executor, message, attachments, err := cmd.Execute(s, msg1, params)
 	if err != nil {
 		s.replyError(cName, m, replier, err, attachments)
 		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -1080,17 +1120,63 @@ func (s *Slack) postCommand(cmd common.Command, m *slackMessageInfo, u *slack.Us
 		s.addRemoveReactions(m, s.options.ReactionDone, s.options.ReactionDoing)
 	}
 
-	msg := &SlackMessage{
+	msg2 := &SlackMessage{
 		id:              ts,
 		visible:         visible,
 		user:            user,
 		threadTimestamp: m.threadTimestamp,
+		channel:         channel,
 	}
+
+	return executor.After(msg2)
+}
+
+func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
+	replier interface{}) error {
+
+	cName := cmd.Name()
 
 	channel := &SlackChannel{
 		id: m.channelID,
 	}
-	return executor.After(msg, channel)
+
+	msg1 := &SlackMessage{
+		id:              m.timestamp,
+		threadTimestamp: m.threadTimestamp,
+		channel:         channel,
+	}
+
+	start := time.Now()
+	executor, message, attachments, err := cmd.Execute(s, msg1, nil)
+	if err != nil {
+		return err
+	}
+
+	if utils.IsEmpty(strings.TrimSpace(message)) {
+		return nil
+	}
+
+	visible := false
+	error := false
+	response := executor.Response()
+	if !utils.IsEmpty(response) {
+		visible = response.Visible()
+		error = response.Error()
+	}
+
+	ts, err := s.reply(cName, m, replier, message, attachments, executor, &start, error)
+	if err != nil {
+		return err
+	}
+
+	msg2 := &SlackMessage{
+		id:              ts,
+		visible:         visible,
+		threadTimestamp: m.threadTimestamp,
+		channel:         channel,
+	}
+
+	return executor.After(msg2)
 }
 
 func (s *Slack) interactionNeeded(fields []common.Field, params map[string]interface{}) bool {
@@ -1121,7 +1207,7 @@ func (s *Slack) interactionNeeded(fields []common.Field, params map[string]inter
 	return len(required) > len(arr)
 }
 
-func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
+func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
 	params := cmd.Params()
@@ -1169,9 +1255,26 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 		wrapper := cmd.Wrapper()
 		eParams, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, cName, params, m)
 
+		mChannel := &SlackChannel{
+			id: m.channelID,
+		}
+
+		mUser := &SlackUser{
+			id:       m.userID,
+			name:     user.Profile.DisplayName,
+			timezone: user.TZ,
+		}
+
+		msg := &SlackMessage{
+			id:              m.timestamp,
+			user:            mUser,
+			threadTimestamp: m.threadTimestamp,
+			channel:         mChannel,
+		}
+
 		rCmd := cName
 		rGroup := group
-		rFields := cmd.Fields(s, true)
+		rFields := cmd.Fields(s, msg)
 		rParams := eParams
 
 		if wrappedCmd != nil {
@@ -1190,7 +1293,7 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 				return
 			}
 
-			rFields = wrappedCmd.Fields(s, true)
+			rFields = wrappedCmd.Fields(s, msg)
 			rParams = wrappedParams
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
@@ -1222,12 +1325,11 @@ func (s *Slack) defCommandDefinition(cmd common.Command, group string) *slacker.
 			}
 		}
 
-		err = s.postCommand(cmd, m, user, replier, eParams)
+		err = s.postUserCommand(cmd, m, user, replier, eParams)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
 		}
-
 	}
 	return def
 }
@@ -1291,7 +1393,7 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 	return err
 }
 
-func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slacker.InteractionDefinition {
+func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker.InteractionDefinition {
 
 	cName := cmd.Name()
 	interactionID := s.getInteractionID(cName, group)
@@ -1401,7 +1503,7 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 				}
 			}
 
-			err = s.postCommand(rCmd, m, user, replier, rParams)
+			err = s.postUserCommand(rCmd, m, user, replier, rParams)
 			if err != nil {
 				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 				return
@@ -1409,6 +1511,33 @@ func (s *Slack) defInteractionDefinition(cmd common.Command, group string) *slac
 
 		default:
 			s.addReaction(m, s.options.ReactionFailed)
+		}
+	}
+	return def
+}
+
+func (s *Slack) jobDefinition(cmd common.Command) *slacker.JobDefinition {
+
+	cName := cmd.Name()
+
+	def := &slacker.JobDefinition{
+		CronExpression: cmd.Schedule(),
+		Name:           cName,
+		Description:    cmd.Description(),
+		HideHelp:       true,
+	}
+	def.Handler = func(cc *slacker.JobContext) {
+
+		m := &slackMessageInfo{
+			channelID: "#sre-tsv",
+		}
+
+		replier := cc.Response()
+
+		err := s.postJobCommand(cmd, m, replier)
+		if err != nil {
+			s.logger.Error("Slack couldn't post from job %s: %s", cName, err)
+			return
 		}
 	}
 	return def
@@ -1460,14 +1589,20 @@ func (s *Slack) start() {
 		})
 
 		for _, c := range commands {
+
 			if !c.Wrapper() {
 				continue
 			}
 
-			def := s.defCommandDefinition(c, "")
+			schedule := c.Schedule()
+			if !utils.IsEmpty(schedule) {
+				continue
+			}
+
+			def := s.commandDefinition(c, "")
 			client.AddCommand(def)
-			if len(c.Fields(s, false)) > 0 {
-				client.AddInteraction(s.defInteractionDefinition(c, ""))
+			if len(c.Fields(s, nil)) > 0 {
+				client.AddInteraction(s.interactionDefinition(c, ""))
 			}
 		}
 	}
@@ -1489,9 +1624,19 @@ func (s *Slack) start() {
 		})
 
 		for _, c := range commands {
-			group.AddCommand(s.defCommandDefinition(c, pName))
-			if len(c.Fields(s, false)) > 0 {
-				client.AddInteraction(s.defInteractionDefinition(c, pName))
+
+			if !c.Wrapper() {
+				continue
+			}
+
+			schedule := c.Schedule()
+			if !utils.IsEmpty(schedule) {
+				continue
+			}
+
+			group.AddCommand(s.commandDefinition(c, pName))
+			if len(c.Fields(s, nil)) > 0 {
+				client.AddInteraction(s.interactionDefinition(c, pName))
 			}
 		}
 	}
@@ -1514,23 +1659,48 @@ func (s *Slack) start() {
 		for _, c := range commands {
 
 			name := c.Name()
+
 			if c.Wrapper() {
 				continue
 			}
 
+			schedule := c.Schedule()
+			if !utils.IsEmpty(schedule) {
+				continue
+			}
+
 			if name == s.options.DefaultCommand {
-				s.defaultDefinition = s.defCommandDefinition(c, "")
+				s.defaultDefinition = s.commandDefinition(c, "")
 			} else {
-				def := s.defCommandDefinition(c, "")
+				def := s.commandDefinition(c, "")
 				if name == s.options.HelpCommand {
 					s.helpDefinition = def
 					client.Help(def)
 				}
 				groupRoot.AddCommand(def)
-				if len(c.Fields(s, false)) > 0 {
-					client.AddInteraction(s.defInteractionDefinition(c, ""))
+				if len(c.Fields(s, nil)) > 0 {
+					client.AddInteraction(s.interactionDefinition(c, ""))
 				}
 			}
+		}
+	}
+
+	// add jobs
+	for _, p := range items {
+
+		commands := p.Commands()
+
+		sort.Slice(commands, func(i, j int) bool {
+			return commands[i].Priority() < commands[j].Priority()
+		})
+
+		for _, c := range commands {
+
+			schedule := c.Schedule()
+			if utils.IsEmpty(schedule) {
+				continue
+			}
+			client.AddJob(s.jobDefinition(c))
 		}
 	}
 

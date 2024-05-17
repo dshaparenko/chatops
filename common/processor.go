@@ -8,14 +8,15 @@ type User interface {
 	TimeZone() string
 }
 
+type Channel interface {
+	ID() string
+}
+
 type Message interface {
 	ID() string
 	Visible() bool
 	User() User
-}
-
-type Channel interface {
-	ID() string
+	Channel() Channel
 }
 
 type AttachmentType string
@@ -51,7 +52,7 @@ type Field struct {
 
 type Executor interface {
 	Response() Response
-	After(message Message, channel Channel) error
+	After(message Message) error
 }
 
 type Command interface {
@@ -59,10 +60,11 @@ type Command interface {
 	Description() string
 	Params() []string
 	Aliases() []string
-	Fields(bot Bot, evaluate bool) []Field
+	Fields(bot Bot, message Message) []Field
 	Priority() int
 	Wrapper() bool
-	Execute(bot Bot, user User, params ExecuteParams) (Executor, string, []*Attachment, error)
+	Schedule() string
+	Execute(bot Bot, message Message, params ExecuteParams) (Executor, string, []*Attachment, error)
 }
 
 type Processor interface {
