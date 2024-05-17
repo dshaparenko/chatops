@@ -1136,8 +1136,11 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 
 	cName := cmd.Name()
 
-	channel := &SlackChannel{
-		id: m.channelID,
+	var channel *SlackChannel
+	if !utils.IsEmpty(s.options.PublicChannel) {
+		channel = &SlackChannel{
+			id: s.options.PublicChannel,
+		}
 	}
 
 	msg1 := &SlackMessage{
@@ -1594,11 +1597,6 @@ func (s *Slack) start() {
 				continue
 			}
 
-			schedule := c.Schedule()
-			if !utils.IsEmpty(schedule) {
-				continue
-			}
-
 			def := s.commandDefinition(c, "")
 			client.AddCommand(def)
 			if len(c.Fields(s, nil)) > 0 {
@@ -1629,11 +1627,6 @@ func (s *Slack) start() {
 				continue
 			}
 
-			schedule := c.Schedule()
-			if !utils.IsEmpty(schedule) {
-				continue
-			}
-
 			group.AddCommand(s.commandDefinition(c, pName))
 			if len(c.Fields(s, nil)) > 0 {
 				client.AddInteraction(s.interactionDefinition(c, pName))
@@ -1661,11 +1654,6 @@ func (s *Slack) start() {
 			name := c.Name()
 
 			if c.Wrapper() {
-				continue
-			}
-
-			schedule := c.Schedule()
-			if !utils.IsEmpty(schedule) {
 				continue
 			}
 
