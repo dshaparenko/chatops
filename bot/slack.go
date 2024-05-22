@@ -200,6 +200,9 @@ func (sm *SlackMessage) Channel() common.Channel {
 	return sm.channel
 }
 
+func (sm *SlackMessage) ParentID() string {
+	return sm.threadTimestamp
+}
 // Slack
 
 func (s *Slack) Name() string {
@@ -878,9 +881,9 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 		if !utils.IsEmpty(params[field.Name]) {
 			def = fmt.Sprintf("%v", params[field.Name])
 		}
-		if utils.IsEmpty(def) {
-			def = field.Default
-		}
+		// if utils.IsEmpty(def) { // not needed anymore, now params are filled with defaults before this point
+		// 	def = field.Default
+		// }
 
 		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
 		var h *slack.TextBlockObject
@@ -1274,7 +1277,8 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		rCmd := cName
 		rGroup := group
 		rFields := cmd.Fields(s, msg)
-		rParams := eParams
+		eParams = cmd.ParamsSetDefaults(eParams, rFields) //fill eParams with defaults
+		rParams := eParams // just point to eParams, enough for nonwrapped cmds, they should be the same
 
 		if wrappedCmd != nil {
 
@@ -1293,7 +1297,8 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			}
 
 			rFields = wrappedCmd.Fields(s, msg)
-			rParams = wrappedParams
+			eParams = cmd.ParamsSetDefaults(eParams, rFields) //fill eParams with defaults for wrapped cmd as well, now it holds outer and inner params with defaults set
+			rParams = cmd.ParamsSetDefaults(wrappedParams, rFields) // new rParams only for wrapped cmd (inner params), not pointing to eParams anymore
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
 
