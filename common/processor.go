@@ -17,6 +17,7 @@ type Message interface {
 	Visible() bool
 	User() User
 	Channel() Channel
+	ParentID() string
 }
 
 type AttachmentType string
@@ -61,6 +62,7 @@ type Command interface {
 	Params() []string
 	Aliases() []string
 	Fields(bot Bot, message Message) []Field
+	ParamsSetDefaults(params map[string]interface{}, fields []Field) map[string]interface{}
 	Priority() int
 	Wrapper() bool
 	Schedule() string

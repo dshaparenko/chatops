@@ -13,6 +13,7 @@ import (
 	sreCommon "github.com/devopsext/sre/common"
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
+	"github.com/jinzhu/copier"
 	"gopkg.in/yaml.v2"
 )
 
@@ -670,6 +671,19 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message) []commo
 		return newFields
 	}
 	return []common.Field{}
+}
+
+func (dc *DefaultCommand) ParamsSetDefaults(eParams map[string]interface{}, fields []common.Field) map[string]interface{} {
+	newParams := make(map[string]interface{})
+	copier.Copy(&newParams,eParams)
+	for _, field := range fields {
+		if !utils.IsEmpty(eParams[field.Name]) {
+			newParams[field.Name] = eParams[field.Name]
+		} else if !utils.IsEmpty(field.Default) {
+			newParams[field.Name] = fmt.Sprintf("%v", field.Default)
+		}
+	}
+	return newParams
 }
 
 func (dc *DefaultCommand) Priority() int {
