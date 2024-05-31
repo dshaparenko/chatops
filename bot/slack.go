@@ -200,6 +200,9 @@ func (sm *SlackMessage) Channel() common.Channel {
 	return sm.channel
 }
 
+func (sm *SlackMessage) ParentID() string {
+	return sm.threadTimestamp
+}
 // Slack
 
 func (s *Slack) Name() string {

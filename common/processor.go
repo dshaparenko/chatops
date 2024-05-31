@@ -17,6 +17,7 @@ type Message interface {
 	Visible() bool
 	User() User
 	Channel() Channel
+	ParentID() string
 }
 
 type AttachmentType string
