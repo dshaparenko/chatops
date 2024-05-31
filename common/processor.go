@@ -62,7 +62,6 @@ type Command interface {
 	Params() []string
 	Aliases() []string
 	Fields(bot Bot, message Message) []Field
-	ParamsSetDefaults(params map[string]interface{}, fields []Field) map[string]interface{}
 	Priority() int
 	Wrapper() bool
 	Schedule() string
