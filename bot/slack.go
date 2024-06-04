@@ -203,6 +203,7 @@ func (sm *SlackMessage) Channel() common.Channel {
 func (sm *SlackMessage) ParentID() string {
 	return sm.threadTimestamp
 }
+
 // Slack
 
 func (s *Slack) Name() string {
@@ -1381,6 +1382,7 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 
 	options := []slack.MsgOption{}
 	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionAttachments(atts...))
+	options = append(options, slack.MsgOptionDisableLinkUnfurl())
 
 	if !utils.IsEmpty(threadTS) {
 		options = append(options, slack.MsgOptionTS(threadTS))
