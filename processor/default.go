@@ -40,6 +40,7 @@ type DefaultConfig struct {
 	Priority    int
 	Wrapper     bool
 	Schedule    string
+	Channel     string
 }
 
 type DefaultCommand struct {
@@ -689,6 +690,13 @@ func (dc *DefaultCommand) Wrapper() bool {
 func (dc *DefaultCommand) Schedule() string {
 	if dc.config != nil {
 		return dc.config.Schedule
+	}
+	return ""
+}
+
+func (dc *DefaultCommand) Channel() string {
+	if dc.config != nil {
+		return dc.config.Channel
 	}
 	return ""
 }

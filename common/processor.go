@@ -65,6 +65,7 @@ type Command interface {
 	Priority() int
 	Wrapper() bool
 	Schedule() string
+	Channel() string
 	Execute(bot Bot, message Message, params ExecuteParams) (Executor, string, []*Attachment, error)
 }
 
