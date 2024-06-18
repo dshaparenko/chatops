@@ -1536,6 +1536,9 @@ func (s *Slack) jobDefinition(cmd common.Command) *slacker.JobDefinition {
 		if !utils.IsEmpty(s.options.PublicChannel) {
 			m.channelID = s.options.PublicChannel
 		}
+		if !utils.IsEmpty(cmd.Channel()) {
+			m.channelID = cmd.Channel()
+		}
 
 		replier := cc.Response()
 
