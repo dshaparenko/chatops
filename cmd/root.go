@@ -80,6 +80,7 @@ var slackOptions = bot.SlackOptions{
 var defaultOptions = processor.DefaultOptions{
 	CommandsDir:  envGet("DEFAULT_COMMANDS_DIR", "").(string),
 	TemplatesDir: envGet("DEFAULT_TEMPLATES_DIR", "").(string),
+	RunbooksDir:  envGet("DEFAULT_RUNBOOKS_DIR", "").(string),
 	CommandExt:   envGet("DEFAULT_COMMAND_EXT", ".tpl").(string),
 	ConfigExt:    envGet("DEFAULT_CONFIG_EXT", ".yml").(string),
 	Error:        envGet("DEFAULT_ERROR", "Couldn't execute command").(string),

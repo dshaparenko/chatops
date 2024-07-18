@@ -12,6 +12,7 @@ chatops
 .start.template
 .commands/
 .templates/
+.runbooks/
 .temp.file
 .incident.json
 .image.png

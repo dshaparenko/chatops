@@ -20,6 +20,7 @@ import (
 type DefaultOptions struct {
 	CommandsDir  string
 	TemplatesDir string
+	RunbooksDir  string
 	CommandExt   string
 	ConfigExt    string
 	Description  string
@@ -32,7 +33,7 @@ type DefaultReposne struct {
 	Duration bool
 }
 
-type DefaultConfig struct {
+type DefaultCommandConfig struct {
 	Description string
 	Params      []string
 	Aliases     []string
@@ -46,7 +47,7 @@ type DefaultConfig struct {
 type DefaultCommand struct {
 	name      string
 	path      string
-	config    *DefaultConfig
+	config    *DefaultCommandConfig
 	processor *Default
 	logger    sreCommon.Logger
 }
@@ -78,8 +79,18 @@ type Default struct {
 	observability *common.Observability
 }
 
-// Default executor
+type DefaultRunbookConfig struct {
+}
 
+type DefaultRunbook struct {
+	name      string
+	path      string
+	config    *DefaultRunbookConfig
+	processor *Default
+	logger    sreCommon.Logger
+}
+
+// Default executor
 // common.Response
 
 func (de *DefaultExecutor) Error() bool {
@@ -236,6 +247,12 @@ func (de *DefaultExecutor) fRunCommand(fileName string, obj interface{}) (string
 func (de *DefaultExecutor) fRunTemplate(fileName string, obj interface{}) (string, error) {
 	s := de.filePath(de.command.processor.options.TemplatesDir, fileName)
 	return de.template.TemplateRenderFile(s, obj)
+}
+
+func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) string {
+	s := de.filePath(de.command.processor.options.RunbooksDir, fileName)
+	return s
+	//return de.template.TemplateRenderFile(s, obj)
 }
 
 func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[string]interface{}) (string, error) {
@@ -467,6 +484,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	funcs["runFile"] = executor.fRunFile
 	funcs["runCommand"] = executor.fRunCommand
 	funcs["runTemplate"] = executor.fRunTemplate
+	funcs["runBook"] = executor.fRunBook
 	funcs["postFile"] = executor.fPostFile
 	funcs["postCommand"] = executor.fPostCommand
 	funcs["postTemplate"] = executor.fPostTemplate
@@ -675,7 +693,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message) []commo
 
 func (dc *DefaultCommand) ParamsSetDefaults(eParams map[string]interface{}, fields []common.Field) map[string]interface{} {
 	newParams := make(map[string]interface{})
-	copier.Copy(&newParams,eParams)
+	copier.Copy(&newParams, eParams)
 	for _, field := range fields {
 		if !utils.IsEmpty(eParams[field.Name]) {
 			newParams[field.Name] = eParams[field.Name]
@@ -743,7 +761,7 @@ func (d *Default) Commands() []common.Command {
 	return d.commands
 }
 
-func (d *Default) loadConfig(path string) (*DefaultConfig, error) {
+func (d *Default) loadConfig(path string) (*DefaultCommandConfig, error) {
 
 	if !utils.FileExists(path) {
 		return nil, nil
@@ -754,7 +772,7 @@ func (d *Default) loadConfig(path string) (*DefaultConfig, error) {
 		return nil, err
 	}
 
-	var v DefaultConfig
+	var v DefaultCommandConfig
 	err = yaml.Unmarshal(bytes, &v)
 	if err != nil {
 		return nil, err
@@ -767,7 +785,7 @@ func (d *Default) createCommand(name, path string) (*DefaultCommand, error) {
 	logger := d.observability.Logs()
 
 	var err error
-	var config *DefaultConfig
+	var config *DefaultCommandConfig
 	if !utils.IsEmpty(d.options.ConfigExt) {
 
 		dFile := filepath.Dir(path)
