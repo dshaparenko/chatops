@@ -203,6 +203,7 @@ func (sm *SlackMessage) Channel() common.Channel {
 func (sm *SlackMessage) ParentID() string {
 	return sm.threadTimestamp
 }
+
 // Slack
 
 func (s *Slack) Name() string {
@@ -881,9 +882,9 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 		if !utils.IsEmpty(params[field.Name]) {
 			def = fmt.Sprintf("%v", params[field.Name])
 		}
-		// if utils.IsEmpty(def) { // not needed anymore, now params are filled with defaults before this point
-		// 	def = field.Default
-		// }
+		if utils.IsEmpty(def) {
+			def = field.Default
+		}
 
 		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
 		var h *slack.TextBlockObject
@@ -1277,8 +1278,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		rCmd := cName
 		rGroup := group
 		rFields := cmd.Fields(s, msg)
-		eParams = cmd.ParamsSetDefaults(eParams, rFields) //fill eParams with defaults
-		rParams := eParams // just point to eParams, enough for nonwrapped cmds, they should be the same
+		rParams := eParams
 
 		if wrappedCmd != nil {
 
@@ -1297,8 +1297,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			}
 
 			rFields = wrappedCmd.Fields(s, msg)
-			eParams = cmd.ParamsSetDefaults(eParams, rFields) //fill eParams with defaults for wrapped cmd as well, now it holds outer and inner params with defaults set
-			rParams = cmd.ParamsSetDefaults(wrappedParams, rFields) // new rParams only for wrapped cmd (inner params), not pointing to eParams anymore
+			rParams = wrappedParams
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
 
@@ -1383,6 +1382,7 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 
 	options := []slack.MsgOption{}
 	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionAttachments(atts...))
+	options = append(options, slack.MsgOptionDisableLinkUnfurl())
 
 	if !utils.IsEmpty(threadTS) {
 		options = append(options, slack.MsgOptionTS(threadTS))
@@ -1535,6 +1535,9 @@ func (s *Slack) jobDefinition(cmd common.Command) *slacker.JobDefinition {
 		m := &slackMessageInfo{}
 		if !utils.IsEmpty(s.options.PublicChannel) {
 			m.channelID = s.options.PublicChannel
+		}
+		if !utils.IsEmpty(cmd.Channel()) {
+			m.channelID = cmd.Channel()
 		}
 
 		replier := cc.Response()

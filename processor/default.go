@@ -13,7 +13,6 @@ import (
 	sreCommon "github.com/devopsext/sre/common"
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
-	"github.com/jinzhu/copier"
 	"gopkg.in/yaml.v2"
 )
 
@@ -42,6 +41,7 @@ type DefaultCommandConfig struct {
 	Priority    int
 	Wrapper     bool
 	Schedule    string
+	Channel     string
 }
 
 type DefaultCommand struct {
@@ -691,19 +691,6 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message) []commo
 	return []common.Field{}
 }
 
-func (dc *DefaultCommand) ParamsSetDefaults(eParams map[string]interface{}, fields []common.Field) map[string]interface{} {
-	newParams := make(map[string]interface{})
-	copier.Copy(&newParams, eParams)
-	for _, field := range fields {
-		if !utils.IsEmpty(eParams[field.Name]) {
-			newParams[field.Name] = eParams[field.Name]
-		} else if !utils.IsEmpty(field.Default) {
-			newParams[field.Name] = fmt.Sprintf("%v", field.Default)
-		}
-	}
-	return newParams
-}
-
 func (dc *DefaultCommand) Priority() int {
 	if dc.config != nil {
 		return dc.config.Priority
@@ -721,6 +708,13 @@ func (dc *DefaultCommand) Wrapper() bool {
 func (dc *DefaultCommand) Schedule() string {
 	if dc.config != nil {
 		return dc.config.Schedule
+	}
+	return ""
+}
+
+func (dc *DefaultCommand) Channel() string {
+	if dc.config != nil {
+		return dc.config.Channel
 	}
 	return ""
 }
