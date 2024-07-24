@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/template"
 
+	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
 	"gopkg.in/yaml.v2"
 )
@@ -107,4 +108,36 @@ func IfDef(cond bool, v1, v2 interface{}) interface{} {
 		return v1
 	}
 	return v2
+}
+
+func RenderTemplate(tpl *toolsRender.TextTemplate, def string, obj interface{}) (string, error) {
+
+	if tpl == nil {
+		return def, nil
+	}
+
+	b, err := tpl.RenderObject(obj)
+	if err != nil {
+		return def, err
+	}
+	r := strings.TrimSpace(string(b))
+	// simplify <no value> => empty string
+	return strings.ReplaceAll(r, "<no value>", ""), nil
+}
+
+func Render(def string, obj interface{}, observability *Observability) string {
+
+	logger := observability.Logs()
+	tpl, err := toolsRender.NewTextTemplate(toolsRender.TemplateOptions{Content: def}, observability)
+	if err != nil {
+		logger.Error(err)
+		return def
+	}
+
+	s, err := RenderTemplate(tpl, def, obj)
+	if err != nil {
+		logger.Error(err)
+		return def
+	}
+	return s
 }

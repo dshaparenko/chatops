@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,8 +14,82 @@ import (
 	sreCommon "github.com/devopsext/sre/common"
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
+	"golang.org/x/sync/errgroup"
+
 	"gopkg.in/yaml.v2"
 )
+
+type DefaultRunbookStepResult struct {
+	ID           string
+	Text         string
+	Attachements []*common.Attachment
+	Error        error
+}
+
+type DefaultRunbookStepResultFunc = func(result *DefaultRunbookStepResult, message common.Message) error
+
+type DefaultRunbookStep struct {
+	ID       string
+	Step     string
+	Template string
+	Command  string
+	Disabled bool
+	Pipeline []*DefaultRunbookStep
+}
+
+type DefaultRunbookConfig struct {
+	Description string
+	Params      []string
+	Pipeline    []*DefaultRunbookStep
+}
+
+type DefaultRunbook struct {
+	name    string
+	path    string
+	command *DefaultCommand
+	config  *DefaultRunbookConfig
+}
+
+type DefaultPostKind = int
+
+const (
+	DefaultPostKindTemplate = 0
+	DefaultPostKindCommand  = 1
+	DefaultPostKindRunbook  = 2
+)
+
+type DefaultPost struct {
+	Name string
+	Path string
+	Obj  interface{}
+	Kind DefaultPostKind
+}
+
+type DefaultExecutor struct {
+	command     *DefaultCommand
+	visible     *bool
+	error       *bool
+	attachments *sync.Map
+	posts       *sync.Map
+	bot         common.Bot
+	params      common.ExecuteParams
+	message     common.Message
+	template    *toolsRender.TextTemplate
+}
+
+type DefaultRunbookTemplateExecutor = DefaultExecutor
+
+type DefaultRunbookCommandExecutor struct {
+	//
+}
+
+type DefaultRunbookExecutor struct {
+	templateExecutor *DefaultRunbookTemplateExecutor
+	commandExecutor  *DefaultRunbookCommandExecutor
+	runbook          *DefaultRunbook
+	step             *DefaultRunbookStep
+	description      string
+}
 
 type DefaultOptions struct {
 	CommandsDir  string
@@ -52,24 +127,6 @@ type DefaultCommand struct {
 	logger    sreCommon.Logger
 }
 
-type DefaultPost struct {
-	Name string
-	Path string
-	Obj  interface{}
-}
-
-type DefaultExecutor struct {
-	command     *DefaultCommand
-	visible     *bool
-	error       *bool
-	attachments *sync.Map
-	posts       *sync.Map
-	bot         common.Bot
-	params      common.ExecuteParams
-	message     common.Message
-	template    *toolsRender.TextTemplate
-}
-
 type Default struct {
 	name          string
 	options       DefaultOptions
@@ -77,17 +134,6 @@ type Default struct {
 	commands      []common.Command
 	meter         sreCommon.Meter
 	observability *common.Observability
-}
-
-type DefaultRunbookConfig struct {
-}
-
-type DefaultRunbook struct {
-	name      string
-	path      string
-	config    *DefaultRunbookConfig
-	processor *Default
-	logger    sreCommon.Logger
 }
 
 // Default executor
@@ -132,7 +178,7 @@ func (de *DefaultExecutor) filePath(dir, fileName string) string {
 	return fmt.Sprintf("%s%s%s", dir, string(os.PathSeparator), fileName)
 }
 
-func (de *DefaultExecutor) fPostFile(path string, obj interface{}) string {
+func (de *DefaultExecutor) fPostFile(path string, obj interface{}, kind DefaultPostKind) string {
 
 	gid := utils.GoRoutineID()
 	var posts []*DefaultPost
@@ -149,6 +195,7 @@ func (de *DefaultExecutor) fPostFile(path string, obj interface{}) string {
 		Name: filepath.Base(name),
 		Path: path,
 		Obj:  obj,
+		Kind: kind,
 	})
 	de.posts.Store(gid, posts)
 	return ""
@@ -156,12 +203,17 @@ func (de *DefaultExecutor) fPostFile(path string, obj interface{}) string {
 
 func (de *DefaultExecutor) fPostCommand(fileName string, obj interface{}) string {
 	s := de.filePath(de.command.processor.options.CommandsDir, fileName)
-	return de.fPostFile(s, obj)
+	return de.fPostFile(s, obj, DefaultPostKindCommand)
 }
 
 func (de *DefaultExecutor) fPostTemplate(fileName string, obj interface{}) string {
 	s := de.filePath(de.command.processor.options.TemplatesDir, fileName)
-	return de.fPostFile(s, obj)
+	return de.fPostFile(s, obj, DefaultPostKindTemplate)
+}
+
+func (de *DefaultExecutor) fPostBook(fileName string, obj interface{}) string {
+	s := de.filePath(de.command.processor.options.RunbooksDir, fileName)
+	return de.fPostFile(s, obj, DefaultPostKindRunbook)
 }
 
 func (de *DefaultExecutor) fCreateAttachment(title, text string, data interface{}, typ string) interface{} {
@@ -209,29 +261,6 @@ func (de *DefaultExecutor) fAddAttachment(title, text string, data interface{}, 
 }
 
 func (de *DefaultExecutor) fAddFile(name string, data interface{}, typ string) string {
-
-	/*gid := utils.GoRoutineID()
-	var atts []*common.Attachment
-
-	r, ok := de.attachments.Load(gid)
-	if ok {
-		atts = r.([]*common.Attachment)
-	}
-
-	dBytes, ok := data.([]byte)
-	if !ok {
-		s := fmt.Sprintf("%v", data)
-		dBytes = []byte(s)
-	}
-
-	att := &common.Attachment{
-		Title: title,
-		Text:  text,
-		Data:  dBytes,
-		Type:  common.AttachmentType(typ),
-	}
-	atts = append(atts, att)
-	de.attachments.Store(gid, atts)*/
 	return ""
 }
 
@@ -249,10 +278,22 @@ func (de *DefaultExecutor) fRunTemplate(fileName string, obj interface{}) (strin
 	return de.template.TemplateRenderFile(s, obj)
 }
 
-func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) string {
+func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) (string, error) {
+
 	s := de.filePath(de.command.processor.options.RunbooksDir, fileName)
-	return s
-	//return de.template.TemplateRenderFile(s, obj)
+	ext := filepath.Ext(fileName)
+	name := strings.TrimSuffix(fileName, ext)
+
+	rb, err := NewRunbook(name, s, de.command)
+	if err != nil {
+		return "", err
+	}
+
+	err = rb.Execute(de.bot, de.message, obj, de.runbookAfterCallback)
+	if err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[string]interface{}) (string, error) {
@@ -291,7 +332,7 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 
 	var err error
 	for _, ch := range chnls {
-		e := de.bot.Post(ch, message, atts, nil)
+		e := de.bot.Post(ch, message, atts, nil, de.Response())
 		if e != nil {
 			de.command.logger.Error(e)
 			err = e
@@ -378,7 +419,7 @@ func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment
 	return strings.TrimSpace(string(b)), atts, nil
 }
 
-func (de *DefaultExecutor) execute(obj interface{}) (string, []*common.Attachment, error) {
+func (de *DefaultExecutor) execute(id string, obj interface{}) (string, []*common.Attachment, error) {
 
 	t1 := time.Now()
 
@@ -407,7 +448,22 @@ func (de *DefaultExecutor) execute(obj interface{}) (string, []*common.Attachmen
 	timeCounter := processor.meter.Counter("time", "Sum of all time executions", labels, prefixes...)
 
 	name := command.getNameWithGroup("/")
-	logger.Debug("Default is executing command %s with params %v...", name, de.params)
+
+	ids := ""
+	var params interface{}
+
+	if obj != nil {
+		m, ok := obj.(map[string]interface{})
+		if ok {
+			ids = id
+			params = m["params"]
+			if !utils.IsEmpty(ids) {
+				ids = fmt.Sprintf("id=%s ", ids)
+			}
+		}
+	}
+
+	logger.Debug("Default is executing command %s %swith params %v...", name, ids, params)
 
 	text, atts, err := de.render(obj)
 	if err != nil {
@@ -418,7 +474,85 @@ func (de *DefaultExecutor) execute(obj interface{}) (string, []*common.Attachmen
 	elapsed := time.Since(t1).Milliseconds()
 	timeCounter.Add(int(elapsed))
 
+	logger.Debug("Default is executed command %s %swith params %v in %s", name, ids, params, time.Since(t1))
+
 	return text, atts, nil
+}
+
+func (de *DefaultExecutor) defaultAfter(post *DefaultPost, message common.Message) error {
+
+	var text string
+	var atts []*common.Attachment
+
+	executor, err := NewExecutor(post.Name, post.Path, de.command, de.bot, message, de.params)
+	if err != nil {
+		return err
+	}
+
+	text, atts, err = executor.execute("", post.Obj)
+	if err != nil {
+		return err
+	}
+
+	var channel common.Channel
+	if !utils.IsEmpty(message) {
+		channel = message.Channel()
+	}
+	if utils.IsEmpty(channel) {
+		return nil
+	}
+
+	if utils.IsEmpty(text) {
+		return nil
+	}
+	err = de.bot.Post(channel.ID(), text, atts, message, de.Response())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, message common.Message) error {
+
+	if ret == nil {
+		return nil
+	}
+
+	var channel common.Channel
+	if !utils.IsEmpty(message) {
+		channel = message.Channel()
+	}
+	if utils.IsEmpty(channel) {
+		return nil
+	}
+
+	if ret.Error != nil {
+		return ret.Error
+	}
+
+	if utils.IsEmpty(ret.Text) {
+		return nil
+	}
+
+	err := de.bot.Post(channel.ID(), ret.Text, ret.Attachements, message, de.Response())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (de *DefaultExecutor) runbookAfter(post *DefaultPost, message common.Message) error {
+
+	rb, err := NewRunbook(post.Name, post.Path, de.command)
+	if err != nil {
+		return err
+	}
+
+	err = rb.Execute(de.bot, message, post.Obj, de.runbookAfterCallback)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (de *DefaultExecutor) After(message common.Message) error {
@@ -434,47 +568,28 @@ func (de *DefaultExecutor) After(message common.Message) error {
 	for _, p := range posts {
 		go func(post *DefaultPost) {
 
-			command := de.command
-			logger := command.logger
+			var err error
+			logger := de.command.logger
 
-			executor, err := NewExecutor(post.Name, post.Path, command, de.bot, message, de.params)
+			switch post.Kind {
+			case DefaultPostKindTemplate, DefaultPostKindCommand:
+
+				err = de.defaultAfter(post, message)
+			case DefaultPostKindRunbook:
+
+				err = de.runbookAfter(post, message)
+			}
+
 			if err != nil {
 				logger.Error(err)
 				return
 			}
-
-			text, atts, err := executor.execute(post.Obj)
-			if err != nil {
-				logger.Error(err)
-				return
-			}
-
-			if utils.IsEmpty(text) {
-				return
-			}
-
-			channel := message.Channel()
-			if utils.IsEmpty(channel) {
-				return
-			}
-
-			err = de.bot.Post(channel.ID(), text, atts, message)
-			if err != nil {
-				logger.Error(err)
-				return
-			}
-
 		}(p)
 	}
 	return nil
 }
 
-func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, observability *common.Observability) (*toolsRender.TextTemplate, error) {
-
-	content, err := utils.Content(path)
-	if err != nil {
-		return nil, fmt.Errorf("Default couldn't read template %s, error: %s", path, err)
-	}
+func NewExecutorTemplate(name string, content string, executor *DefaultExecutor, observability *common.Observability) (*toolsRender.TextTemplate, error) {
 
 	funcs := make(map[string]any)
 
@@ -488,6 +603,7 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 	funcs["postFile"] = executor.fPostFile
 	funcs["postCommand"] = executor.fPostCommand
 	funcs["postTemplate"] = executor.fPostTemplate
+	funcs["postBook"] = executor.fPostBook
 	funcs["sendMessage"] = executor.fSendMessage
 	funcs["sendMessageEx"] = executor.fSendMessageEx
 	funcs["setInvisible"] = executor.fSetInvisible
@@ -513,6 +629,11 @@ func NewExecutorTemplate(name string, path string, executor *DefaultExecutor, ob
 
 func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams) (*DefaultExecutor, error) {
 
+	content, err := utils.Content(path)
+	if err != nil {
+		return nil, fmt.Errorf("Default couldn't read template %s, error: %s", path, err)
+	}
+
 	executor := &DefaultExecutor{
 		command:     command,
 		attachments: &sync.Map{},
@@ -522,12 +643,176 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 		params:      params,
 	}
 
-	template, err := NewExecutorTemplate(name, path, executor, command.processor.observability)
+	template, err := NewExecutorTemplate(name, string(content), executor, command.processor.observability)
 	if err != nil {
 		return nil, err
 	}
 	executor.template = template
 	return executor, nil
+}
+
+// Default Runbook Command Executor
+
+// Default Runbook Executor
+
+func (dre *DefaultRunbookExecutor) execute(id string, obj interface{}) *DefaultRunbookStepResult {
+
+	var text string
+	var atts []*common.Attachment
+	var err error
+
+	if dre.templateExecutor != nil {
+		text, atts, err = dre.templateExecutor.execute(id, obj)
+	}
+	if dre.commandExecutor != nil {
+		//
+	}
+	return &DefaultRunbookStepResult{
+		Text:         text,
+		Attachements: atts,
+		Error:        err,
+	}
+}
+
+func NewRunbookExecutor(rb *DefaultRunbook, step *DefaultRunbookStep, bot common.Bot, message common.Message, params common.ExecuteParams) (*DefaultRunbookExecutor, error) {
+
+	observability := rb.command.processor.observability
+
+	rExecutor := &DefaultRunbookExecutor{
+		runbook:     rb,
+		step:        step,
+		description: common.Render(step.Step, params, observability),
+	}
+
+	if !utils.IsEmpty(step.Template) {
+
+		tExecutor := &DefaultRunbookTemplateExecutor{
+			command:     rb.command,
+			attachments: &sync.Map{},
+			posts:       &sync.Map{},
+			bot:         bot,
+			message:     message,
+			params:      params,
+		}
+
+		name := fmt.Sprintf("runbook-%s", rb.name)
+		template, err := NewExecutorTemplate(name, step.Template, tExecutor, observability)
+		if err != nil {
+			return nil, err
+		}
+		tExecutor.template = template
+		rExecutor.templateExecutor = tExecutor
+	}
+
+	if utils.IsEmpty(step.Command) {
+
+		cExecutor := &DefaultRunbookCommandExecutor{
+			//
+		}
+		rExecutor.commandExecutor = cExecutor
+	}
+	return rExecutor, nil
+}
+
+// Default Runbook
+
+func (dr *DefaultRunbook) countPipelineSteps(pl []*DefaultRunbookStep) int {
+
+	r := 0
+	for _, v := range pl {
+		if !v.Disabled {
+			r++
+		}
+	}
+	return r
+}
+
+func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot common.Bot, message common.Message, params map[string]interface{}, callback DefaultRunbookStepResultFunc) error {
+
+	if dr.countPipelineSteps(pl) == 0 {
+		return nil
+	}
+
+	g := &errgroup.Group{}
+
+	for i, step := range pl {
+
+		id1 := strconv.Itoa(i)
+		if !utils.IsEmpty(step.ID) {
+			id1 = step.ID
+		}
+		if !utils.IsEmpty(id) {
+			id1 = fmt.Sprintf("%s.%s", id, id1)
+		}
+		if step.Disabled {
+			continue
+		}
+
+		g.Go(func() error {
+
+			executor, err := NewRunbookExecutor(dr, step, bot, message, params)
+			if err != nil {
+				return err
+			}
+			r1 := executor.execute(id1, params)
+			if r1 != nil && r1.Error != nil {
+				return r1.Error
+			}
+			r1.ID = id1
+			err = callback(r1, message)
+			if err != nil {
+				return err
+			}
+			err = dr.runPipeline(id1, step.Pipeline, bot, message, params, callback)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+	return g.Wait()
+}
+
+func (dr *DefaultRunbook) Execute(bot common.Bot, message common.Message, obj interface{}, callback DefaultRunbookStepResultFunc) error {
+
+	if dr.countPipelineSteps(dr.config.Pipeline) == 0 {
+		dr.command.logger.Debug("Default runbook %s has no pipepline steps. Skipped", dr.name)
+	}
+
+	dr.command.logger.Debug("Default is processing runbook %s...", dr.name)
+
+	params := make(common.ExecuteParams)
+	ps, ok := obj.(map[string]interface{})
+	if ok {
+		params = ps
+	}
+	return dr.runPipeline("", dr.config.Pipeline, bot, message, params, callback)
+}
+
+func NewRunbook(name, path string, command *DefaultCommand) (*DefaultRunbook, error) {
+
+	if !utils.FileExists(path) {
+		return nil, fmt.Errorf("Default couldn't find runbook %s", path)
+	}
+
+	bytes, err := utils.Content(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var config DefaultRunbookConfig
+	err = yaml.Unmarshal(bytes, &config)
+	if err != nil {
+		return nil, err
+	}
+
+	rb := &DefaultRunbook{
+		name:    name,
+		path:    path,
+		command: command,
+		config:  &config,
+	}
+	return rb, nil
 }
 
 // Default command
@@ -721,7 +1006,7 @@ func (dc *DefaultCommand) Channel() string {
 
 func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params common.ExecuteParams) (common.Executor, string, []*common.Attachment, error) {
 
-	name := dc.getNameWithGroup("_")
+	name := dc.getNameWithGroup("-")
 
 	executor, err := NewExecutor(name, dc.path, dc, bot, message, params)
 	if err != nil {
@@ -736,7 +1021,7 @@ func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params
 	m["channel"] = message.Channel()
 	m["name"] = dc.getNameWithGroup("/")
 
-	msg, atts, err := executor.execute(m)
+	msg, atts, err := executor.execute("", m)
 	if err != nil {
 		dc.logger.Error(err)
 		err = fmt.Errorf("%s", dc.processor.options.Error)

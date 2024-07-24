@@ -120,6 +120,7 @@ type SlackFileBlock struct {
 type SlackButtonValue struct {
 	Timestamp string
 	Text      string
+	Wrapped   string
 	Wrapper   string
 }
 
@@ -130,6 +131,7 @@ type slackMessageInfo struct {
 	channelID       string
 	timestamp       string
 	threadTimestamp string
+	wrapped         string
 	wrapper         string
 }
 
@@ -575,7 +577,7 @@ func (s *Slack) findCommand(group, command string) common.Command {
 	return nil
 }
 
-func (s *Slack) findParams(wrapper bool, command string, params []string, m *slackMessageInfo) (common.ExecuteParams, common.ExecuteParams, common.Command, string) {
+func (s *Slack) findParams(wrapper bool, group, input string, params []string, m *slackMessageInfo) (common.ExecuteParams, common.ExecuteParams, common.Command, string) {
 
 	r := make(common.ExecuteParams)
 	rw := make(common.ExecuteParams)
@@ -584,81 +586,146 @@ func (s *Slack) findParams(wrapper bool, command string, params []string, m *sla
 		return r, rw, nil, ""
 	}
 
-	text, command := s.getEventTextCommand(command, m)
-	delimiter := command + " "
-	arr := strings.SplitN(text, delimiter, 2)
-	if len(arr) < 2 {
+	// group command param1 param2
+	// command param1 param2
+
+	// find group, command, params
+
+	text, _ := s.getEventTextCommand(input, m)
+	delim := " "
+	arr := strings.Split(text, delim)
+
+	if len(arr) == 0 {
 		return r, rw, nil, ""
 	}
-	text = strings.TrimSpace(arr[1])
 
-	var keys []string
+	if !wrapper {
 
-	for _, p := range params {
-		values, ks := s.matchParam(text, p)
+		cs := ""
+		ps := ""
+
+		if !utils.IsEmpty(group) {
+			if len(arr) > 1 {
+				cs = strings.TrimSpace(arr[1])
+			}
+			if len(arr) > 2 {
+				ps = strings.TrimSpace(strings.Join(arr[2:], delim))
+			}
+		} else {
+			if len(arr) > 0 {
+				cs = strings.TrimSpace(arr[0])
+			}
+			if len(arr) > 1 {
+				ps = strings.TrimSpace(strings.Join(arr[1:], delim))
+			}
+		}
+
+		if utils.IsEmpty(cs) || utils.IsEmpty(ps) {
+			return r, rw, nil, ""
+		}
+
+		for _, p := range params {
+
+			values, _ := s.matchParam(ps, p)
+			for k, v := range values {
+				r[k] = v
+			}
+			if len(r) > 0 {
+				break
+			}
+		}
+		return r, rw, nil, ""
+	}
+
+	// wrappergroup wrapper group command param1 param2
+	// wrappergroup wrapper command param1 param2
+	// wrapper command param1 param2
+
+	// find wrapper group, command, params
+
+	wgr := ""
+	wr := ""
+	ps := ""
+
+	if len(arr) > 0 {
+		wgr = strings.TrimSpace(arr[0])
+	}
+	if len(arr) > 1 {
+		wr = strings.TrimSpace(arr[1])
+	}
+	if len(arr) > 2 {
+		ps = strings.TrimSpace(strings.Join(arr[2:], delim))
+	}
+
+	rwc := s.findCommand(wgr, wr)
+	if rwc == nil {
+		if len(arr) > 1 {
+			ps = strings.TrimSpace(strings.Join(arr[1:], delim))
+		}
+		wr = wgr
+		wgr = ""
+		rwc = s.findCommand(wgr, wr)
+	}
+
+	if rwc == nil {
+		return r, rw, nil, ""
+	}
+
+	// find wrapped group, command, params
+
+	arr = strings.Split(ps, delim)
+	gr := ""
+	cs := ""
+	psw := ps
+	ps = ""
+
+	if len(arr) > 0 {
+		gr = strings.TrimSpace(arr[0])
+	}
+	if len(arr) > 1 {
+		cs = strings.TrimSpace(arr[1])
+	}
+	if len(arr) > 2 {
+		ps = strings.TrimSpace(strings.Join(arr[2:], delim))
+	}
+
+	rc := s.findCommand(gr, cs)
+	if rc == nil {
+		if len(arr) > 1 {
+			ps = strings.TrimSpace(strings.Join(arr[1:], delim))
+		}
+		cs = gr
+		psw = cs
+		gr = ""
+		rc = s.findCommand(gr, cs)
+	}
+
+	if rc == nil {
+		return r, rw, nil, ""
+	}
+
+	for _, p := range rwc.Params() {
+
+		values, _ := s.matchParam(psw, p)
 		for k, v := range values {
 			r[k] = v
 		}
 		if len(r) > 0 {
-			keys = ks
 			break
 		}
 	}
-	if !wrapper {
-		return r, rw, nil, ""
+
+	for _, p := range rc.Params() {
+
+		values, _ := s.matchParam(ps, p)
+		for k, v := range values {
+			rw[k] = v
+		}
+		if len(rw) > 0 {
+			break
+		}
 	}
-
-	// wrapper code
-	// show app org params
-	if len(keys) > 0 {
-		keys := common.RemoveEmptyStrings(keys)
-
-		group := ""
-		var c common.Command
-		if len(keys) == 1 {
-			cmd := fmt.Sprintf("%v", r[keys[0]])
-			c = s.findCommand("", cmd)
-		}
-		if len(keys) > 1 {
-			v1 := fmt.Sprintf("%v", r[keys[0]])
-			v2 := fmt.Sprintf("%v", r[keys[1]])
-
-			c = s.findCommand("", v1)
-			if c != nil {
-				group = ""
-				delete(r, keys[0])
-				r[keys[1]] = c.Name()
-			} else {
-				group = v1
-				c = s.findCommand(group, v2)
-			}
-		}
-
-		if c == nil {
-			return r, rw, nil, ""
-		}
-		arr := strings.SplitAfter(text, c.Name())
-		if len(arr) < 2 {
-			return r, rw, c, group
-		}
-		text = strings.TrimSpace(arr[1])
-
-		r2 := make(common.ExecuteParams)
-
-		for _, p := range c.Params() {
-			values, _ := s.matchParam(text, p)
-			for k, v := range values {
-				r2[k] = v
-			}
-			if len(r2) > 0 {
-				break
-			}
-		}
-		r = common.MergeInterfaceMaps(r, r2)
-		return r, r2, c, group
-	}
-
-	return r, rw, nil, ""
+	return r, rw, rc, gr
 }
 
 func (s *Slack) updateCounters(group, command, text, userID string) {
@@ -1046,6 +1113,7 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	value := &SlackButtonValue{
 		Timestamp: m.timestamp,
 		Text:      m.text,
+		Wrapped:   m.wrapped,
 		Wrapper:   m.wrapper,
 	}
 	data, err := json.Marshal(value)
@@ -1111,11 +1179,16 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 		error = response.Error()
 	}
 
-	ts, err := s.reply(cName, m, replier, message, attachments, executor, &start, error)
-	if err != nil {
-		s.replyError(cName, m, replier, err, attachments)
-		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
-		return err
+	ts := ""
+	if !utils.IsEmpty(message) {
+
+		ts, err = s.reply(cName, m, replier, message, attachments, executor, &start, error)
+		if err != nil {
+			s.replyError(cName, m, replier, err, attachments)
+			s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+			return err
+		}
+
 	}
 
 	if error {
@@ -1255,8 +1328,9 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				return
 			}
 		}
+
 		wrapper := cmd.Wrapper()
-		eParams, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, cName, params, m)
+		eParams, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, group, cName, params, m)
 
 		mChannel := &SlackChannel{
 			id: m.channelID,
@@ -1280,13 +1354,19 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		rFields := cmd.Fields(s, msg)
 		rParams := eParams
 
-		if wrappedCmd != nil {
+		if wrapper {
 
-			rCmd = wrappedCmd.Name()
+			rCmd = ""
+			if wrappedCmd != nil {
+				rCmd = wrappedCmd.Name()
+			}
 			rGroup = wrappedGroup
 
 			wrapperGroupName := rCmd
-			if !utils.IsEmpty(rGroup) {
+			if utils.IsEmpty(wrapperGroupName) {
+				wrapperGroupName = rGroup
+			}
+			if !utils.IsEmpty(rGroup) && !utils.IsEmpty(rCmd) {
 				wrapperGroupName = fmt.Sprintf("%s/%s", rGroup, rCmd)
 			}
 
@@ -1296,8 +1376,11 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				return
 			}
 
-			rFields = wrappedCmd.Fields(s, msg)
+			if wrappedCmd != nil {
+				rFields = wrappedCmd.Fields(s, msg)
+			}
 			rParams = wrappedParams
+			m.wrapped = fmt.Sprintf("%s/%s", rGroup, rCmd)
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
 
@@ -1315,7 +1398,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			// fix string to appropriate value
 			for _, f := range rFields {
 
-				p := eParams[f.Name]
+				p := rParams[f.Name]
 				if p == nil {
 					continue
 				}
@@ -1323,12 +1406,14 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				switch f.Type {
 				case common.FieldTypeMultiSelect:
 					v := fmt.Sprintf("%v", p)
-					eParams[f.Name] = common.RemoveEmptyStrings(strings.Split(v, ","))
+					rParams[f.Name] = common.RemoveEmptyStrings(strings.Split(v, ","))
 				}
 			}
 		}
 
-		err = s.postUserCommand(cmd, m, user, replier, eParams)
+		rParams = common.MergeInterfaceMaps(eParams, rParams)
+
+		err = s.postUserCommand(cmd, m, user, replier, rParams)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
@@ -1344,7 +1429,7 @@ func (s *Slack) hideInteraction(m *slackMessageInfo, responseURL string) {
 	)
 }
 
-func (s *Slack) Post(channel string, message string, attachments []*common.Attachment, parent common.Message) error {
+func (s *Slack) Post(channel string, message string, attachments []*common.Attachment, parent common.Message, response common.Response) error {
 
 	channelID := channel
 	threadTS := ""
@@ -1353,7 +1438,7 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 
 	if !utils.IsEmpty(parent) {
 
-		threadTS = parent.ID()
+		//threadTS = parent.ID()
 		p, ok := parent.(*SlackMessage)
 		if ok {
 			ts := p.threadTimestamp
@@ -1366,6 +1451,10 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 		if !utils.IsEmpty(user) {
 			userID = user.ID()
 			visible = parent.Visible()
+		}
+
+		if !utils.IsEmpty(response) {
+			visible = response.Visible()
 		}
 	}
 
@@ -1496,18 +1585,25 @@ func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker
 			}
 
 			// do unwrap
-			rCmd := cmd
-			rParams := params
+
 			if !utils.IsEmpty(value.Wrapper) {
 				arr := strings.Split(value.Wrapper, "/")
 				if len(arr) == 2 {
-					rCmd = s.findCommand(arr[0], arr[1])
-					prs, _, _, _ := s.findParams(false, rCmd.Name(), rCmd.Params(), m)
-					rParams = common.MergeInterfaceMaps(prs, params)
+					cmd = s.findCommand(arr[0], arr[1])
 				}
 			}
 
-			err = s.postUserCommand(rCmd, m, user, replier, rParams)
+			rParams := params
+			if !utils.IsEmpty(value.Wrapped) {
+				arr := strings.Split(value.Wrapped, "/")
+				if len(arr) == 2 {
+					rCmd := s.findCommand(arr[0], arr[1])
+					eParams, _, _, _ := s.findParams(!utils.IsEmpty(value.Wrapper), arr[0], value.Text, rCmd.Params(), m)
+					rParams = common.MergeInterfaceMaps(rParams, eParams)
+				}
+			}
+
+			err = s.postUserCommand(cmd, m, user, replier, rParams)
 			if err != nil {
 				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 				return
@@ -1628,7 +1724,7 @@ func (s *Slack) start() {
 
 		for _, c := range commands {
 
-			if !c.Wrapper() {
+			if c.Wrapper() {
 				continue
 			}
 
