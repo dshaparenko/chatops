@@ -44,10 +44,11 @@ type DefaultRunbookConfig struct {
 }
 
 type DefaultRunbook struct {
-	name    string
-	path    string
-	command *DefaultCommand
-	config  *DefaultRunbookConfig
+	name           string
+	path           string
+	command        *DefaultCommand
+	config         *DefaultRunbookConfig
+	parentExecutor *DefaultExecutor
 }
 
 type DefaultPostKind = int
@@ -80,7 +81,11 @@ type DefaultExecutor struct {
 type DefaultRunbookTemplateExecutor = DefaultExecutor
 
 type DefaultRunbookCommandExecutor struct {
-	//
+	runbookExecutor *DefaultRunbookExecutor
+	bot             common.Bot
+	params          common.ExecuteParams
+	message         common.Message
+	command         string
 }
 
 type DefaultRunbookExecutor struct {
@@ -284,7 +289,7 @@ func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) (string, e
 	ext := filepath.Ext(fileName)
 	name := strings.TrimSuffix(fileName, ext)
 
-	rb, err := NewRunbook(name, s, de.command)
+	rb, err := NewRunbook(name, s, de.command, de)
 	if err != nil {
 		return "", err
 	}
@@ -543,7 +548,7 @@ func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, m
 
 func (de *DefaultExecutor) runbookAfter(post *DefaultPost, message common.Message) error {
 
-	rb, err := NewRunbook(post.Name, post.Path, de.command)
+	rb, err := NewRunbook(post.Name, post.Path, de.command, de)
 	if err != nil {
 		return err
 	}
@@ -653,28 +658,49 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 
 // Default Runbook Command Executor
 
+func (dre *DefaultRunbookCommandExecutor) execute() error {
+
+	var response common.Response
+	if !utils.IsEmpty(dre.runbookExecutor.runbook.parentExecutor) {
+		response = dre.runbookExecutor.runbook.parentExecutor.Response()
+	}
+
+	var channel common.Channel
+	if !utils.IsEmpty(dre.message) {
+		channel = dre.message.Channel()
+	}
+	if utils.IsEmpty(channel) {
+		return nil
+	}
+
+	return dre.bot.Command(channel.ID(), dre.command, dre.message, response)
+}
+
 // Default Runbook Executor
 
-func (dre *DefaultRunbookExecutor) execute(id string, obj interface{}) *DefaultRunbookStepResult {
-
-	var text string
-	var atts []*common.Attachment
-	var err error
+func (dre *DefaultRunbookExecutor) execute(id string, params map[string]interface{}) *DefaultRunbookStepResult {
 
 	if dre.templateExecutor != nil {
-		text, atts, err = dre.templateExecutor.execute(id, obj)
+		r := &DefaultRunbookStepResult{
+			ID: fmt.Sprintf("%s.template", id),
+		}
+		r.Text, r.Attachements, r.Error = dre.templateExecutor.execute(id, params)
+		return r
+	} else if dre.commandExecutor != nil {
+		r := &DefaultRunbookStepResult{
+			ID: fmt.Sprintf("%s.command", id),
+		}
+		r.Error = dre.commandExecutor.execute()
+		return r
 	}
-	if dre.commandExecutor != nil {
-		//
-	}
-	return &DefaultRunbookStepResult{
-		Text:         text,
-		Attachements: atts,
-		Error:        err,
-	}
+	return nil
 }
 
 func NewRunbookExecutor(rb *DefaultRunbook, step *DefaultRunbookStep, bot common.Bot, message common.Message, params common.ExecuteParams) (*DefaultRunbookExecutor, error) {
+
+	if utils.IsEmpty(step.Template) && utils.IsEmpty(step.Command) {
+		return nil, nil
+	}
 
 	observability := rb.command.processor.observability
 
@@ -704,10 +730,14 @@ func NewRunbookExecutor(rb *DefaultRunbook, step *DefaultRunbookStep, bot common
 		rExecutor.templateExecutor = tExecutor
 	}
 
-	if utils.IsEmpty(step.Command) {
+	if !utils.IsEmpty(step.Command) {
 
 		cExecutor := &DefaultRunbookCommandExecutor{
-			//
+			runbookExecutor: rExecutor,
+			bot:             bot,
+			message:         message,
+			params:          params,
+			command:         common.Render(step.Command, params, observability),
 		}
 		rExecutor.commandExecutor = cExecutor
 	}
@@ -754,15 +784,24 @@ func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot c
 			if err != nil {
 				return err
 			}
+			if executor == nil {
+				return nil
+			}
+
 			r1 := executor.execute(id1, params)
 			if r1 != nil && r1.Error != nil {
 				return r1.Error
 			}
+			if r1 == nil {
+				return nil
+			}
+
 			r1.ID = id1
 			err = callback(r1, message)
 			if err != nil {
 				return err
 			}
+
 			err = dr.runPipeline(id1, step.Pipeline, bot, message, params, callback)
 			if err != nil {
 				return err
@@ -789,7 +828,7 @@ func (dr *DefaultRunbook) Execute(bot common.Bot, message common.Message, obj in
 	return dr.runPipeline("", dr.config.Pipeline, bot, message, params, callback)
 }
 
-func NewRunbook(name, path string, command *DefaultCommand) (*DefaultRunbook, error) {
+func NewRunbook(name, path string, command *DefaultCommand, parentExecutor *DefaultExecutor) (*DefaultRunbook, error) {
 
 	if !utils.FileExists(path) {
 		return nil, fmt.Errorf("Default couldn't find runbook %s", path)
@@ -807,10 +846,11 @@ func NewRunbook(name, path string, command *DefaultCommand) (*DefaultRunbook, er
 	}
 
 	rb := &DefaultRunbook{
-		name:    name,
-		path:    path,
-		command: command,
-		config:  &config,
+		name:           name,
+		path:           path,
+		command:        command,
+		config:         &config,
+		parentExecutor: parentExecutor,
 	}
 	return rb, nil
 }

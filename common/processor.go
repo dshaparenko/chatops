@@ -119,6 +119,33 @@ func (ps *Processors) Items() []Processor {
 	return ps.list
 }
 
+func (ps *Processors) Exists(porcessor string) bool {
+
+	for _, v := range ps.list {
+		g := v.Name()
+		if g == porcessor {
+			return true
+		}
+	}
+	return false
+}
+
+func (ps *Processors) FindCommand(porcessor, command string) Command {
+
+	for _, v := range ps.list {
+		g := v.Name()
+		if g == porcessor {
+			for _, v1 := range v.Commands() {
+				c := v1.Name()
+				if c == command {
+					return v1
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func NewProcessors() *Processors {
 	return &Processors{}
 }

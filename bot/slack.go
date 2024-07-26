@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -79,6 +78,7 @@ type Slack struct {
 	options           SlackOptions
 	processors        *common.Processors
 	client            *slacker.Slacker
+	ctx               context.Context
 	auth              *slack.AuthTestResponse
 	logger            sreCommon.Logger
 	meter             sreCommon.Meter
@@ -124,6 +124,10 @@ type SlackButtonValue struct {
 	Wrapper   string
 }
 
+type SlackPostReplier struct {
+	slack *Slack
+}
+
 type slackMessageInfo struct {
 	typ             string
 	text            string
@@ -133,6 +137,13 @@ type slackMessageInfo struct {
 	threadTimestamp string
 	wrapped         string
 	wrapper         string
+}
+
+type slackResponse struct {
+	visible  bool
+	original bool
+	duration bool
+	error    bool
 }
 
 const (
@@ -206,24 +217,55 @@ func (sm *SlackMessage) ParentID() string {
 	return sm.threadTimestamp
 }
 
+// SlackPostReplier
+
+/*func (spr *SlackPostReplier) PostBlocks(channel string, blocks []slack.Block, options ...slacker.PostOption) (string, error) {
+
+	rw := slacker.newWriterResponse{&slacker.Writer{}}
+
+	postOptions := newPostOptions(options...)
+
+	opts := []slack.MsgOption{
+		slack.MsgOptionText("", false),
+		slack.MsgOptionAttachments(postOptions.Attachments...),
+		slack.MsgOptionBlocks(blocks...),
+	}
+
+	if len(postOptions.ThreadTS) > 0 {
+		opts = append(opts, slack.MsgOptionTS(postOptions.ThreadTS))
+	}
+
+	if len(postOptions.ReplaceMessageTS) > 0 {
+		opts = append(opts, slack.MsgOptionUpdate(postOptions.ReplaceMessageTS))
+	}
+
+	if len(postOptions.EphemeralUserID) > 0 {
+		opts = append(opts, slack.MsgOptionPostEphemeral(postOptions.EphemeralUserID))
+	}
+
+	if postOptions.ScheduleTime != nil {
+		postAt := fmt.Sprintf("%d", postOptions.ScheduleTime.Unix())
+		opts = append(opts, slack.MsgOptionSchedule(postAt))
+	}
+
+	_, timestamp, err := spr.slack.client.SlackClient().PostMessageContext(
+		spr.slack.ctx,
+		channel,
+		opts...,
+	)
+	return timestamp, err
+}*/
+
 // Slack
 
 func (s *Slack) Name() string {
 	return "Slack"
 }
 
-/*func (s *Slack) Info() interface{} {
+func (s *Slack) prepareInputText(input, typ string) string {
 
-	if s.auth == nil {
-		return nil
-	}
-	return s.auth
-}*/
-
-func (s *Slack) getEventTextCommand(command string, m *slackMessageInfo) (string, string) {
-
-	text := m.text
-	switch m.typ {
+	text := input
+	switch typ {
 	case "slash_commands":
 		text = strings.TrimSpace(text)
 	case "app_mention":
@@ -240,13 +282,7 @@ func (s *Slack) getEventTextCommand(command string, m *slackMessageInfo) (string
 			text = strings.TrimSpace(items[1])
 		}
 	}
-
-	arr := strings.Split(text, " ")
-	if len(arr) > 0 {
-		command = strings.TrimSpace(arr[0])
-	}
-
-	return text, command
+	return text
 }
 
 /*
@@ -548,93 +584,65 @@ func (s *Slack) matchParam(text, param string) (map[string]string, []string) {
 	return r, names
 }
 
-func (s *Slack) findCommandGroup(group string) bool {
+func (s *Slack) findParams(wrapper bool, m *slackMessageInfo) (common.ExecuteParams, common.Command, string, common.ExecuteParams, common.Command, string) {
 
-	items := s.processors.Items()
-	for _, v := range items {
-		g := v.Name()
-		if g == group {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Slack) findCommand(group, command string) common.Command {
-
-	items := s.processors.Items()
-	for _, v := range items {
-		g := v.Name()
-		if g == group {
-			for _, v1 := range v.Commands() {
-				c := v1.Name()
-				if c == command {
-					return v1
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func (s *Slack) findParams(wrapper bool, group, input string, params []string, m *slackMessageInfo) (common.ExecuteParams, common.ExecuteParams, common.Command, string) {
-
-	r := make(common.ExecuteParams)
-	rw := make(common.ExecuteParams)
-
-	if utils.IsEmpty(params) {
-		return r, rw, nil, ""
-	}
+	ep := make(common.ExecuteParams)
+	wp := make(common.ExecuteParams)
 
 	// group command param1 param2
 	// command param1 param2
 
 	// find group, command, params
 
-	text, _ := s.getEventTextCommand(input, m)
+	text := s.prepareInputText(m.text, m.typ)
 	delim := " "
 	arr := strings.Split(text, delim)
 
 	if len(arr) == 0 {
-		return r, rw, nil, ""
+		return ep, nil, "", wp, nil, ""
 	}
 
 	if !wrapper {
 
-		cs := ""
-		ps := ""
+		egr := ""
+		ec := ""
+		eps := ""
 
-		if !utils.IsEmpty(group) {
-			if len(arr) > 1 {
-				cs = strings.TrimSpace(arr[1])
-			}
-			if len(arr) > 2 {
-				ps = strings.TrimSpace(strings.Join(arr[2:], delim))
-			}
-		} else {
-			if len(arr) > 0 {
-				cs = strings.TrimSpace(arr[0])
-			}
-			if len(arr) > 1 {
-				ps = strings.TrimSpace(strings.Join(arr[1:], delim))
-			}
+		if len(arr) > 0 {
+			egr = strings.TrimSpace(arr[0])
+		}
+		if len(arr) > 1 {
+			ec = strings.TrimSpace(arr[1])
+		}
+		if len(arr) > 2 {
+			eps = strings.TrimSpace(strings.Join(arr[2:], delim))
 		}
 
-		if utils.IsEmpty(cs) || utils.IsEmpty(ps) {
-			return r, rw, nil, ""
+		ecm := s.processors.FindCommand(egr, ec)
+		if ecm == nil {
+			if len(arr) > 1 {
+				eps = strings.TrimSpace(strings.Join(arr[1:], delim))
+			}
+			ec = egr
+			egr = ""
+			ecm = s.processors.FindCommand(egr, ec)
 		}
 
-		for _, p := range params {
+		if ecm == nil {
+			return ep, nil, "", wp, nil, ""
+		}
 
-			values, _ := s.matchParam(ps, p)
+		for _, p := range ecm.Params() {
+
+			values, _ := s.matchParam(eps, p)
 			for k, v := range values {
-				r[k] = v
+				ep[k] = v
 			}
-			if len(r) > 0 {
+			if len(ep) > 0 {
 				break
 			}
 		}
-		return r, rw, nil, ""
+		return ep, ecm, egr, wp, nil, ""
 	}
 
 	// wrappergroup wrapper group command param1 param2
@@ -643,89 +651,88 @@ func (s *Slack) findParams(wrapper bool, group, input string, params []string, m
 
 	// find wrapper group, command, params
 
+	egr := ""
+	ec := ""
+	eps := ""
+
+	if len(arr) > 0 {
+		egr = strings.TrimSpace(arr[0])
+	}
+	if len(arr) > 1 {
+		ec = strings.TrimSpace(arr[1])
+	}
+	if len(arr) > 2 {
+		eps = strings.TrimSpace(strings.Join(arr[2:], delim))
+	}
+
+	ecm := s.processors.FindCommand(egr, ec)
+	if ecm == nil {
+		if len(arr) > 1 {
+			eps = strings.TrimSpace(strings.Join(arr[1:], delim))
+		}
+		ec = egr
+		egr = ""
+		ecm = s.processors.FindCommand(egr, ec)
+	}
+
+	if ecm == nil {
+		return ep, ecm, egr, wp, nil, ""
+	}
+
+	// find wrapped group, command, params
+
+	arr = strings.Split(eps, delim)
 	wgr := ""
-	wr := ""
-	ps := ""
+	wc := ""
+	wps := eps
 
 	if len(arr) > 0 {
 		wgr = strings.TrimSpace(arr[0])
 	}
 	if len(arr) > 1 {
-		wr = strings.TrimSpace(arr[1])
+		wc = strings.TrimSpace(arr[1])
 	}
 	if len(arr) > 2 {
-		ps = strings.TrimSpace(strings.Join(arr[2:], delim))
+		wps = strings.TrimSpace(strings.Join(arr[2:], delim))
 	}
 
-	rwc := s.findCommand(wgr, wr)
-	if rwc == nil {
+	wcm := s.processors.FindCommand(wgr, wc)
+	if wcm == nil {
 		if len(arr) > 1 {
-			ps = strings.TrimSpace(strings.Join(arr[1:], delim))
+			wps = strings.TrimSpace(strings.Join(arr[1:], delim))
 		}
-		wr = wgr
+		wc = wgr
 		wgr = ""
-		rwc = s.findCommand(wgr, wr)
+		eps = wc
+		wcm = s.processors.FindCommand(wgr, wc)
 	}
 
-	if rwc == nil {
-		return r, rw, nil, ""
+	if wcm == nil {
+		return ep, ecm, egr, wp, nil, ""
 	}
 
-	// find wrapped group, command, params
+	for _, p := range wcm.Params() {
 
-	arr = strings.Split(ps, delim)
-	gr := ""
-	cs := ""
-	psw := ps
-	ps = ""
-
-	if len(arr) > 0 {
-		gr = strings.TrimSpace(arr[0])
-	}
-	if len(arr) > 1 {
-		cs = strings.TrimSpace(arr[1])
-	}
-	if len(arr) > 2 {
-		ps = strings.TrimSpace(strings.Join(arr[2:], delim))
-	}
-
-	rc := s.findCommand(gr, cs)
-	if rc == nil {
-		if len(arr) > 1 {
-			ps = strings.TrimSpace(strings.Join(arr[1:], delim))
-		}
-		cs = gr
-		psw = cs
-		gr = ""
-		rc = s.findCommand(gr, cs)
-	}
-
-	if rc == nil {
-		return r, rw, nil, ""
-	}
-
-	for _, p := range rwc.Params() {
-
-		values, _ := s.matchParam(psw, p)
+		values, _ := s.matchParam(wps, p)
 		for k, v := range values {
-			r[k] = v
+			wp[k] = v
 		}
-		if len(r) > 0 {
+		if len(wp) > 0 {
 			break
 		}
 	}
 
-	for _, p := range rc.Params() {
+	for _, p := range ecm.Params() {
 
-		values, _ := s.matchParam(ps, p)
+		values, _ := s.matchParam(eps, p)
 		for k, v := range values {
-			rw[k] = v
+			ep[k] = v
 		}
-		if len(rw) > 0 {
+		if len(ep) > 0 {
 			break
 		}
 	}
-	return r, rw, rc, gr
+	return ep, ecm, egr, wp, wcm, wgr
 }
 
 func (s *Slack) updateCounters(group, command, text, userID string) {
@@ -780,31 +787,27 @@ func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 
 func (s *Slack) reply(command string, m *slackMessageInfo,
 	replier interface{}, message string, attachments []*common.Attachment,
-	executor common.Executor, start *time.Time, error bool) (string, error) {
+	response *slackResponse, start *time.Time, error bool) (string, error) {
 
 	threadTS := m.threadTimestamp
-	text, _ := s.getEventTextCommand(command, m)
+	text := s.prepareInputText(m.text, m.typ)
 	replyInThread := !utils.IsEmpty(threadTS)
 
 	visible := false
 	original := false
 	duration := false
 
-	if !utils.IsEmpty(executor) {
-
-		response := executor.Response()
-
-		if !utils.IsEmpty(response) {
-			visible = response.Visible()
-			original = response.Original()
-			duration = response.Duration()
-		}
+	if !utils.IsEmpty(response) {
+		visible = response.visible
+		original = response.original
+		duration = response.duration
 	}
 
 	atts := []slack.Attachment{}
 	opts := []slacker.PostOption{}
 	if error {
-		atts = append(atts, slack.Attachment{
+		eatts := []slack.Attachment{}
+		eatts = append(atts, slack.Attachment{
 			Color: s.options.ErrorColor,
 			Blocks: slack.Blocks{
 				BlockSet: []slack.Block{
@@ -813,13 +816,15 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 				},
 			},
 		})
-		opts = append(opts, slacker.SetAttachments(atts))
+		opts = append(opts, slacker.SetAttachments(eatts))
+		atts = append(atts, eatts...)
 	} else {
 		batts, err := s.buildAttachmentBlocks(attachments)
 		if err != nil {
 			return "", err
 		}
 		opts = append(opts, slacker.SetAttachments(batts))
+		atts = append(atts, batts...)
 	}
 
 	if replyInThread {
@@ -893,7 +898,29 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 		return ts, nil
 	}
 
-	return "", errors.New("replier is not defined")
+	// default => command as text
+	// durty trick
+
+	slackOpts := []slack.MsgOption{
+		slack.MsgOptionText("", false),
+		slack.MsgOptionAttachments(atts...),
+		slack.MsgOptionBlocks(blocks...),
+	}
+
+	if replyInThread {
+		slackOpts = append(slackOpts, slack.MsgOptionTS(threadTS))
+	}
+
+	if !visible {
+		slackOpts = append(slackOpts, slack.MsgOptionPostEphemeral(m.userID))
+	}
+
+	_, timestamp, err := s.client.SlackClient().PostMessageContext(
+		s.ctx,
+		m.channelID,
+		slackOpts...,
+	)
+	return timestamp, err
 }
 
 func (s *Slack) replyError(command string, m *slackMessageInfo,
@@ -1138,7 +1165,7 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 }
 
 func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
-	replier interface{}, params common.ExecuteParams) error {
+	replier interface{}, params common.ExecuteParams, response common.Response, reaction bool) error {
 
 	cName := cmd.Name()
 
@@ -1161,45 +1188,54 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 		channel:         channel,
 	}
 
-	s.addReaction(m, s.options.ReactionDoing)
+	if reaction {
+		s.addReaction(m, s.options.ReactionDoing)
+	}
 
 	start := time.Now()
 	executor, message, attachments, err := cmd.Execute(s, msg1, params)
 	if err != nil {
 		s.replyError(cName, m, replier, err, attachments)
-		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+		if reaction {
+			s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+		}
 		return err
 	}
 
-	visible := false
-	error := false
-	response := executor.Response()
+	r := &slackResponse{}
+	eResponse := executor.Response()
 	if !utils.IsEmpty(response) {
-		visible = response.Visible()
-		error = response.Error()
+		r.visible = response.Visible()
+		r.error = response.Error()
+	} else if !utils.IsEmpty(response) {
+		r.visible = eResponse.Visible()
+		r.error = eResponse.Error()
 	}
 
 	ts := ""
 	if !utils.IsEmpty(message) {
 
-		ts, err = s.reply(cName, m, replier, message, attachments, executor, &start, error)
+		ts, err = s.reply(cName, m, replier, message, attachments, r, &start, r.error)
 		if err != nil {
 			s.replyError(cName, m, replier, err, attachments)
-			s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+			if reaction {
+				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+			}
 			return err
 		}
-
 	}
 
-	if error {
-		s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
-	} else {
-		s.addRemoveReactions(m, s.options.ReactionDone, s.options.ReactionDoing)
+	if reaction {
+		if r.error {
+			s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+		} else {
+			s.addRemoveReactions(m, s.options.ReactionDone, s.options.ReactionDoing)
+		}
 	}
 
 	msg2 := &SlackMessage{
 		id:              ts,
-		visible:         visible,
+		visible:         r.visible,
 		user:            user,
 		threadTimestamp: m.threadTimestamp,
 		channel:         channel,
@@ -1232,22 +1268,21 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 		return nil
 	}
 
-	visible := false
-	error := false
+	r := &slackResponse{}
 	response := executor.Response()
 	if !utils.IsEmpty(response) {
-		visible = response.Visible()
-		error = response.Error()
+		r.visible = response.Visible()
+		r.error = response.Error()
 	}
 
-	ts, err := s.reply(cName, m, replier, message, attachments, executor, &start, error)
+	ts, err := s.reply(cName, m, replier, message, attachments, r, &start, r.error)
 	if err != nil {
 		return err
 	}
 
 	msg2 := &SlackMessage{
 		id:              ts,
-		visible:         visible,
+		visible:         r.visible,
 		threadTimestamp: m.threadTimestamp,
 		channel:         channel,
 	}
@@ -1283,10 +1318,66 @@ func (s *Slack) interactionNeeded(fields []common.Field, params map[string]inter
 	return len(required) > len(arr)
 }
 
+func (s *Slack) Command(channel, text string, parent common.Message, response common.Response) error {
+
+	if utils.IsEmpty(parent) {
+		s.logger.Debug("Slack command has no parent message for text: %s", text)
+		return nil
+	}
+
+	u := parent.User()
+	if utils.IsEmpty(u) {
+		s.logger.Debug("Slack command has no user for text: %s", text)
+		return nil
+	}
+
+	user, err := s.client.SlackClient().GetUserInfo(u.ID())
+	if err != nil {
+		s.logger.Debug("Slack command has no user for text: %s", text)
+		return err
+	}
+
+	m := &slackMessageInfo{
+		typ:       "message",
+		text:      text,
+		userID:    user.ID,
+		channelID: channel,
+	}
+
+	params, cmd, group, _, _, _ := s.findParams(false, m)
+	if cmd == nil {
+		s.logger.Debug("Slack command not found for text: %s", text)
+		return nil
+	}
+
+	groupName := cmd.Name()
+	if !utils.IsEmpty(group) {
+		groupName = fmt.Sprintf("%s/%s", group, groupName)
+	}
+
+	if s.denyAccess(m.userID, groupName) {
+		s.logger.Debug("Slack command user %s is not permitted to execute %s", m.userID, groupName)
+		return nil
+	}
+
+	fields := cmd.Fields(s, parent)
+	if s.interactionNeeded(fields, params) {
+		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
+		return nil
+	}
+
+	err = s.postUserCommand(cmd, m, user, nil, params, response, false)
+	if err != nil {
+		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, m.userID, err)
+		return err
+	}
+
+	return nil
+}
+
 func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
 
 	cName := cmd.Name()
-	params := cmd.Params()
 
 	def := &slacker.CommandDefinition{
 		Command:     cName,
@@ -1313,7 +1404,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			s.logger.Error("Slack couldn't get user for %s: %s", m.userID, err)
 		}
 
-		text, _ := s.getEventTextCommand(cName, m)
+		text := s.prepareInputText(m.text, m.typ)
 		s.updateCounters(group, cName, text, m.userID)
 
 		groupName := cName
@@ -1330,7 +1421,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		wrapper := cmd.Wrapper()
-		eParams, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, group, cName, params, m)
+		eParams, _, _, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
 
 		mChannel := &SlackChannel{
 			id: m.channelID,
@@ -1413,7 +1504,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
 
-		err = s.postUserCommand(cmd, m, user, replier, rParams)
+		err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
@@ -1589,7 +1680,7 @@ func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker
 			if !utils.IsEmpty(value.Wrapper) {
 				arr := strings.Split(value.Wrapper, "/")
 				if len(arr) == 2 {
-					cmd = s.findCommand(arr[0], arr[1])
+					cmd = s.processors.FindCommand(arr[0], arr[1])
 				}
 			}
 
@@ -1597,13 +1688,12 @@ func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker
 			if !utils.IsEmpty(value.Wrapped) {
 				arr := strings.Split(value.Wrapped, "/")
 				if len(arr) == 2 {
-					rCmd := s.findCommand(arr[0], arr[1])
-					eParams, _, _, _ := s.findParams(!utils.IsEmpty(value.Wrapper), arr[0], value.Text, rCmd.Params(), m)
+					eParams, _, _, _, _, _ := s.findParams(!utils.IsEmpty(value.Wrapper), m)
 					rParams = common.MergeInterfaceMaps(rParams, eParams)
 				}
 			}
 
-			err = s.postUserCommand(cmd, m, user, replier, rParams)
+			err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
 			if err != nil {
 				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 				return
@@ -1801,6 +1891,8 @@ func (s *Slack) start() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	s.ctx = ctx
 
 	err = client.Listen(ctx)
 	if err != nil {

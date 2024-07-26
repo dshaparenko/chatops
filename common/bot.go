@@ -9,6 +9,7 @@ import (
 type Bot interface {
 	Start(wg *sync.WaitGroup)
 	Name() string
+	Command(channel, text string, parent Message, response Response) error
 	Post(channel string, message string, attachments []*Attachment, parent Message, response Response) error
 	Delete(channel, message string) error
 }
