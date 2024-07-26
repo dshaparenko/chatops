@@ -371,6 +371,13 @@ func (de *DefaultExecutor) fDeleteMessage(channelID, messageTimestamp string) st
 	return ""
 }
 
+func (de *DefaultExecutor) fAddReaction(channelID, messageTimestamp, name string) string {
+
+	de.bot.AddReaction(channelID, messageTimestamp, name)
+
+	return ""
+}
+
 func (de *DefaultExecutor) fSetError() string {
 	e := true
 	de.error = &e
@@ -614,6 +621,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
+	funcs["addReaction"] = executor.fAddReaction
 	funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
 	funcs["getParams"] = executor.fGetParams
