@@ -445,6 +445,16 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 	return r, nil
 }
 
+func (s *Slack) AddReaction(channelID, timestamp, name string) error {
+
+	err := s.client.SlackClient().AddReaction(name, slack.NewRefToMessage(channelID, timestamp))
+	if err != nil {
+		s.logger.Error("Slack adding reaction error: %s", err)
+		return err
+	}
+	return nil
+}
+
 func (s *Slack) addReaction(m *slackMessageInfo, name string) {
 
 	if m.typ == "slash_commands" {
