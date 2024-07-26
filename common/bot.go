@@ -11,6 +11,7 @@ type Bot interface {
 	Name() string
 	Post(channel string, message string, attachments []*Attachment, parent Message) error
 	Delete(channel, message string) error
+	AddReaction(channel, message, name string) error
 }
 
 type Bots struct {
