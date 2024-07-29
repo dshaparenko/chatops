@@ -817,7 +817,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	opts := []slacker.PostOption{}
 	if error {
 		eatts := []slack.Attachment{}
-		eatts = append(atts, slack.Attachment{
+		eatts = append(eatts, slack.Attachment{
 			Color: s.options.ErrorColor,
 			Blocks: slack.Blocks{
 				BlockSet: []slack.Block{
@@ -1217,9 +1217,11 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 	if !utils.IsEmpty(response) {
 		r.visible = response.Visible()
 		r.error = response.Error()
-	} else if !utils.IsEmpty(response) {
+	} else if !utils.IsEmpty(eResponse) {
 		r.visible = eResponse.Visible()
 		r.error = eResponse.Error()
+		r.duration = eResponse.Duration()
+		r.original = eResponse.Original()
 	}
 
 	ts := ""
