@@ -26,7 +26,7 @@ type DefaultRunbookStepResult struct {
 	Error        error
 }
 
-type DefaultRunbookStepResultFunc = func(result *DefaultRunbookStepResult, message common.Message) error
+type DefaultRunbookStepResultFunc = func(result *DefaultRunbookStepResult, parent common.Message) error
 
 type DefaultRunbookStep struct {
 	ID       string
@@ -113,15 +113,16 @@ type DefaultReposne struct {
 }
 
 type DefaultCommandConfig struct {
-	Description string
-	Params      []string
-	Aliases     []string
-	Response    DefaultReposne
-	Fields      []common.Field
-	Priority    int
-	Wrapper     bool
-	Schedule    string
-	Channel     string
+	Description  string
+	Params       []string
+	Aliases      []string
+	Response     DefaultReposne
+	Fields       []common.Field
+	Priority     int
+	Wrapper      bool
+	Schedule     string
+	Channel      string
+	Confirmation string
 }
 
 type DefaultCommand struct {
@@ -294,7 +295,7 @@ func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) (string, e
 		return "", err
 	}
 
-	err = rb.Execute(de.bot, de.message, obj, de.runbookAfterCallback)
+	err = rb.Execute(de.bot, de.message, obj, de.runbookAfterCallback, true)
 	if err != nil {
 		return "", err
 	}
@@ -335,9 +336,14 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 		}
 	}
 
+	var user common.User
+	if !utils.IsEmpty(de.message) {
+		user = de.message.User()
+	}
+
 	var err error
 	for _, ch := range chnls {
-		e := de.bot.Post(ch, message, atts, nil, de.Response())
+		e := de.bot.Post(ch, message, atts, user, nil, de.Response())
 		if e != nil {
 			de.command.logger.Error(e)
 			err = e
@@ -491,12 +497,12 @@ func (de *DefaultExecutor) execute(id string, obj interface{}) (string, []*commo
 	return text, atts, nil
 }
 
-func (de *DefaultExecutor) defaultAfter(post *DefaultPost, message common.Message) error {
+func (de *DefaultExecutor) defaultAfter(post *DefaultPost, parent common.Message, skipParent bool) error {
 
 	var text string
 	var atts []*common.Attachment
 
-	executor, err := NewExecutor(post.Name, post.Path, de.command, de.bot, message, de.params)
+	executor, err := NewExecutor(post.Name, post.Path, de.command, de.bot, parent, de.params)
 	if err != nil {
 		return err
 	}
@@ -507,8 +513,11 @@ func (de *DefaultExecutor) defaultAfter(post *DefaultPost, message common.Messag
 	}
 
 	var channel common.Channel
-	if !utils.IsEmpty(message) {
-		channel = message.Channel()
+	var user common.User
+
+	if !utils.IsEmpty(parent) {
+		channel = parent.Channel()
+		user = parent.User()
 	}
 	if utils.IsEmpty(channel) {
 		return nil
@@ -517,22 +526,31 @@ func (de *DefaultExecutor) defaultAfter(post *DefaultPost, message common.Messag
 	if utils.IsEmpty(text) {
 		return nil
 	}
-	err = de.bot.Post(channel.ID(), text, atts, message, de.Response())
+
+	m := parent
+	if skipParent {
+		m = nil
+	}
+
+	err = de.bot.Post(channel.ID(), text, atts, user, m, de.Response())
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, message common.Message) error {
+func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, parent common.Message) error {
 
 	if ret == nil {
 		return nil
 	}
 
 	var channel common.Channel
-	if !utils.IsEmpty(message) {
-		channel = message.Channel()
+	var user common.User
+
+	if !utils.IsEmpty(parent) {
+		channel = parent.Channel()
+		user = parent.User()
 	}
 	if utils.IsEmpty(channel) {
 		return nil
@@ -546,25 +564,60 @@ func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, m
 		return nil
 	}
 
-	err := de.bot.Post(channel.ID(), ret.Text, ret.Attachements, message, de.Response())
+	m := parent
+
+	err := de.bot.Post(channel.ID(), ret.Text, ret.Attachements, user, m, de.Response())
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (de *DefaultExecutor) runbookAfter(post *DefaultPost, message common.Message) error {
+func (de *DefaultExecutor) runbookAfter(post *DefaultPost, message common.Message, waitGroup bool) error {
 
 	rb, err := NewRunbook(post.Name, post.Path, de.command, de)
 	if err != nil {
 		return err
 	}
 
-	err = rb.Execute(de.bot, message, post.Obj, de.runbookAfterCallback)
+	err = rb.Execute(de.bot, message, post.Obj, de.runbookAfterCallback, waitGroup)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (de *DefaultExecutor) after(posts []*DefaultPost, message common.Message, skipParent bool, waitGroup bool) error {
+
+	gr := &errgroup.Group{}
+	var err error
+	for _, p := range posts {
+
+		gr.Go(func() error {
+
+			var err error
+			logger := de.command.logger
+
+			switch p.Kind {
+			case DefaultPostKindTemplate, DefaultPostKindCommand:
+
+				err = de.defaultAfter(p, message, skipParent)
+			case DefaultPostKindRunbook:
+
+				err = de.runbookAfter(p, message, waitGroup)
+			}
+
+			if err != nil {
+				logger.Error(err)
+				return err
+			}
+			return nil
+		})
+	}
+	if waitGroup {
+		err = gr.Wait()
+	}
+	return err
 }
 
 func (de *DefaultExecutor) After(message common.Message) error {
@@ -572,33 +625,18 @@ func (de *DefaultExecutor) After(message common.Message) error {
 	gid := utils.GoRoutineID()
 	var posts []*DefaultPost
 
-	r, ok := de.posts.LoadAndDelete(gid)
+	r, ok := de.posts.Load(gid)
 	if ok {
 		posts = r.([]*DefaultPost)
 	}
 
-	for _, p := range posts {
-		go func(post *DefaultPost) {
+	err := de.after(posts, message, false, false)
 
-			var err error
-			logger := de.command.logger
-
-			switch post.Kind {
-			case DefaultPostKindTemplate, DefaultPostKindCommand:
-
-				err = de.defaultAfter(post, message)
-			case DefaultPostKindRunbook:
-
-				err = de.runbookAfter(post, message)
-			}
-
-			if err != nil {
-				logger.Error(err)
-				return
-			}
-		}(p)
-	}
-	return nil
+	de.posts.Range(func(key, value any) bool {
+		de.posts.Delete(key)
+		return true
+	})
+	return err
 }
 
 func NewExecutorTemplate(name string, content string, executor *DefaultExecutor, observability *common.Observability) (*toolsRender.TextTemplate, error) {
@@ -674,14 +712,19 @@ func (dre *DefaultRunbookCommandExecutor) execute() error {
 	}
 
 	var channel common.Channel
+	var user common.User
+
 	if !utils.IsEmpty(dre.message) {
 		channel = dre.message.Channel()
+		user = dre.message.User()
 	}
 	if utils.IsEmpty(channel) {
 		return nil
 	}
 
-	return dre.bot.Command(channel.ID(), dre.command, dre.message, response)
+	m := dre.message
+
+	return dre.bot.Command(channel.ID(), dre.command, user, m, response)
 }
 
 // Default Runbook Executor
@@ -702,6 +745,20 @@ func (dre *DefaultRunbookExecutor) execute(id string, params map[string]interfac
 		return r
 	}
 	return nil
+}
+
+func (dre *DefaultRunbookExecutor) loadPosts() []*DefaultPost {
+
+	gid := utils.GoRoutineID()
+	var posts []*DefaultPost
+
+	if dre.templateExecutor != nil {
+		r, ok := dre.templateExecutor.posts.LoadAndDelete(gid)
+		if ok {
+			posts = r.([]*DefaultPost)
+		}
+	}
+	return posts
 }
 
 func NewRunbookExecutor(rb *DefaultRunbook, step *DefaultRunbookStep, bot common.Bot, message common.Message, params common.ExecuteParams) (*DefaultRunbookExecutor, error) {
@@ -765,7 +822,8 @@ func (dr *DefaultRunbook) countPipelineSteps(pl []*DefaultRunbookStep) int {
 	return r
 }
 
-func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot common.Bot, message common.Message, params map[string]interface{}, callback DefaultRunbookStepResultFunc) error {
+func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot common.Bot, parent common.Message, params map[string]interface{},
+	callback DefaultRunbookStepResultFunc, waitGroup bool) error {
 
 	if dr.countPipelineSteps(pl) == 0 {
 		return nil
@@ -788,7 +846,7 @@ func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot c
 
 		g.Go(func() error {
 
-			executor, err := NewRunbookExecutor(dr, step, bot, message, params)
+			executor, err := NewRunbookExecutor(dr, step, bot, parent, params)
 			if err != nil {
 				return err
 			}
@@ -805,22 +863,33 @@ func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot c
 			}
 
 			r1.ID = id1
-			err = callback(r1, message)
+			err = callback(r1, parent)
 			if err != nil {
 				return err
 			}
 
-			err = dr.runPipeline(id1, step.Pipeline, bot, message, params, callback)
+			posts := executor.loadPosts()
+			if len(posts) > 0 {
+				err = dr.parentExecutor.after(posts, parent, false, false)
+				if err != nil {
+					return err
+				}
+			}
+
+			err = dr.runPipeline(id1, step.Pipeline, bot, parent, params, callback, true)
 			if err != nil {
 				return err
 			}
 			return nil
 		})
 	}
-	return g.Wait()
+	if waitGroup {
+		return g.Wait()
+	}
+	return nil
 }
 
-func (dr *DefaultRunbook) Execute(bot common.Bot, message common.Message, obj interface{}, callback DefaultRunbookStepResultFunc) error {
+func (dr *DefaultRunbook) Execute(bot common.Bot, message common.Message, obj interface{}, callback DefaultRunbookStepResultFunc, waitGroup bool) error {
 
 	if dr.countPipelineSteps(dr.config.Pipeline) == 0 {
 		dr.command.logger.Debug("Default runbook %s has no pipepline steps. Skipped", dr.name)
@@ -833,7 +902,7 @@ func (dr *DefaultRunbook) Execute(bot common.Bot, message common.Message, obj in
 	if ok {
 		params = ps
 	}
-	return dr.runPipeline("", dr.config.Pipeline, bot, message, params, callback)
+	return dr.runPipeline("", dr.config.Pipeline, bot, message, params, callback, waitGroup)
 }
 
 func NewRunbook(name, path string, command *DefaultCommand, parentExecutor *DefaultExecutor) (*DefaultRunbook, error) {
@@ -1048,6 +1117,13 @@ func (dc *DefaultCommand) Schedule() string {
 func (dc *DefaultCommand) Channel() string {
 	if dc.config != nil {
 		return dc.config.Channel
+	}
+	return ""
+}
+
+func (dc *DefaultCommand) Confirmation() string {
+	if dc.config != nil {
+		return dc.config.Confirmation
 	}
 	return ""
 }

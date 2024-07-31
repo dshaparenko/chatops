@@ -154,6 +154,8 @@ const (
 	slackMaxTextBlockLength          = 3000
 	slackSubmitAction                = "submit"
 	slackCancelAction                = "cancel"
+	slackConfirmAction               = "confirm"
+	slackTitleConfirmation           = "Confirmation"
 )
 
 // SlackRichTextQuote
@@ -267,7 +269,19 @@ func (s *Slack) prepareInputText(input, typ string) string {
 	text := input
 	switch typ {
 	case "slash_commands":
+		// /command <param1>
 		text = strings.TrimSpace(text)
+		items := strings.Split(text, " ")
+		if len(items) > 0 {
+			group, cmd := s.processors.FindCommandByAlias(items[0])
+			if cmd != nil {
+				groupName := cmd.Name()
+				if !utils.IsEmpty(group) {
+					groupName = fmt.Sprintf("%s %s", group, groupName)
+				}
+				text = strings.Replace(text, items[0], groupName, 1)
+			}
+		}
 	case "app_mention":
 		// <@Uq131312> command <param1>  => @bot command param1 param2
 		items := strings.SplitN(text, ">", 2)
@@ -284,60 +298,6 @@ func (s *Slack) prepareInputText(input, typ string) string {
 	}
 	return text
 }
-
-/*
-func (s *Slack) getBotAuth() string {
-
-	auth := ""
-	if !utils.IsEmpty(s.options.BotToken) {
-		auth = fmt.Sprintf("Bearer %s", s.options.BotToken)
-		return auth
-	}
-	return auth
-}
-
-func (s *Slack) getUserAuth() string {
-
-	auth := ""
-	if !utils.IsEmpty(s.options.UserToken) {
-		auth = fmt.Sprintf("Bearer %s", s.options.UserToken)
-		return auth
-	}
-	return auth
-}
-
-
-func (s *Slack) ShareFilePublicURL(file *slack.File) (*slack.File, error) {
-
-	client := utils.NewHttpSecureClient(15)
-
-	params := url.Values{}
-	params.Add("file", file.ID)
-
-	u, err := url.Parse(slackAPIURL)
-	if err != nil {
-		return nil, err
-	}
-	u.Path = path.Join(u.Path, slackFilesSharedPublicURL)
-	u.RawQuery = params.Encode()
-
-	data, err := utils.HttpPostRaw(client, u.String(), "application/x-www-form-urlencoded", s.getUserAuth(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	r := &SlackFileResponseFull{}
-	err = json.Unmarshal(data, r)
-	if err != nil {
-		return nil, err
-	}
-	if !r.SlackResponse.Ok {
-		return nil, errors.New(r.SlackResponse.Error)
-	}
-
-	return &r.File, nil
-}
-*/
 
 func (s *Slack) uploadFileV1(att *common.Attachment) (*slack.File, error) {
 
@@ -542,6 +502,15 @@ func (s *Slack) denyAccess(userID string, command string) bool {
 		return false
 	}
 
+	if s.auth == nil {
+		return false
+	}
+
+	// bot itself
+	if s.auth.UserID == userID {
+		return false
+	}
+
 	groups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
 	if err != nil {
 		s.logger.Error("Slack getting user group error: %s", err)
@@ -642,14 +611,16 @@ func (s *Slack) findParams(wrapper bool, m *slackMessageInfo) (common.ExecutePar
 			return ep, nil, "", wp, nil, ""
 		}
 
-		for _, p := range ecm.Params() {
+		if !utils.IsEmpty(eps) {
+			for _, p := range ecm.Params() {
 
-			values, _ := s.matchParam(eps, p)
-			for k, v := range values {
-				ep[k] = v
-			}
-			if len(ep) > 0 {
-				break
+				values, _ := s.matchParam(eps, p)
+				for k, v := range values {
+					ep[k] = v
+				}
+				if len(ep) > 0 {
+					break
+				}
 			}
 		}
 		return ep, ecm, egr, wp, nil, ""
@@ -694,7 +665,7 @@ func (s *Slack) findParams(wrapper bool, m *slackMessageInfo) (common.ExecutePar
 	arr = strings.Split(eps, delim)
 	wgr := ""
 	wc := ""
-	wps := eps
+	wps := ""
 
 	if len(arr) > 0 {
 		wgr = strings.TrimSpace(arr[0])
@@ -721,25 +692,29 @@ func (s *Slack) findParams(wrapper bool, m *slackMessageInfo) (common.ExecutePar
 		return ep, ecm, egr, wp, nil, ""
 	}
 
-	for _, p := range wcm.Params() {
+	if !utils.IsEmpty(wps) {
+		for _, p := range wcm.Params() {
 
-		values, _ := s.matchParam(wps, p)
-		for k, v := range values {
-			wp[k] = v
-		}
-		if len(wp) > 0 {
-			break
+			values, _ := s.matchParam(wps, p)
+			for k, v := range values {
+				wp[k] = v
+			}
+			if len(wp) > 0 {
+				break
+			}
 		}
 	}
 
-	for _, p := range ecm.Params() {
+	if !utils.IsEmpty(eps) {
+		for _, p := range ecm.Params() {
 
-		values, _ := s.matchParam(eps, p)
-		for k, v := range values {
-			ep[k] = v
-		}
-		if len(ep) > 0 {
-			break
+			values, _ := s.matchParam(eps, p)
+			for k, v := range values {
+				ep[k] = v
+			}
+			if len(ep) > 0 {
+				break
+			}
 		}
 	}
 	return ep, ecm, egr, wp, wcm, wgr
@@ -965,7 +940,7 @@ func (s *Slack) getInteractionID(command, group string) string {
 	return text
 }*/
 
-func (s *Slack) replyInteraction(command, group string, fields []common.Field, params common.ExecuteParams,
+func (s *Slack) replyInteraction(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
 	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
 	threadTS := m.threadTimestamp
@@ -1160,6 +1135,17 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	sv := base64.StdEncoding.EncodeToString(data)
 
 	submit := slack.NewButtonBlockElement(slackSubmitAction, sv, slack.NewTextBlockObject(slack.PlainTextType, "Submit", false, false))
+	submit.Style = slack.StylePrimary
+
+	if !utils.IsEmpty(confirmation) {
+		submit.Confirm = slack.NewConfirmationBlockObject(
+			slack.NewTextBlockObject(slack.PlainTextType, slackTitleConfirmation, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, confirmation, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, slackConfirmAction, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, slackCancelAction, false, false),
+		)
+	}
+
 	cancel := slack.NewButtonBlockElement(slackCancelAction, sv, slack.NewTextBlockObject(slack.PlainTextType, "Cancel", false, false))
 
 	ab := slack.NewActionBlock(interactionID, submit, cancel)
@@ -1174,8 +1160,18 @@ func (s *Slack) replyInteraction(command, group string, fields []common.Field, p
 	return true, nil
 }
 
+/*func (s *Slack) messageInThread(messageId, threadId string, visible bool) bool {
+
+	if
+	if !visible {
+		return
+	}
+}*/
+
 func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
 	replier interface{}, params common.ExecuteParams, response common.Response, reaction bool) error {
+
+	//  should check parent if its visible and its thread message
 
 	cName := cmd.Name()
 
@@ -1205,8 +1201,8 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 	start := time.Now()
 	executor, message, attachments, err := cmd.Execute(s, msg1, params)
 	if err != nil {
-		s.replyError(cName, m, replier, err, attachments)
 		if reaction {
+			s.replyError(cName, m, replier, err, attachments)
 			s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 		}
 		return err
@@ -1229,8 +1225,8 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 
 		ts, err = s.reply(cName, m, replier, message, attachments, r, &start, r.error)
 		if err != nil {
-			s.replyError(cName, m, replier, err, attachments)
 			if reaction {
+				s.replyError(cName, m, replier, err, attachments)
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 			}
 			return err
@@ -1245,11 +1241,15 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 		}
 	}
 
+	ts2 := m.threadTimestamp
+	if r.visible {
+		ts2 = ts
+	}
 	msg2 := &SlackMessage{
 		id:              ts,
 		visible:         r.visible,
 		user:            user,
-		threadTimestamp: m.threadTimestamp,
+		threadTimestamp: ts2,
 		channel:         channel,
 	}
 
@@ -1330,20 +1330,14 @@ func (s *Slack) interactionNeeded(fields []common.Field, params map[string]inter
 	return len(required) > len(arr)
 }
 
-func (s *Slack) Command(channel, text string, parent common.Message, response common.Response) error {
+func (s *Slack) Command(channel, text string, user common.User, parent common.Message, response common.Response) error {
 
-	if utils.IsEmpty(parent) {
-		s.logger.Debug("Slack command has no parent message for text: %s", text)
-		return nil
-	}
-
-	u := parent.User()
-	if utils.IsEmpty(u) {
+	if utils.IsEmpty(user) {
 		s.logger.Debug("Slack command has no user for text: %s", text)
 		return nil
 	}
 
-	user, err := s.client.SlackClient().GetUserInfo(u.ID())
+	u, err := s.client.SlackClient().GetUserInfo(user.ID())
 	if err != nil {
 		s.logger.Debug("Slack command has no user for text: %s", text)
 		return err
@@ -1352,8 +1346,12 @@ func (s *Slack) Command(channel, text string, parent common.Message, response co
 	m := &slackMessageInfo{
 		typ:       "message",
 		text:      text,
-		userID:    user.ID,
+		userID:    u.ID,
 		channelID: channel,
+	}
+
+	if !utils.IsEmpty(parent) {
+		m.threadTimestamp = parent.ParentID()
 	}
 
 	params, cmd, group, _, _, _ := s.findParams(false, m)
@@ -1378,7 +1376,7 @@ func (s *Slack) Command(channel, text string, parent common.Message, response co
 		return nil
 	}
 
-	err = s.postUserCommand(cmd, m, user, nil, params, response, false)
+	err = s.postUserCommand(cmd, m, u, nil, params, response, false)
 	if err != nil {
 		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, m.userID, err)
 		return err
@@ -1433,7 +1431,11 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		wrapper := cmd.Wrapper()
-		eParams, _, _, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
+		eParams, eCmd, _, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
+
+		if s.auth != nil && s.auth.UserID == m.userID && eCmd == nil {
+			return
+		}
 
 		mChannel := &SlackChannel{
 			id: m.channelID,
@@ -1456,6 +1458,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		rGroup := group
 		rFields := cmd.Fields(s, msg)
 		rParams := eParams
+		confirmation := cmd.Confirmation()
 
 		if wrapper {
 
@@ -1481,6 +1484,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 			if wrappedCmd != nil {
 				rFields = wrappedCmd.Fields(s, msg)
+				confirmation = wrappedCmd.Confirmation()
 			}
 			rParams = wrappedParams
 			m.wrapped = fmt.Sprintf("%s/%s", rGroup, rCmd)
@@ -1488,7 +1492,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		if s.interactionNeeded(rFields, rParams) {
-			shown, err := s.replyInteraction(rCmd, rGroup, rFields, rParams, m, user, replier)
+			shown, err := s.replyInteraction(rCmd, rGroup, confirmation, rFields, rParams, m, user, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -1532,7 +1536,7 @@ func (s *Slack) hideInteraction(m *slackMessageInfo, responseURL string) {
 	)
 }
 
-func (s *Slack) Post(channel string, message string, attachments []*common.Attachment, parent common.Message, response common.Response) error {
+func (s *Slack) Post(channel string, message string, attachments []*common.Attachment, user common.User, parent common.Message, response common.Response) error {
 
 	channelID := channel
 	threadTS := ""
@@ -1540,25 +1544,15 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 	userID := ""
 
 	if !utils.IsEmpty(parent) {
+		threadTS = parent.ParentID()
+	}
 
-		//threadTS = parent.ID()
-		p, ok := parent.(*SlackMessage)
-		if ok {
-			ts := p.threadTimestamp
-			if !utils.IsEmpty(ts) {
-				threadTS = ts
-			}
-		}
+	if !utils.IsEmpty(user) {
+		userID = user.ID()
+	}
 
-		user := parent.User()
-		if !utils.IsEmpty(user) {
-			userID = user.ID()
-			visible = parent.Visible()
-		}
-
-		if !utils.IsEmpty(response) {
-			visible = response.Visible()
-		}
+	if !utils.IsEmpty(response) {
+		visible = response.Visible()
 	}
 
 	atts, err := s.buildAttachmentBlocks(attachments)

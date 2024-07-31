@@ -61,6 +61,7 @@ type Command interface {
 	Description() string
 	Params() []string
 	Aliases() []string
+	Confirmation() string
 	Fields(bot Bot, message Message) []Field
 	Priority() int
 	Wrapper() bool
@@ -119,22 +120,22 @@ func (ps *Processors) Items() []Processor {
 	return ps.list
 }
 
-func (ps *Processors) Exists(porcessor string) bool {
+func (ps *Processors) Exists(processor string) bool {
 
 	for _, v := range ps.list {
 		g := v.Name()
-		if g == porcessor {
+		if g == processor {
 			return true
 		}
 	}
 	return false
 }
 
-func (ps *Processors) FindCommand(porcessor, command string) Command {
+func (ps *Processors) FindCommand(processor, command string) Command {
 
 	for _, v := range ps.list {
 		g := v.Name()
-		if g == porcessor {
+		if g == processor {
 			for _, v1 := range v.Commands() {
 				c := v1.Name()
 				if c == command {
@@ -144,6 +145,19 @@ func (ps *Processors) FindCommand(porcessor, command string) Command {
 		}
 	}
 	return nil
+}
+
+func (ps *Processors) FindCommandByAlias(alias string) (string, Command) {
+
+	for _, v := range ps.list {
+		for _, v1 := range v.Commands() {
+			als := v1.Aliases()
+			if utils.Contains(als, alias) {
+				return v.Name(), v1
+			}
+		}
+	}
+	return "", nil
 }
 
 func NewProcessors() *Processors {
