@@ -219,45 +219,6 @@ func (sm *SlackMessage) ParentID() string {
 	return sm.threadTimestamp
 }
 
-// SlackPostReplier
-
-/*func (spr *SlackPostReplier) PostBlocks(channel string, blocks []slack.Block, options ...slacker.PostOption) (string, error) {
-
-	rw := slacker.newWriterResponse{&slacker.Writer{}}
-
-	postOptions := newPostOptions(options...)
-
-	opts := []slack.MsgOption{
-		slack.MsgOptionText("", false),
-		slack.MsgOptionAttachments(postOptions.Attachments...),
-		slack.MsgOptionBlocks(blocks...),
-	}
-
-	if len(postOptions.ThreadTS) > 0 {
-		opts = append(opts, slack.MsgOptionTS(postOptions.ThreadTS))
-	}
-
-	if len(postOptions.ReplaceMessageTS) > 0 {
-		opts = append(opts, slack.MsgOptionUpdate(postOptions.ReplaceMessageTS))
-	}
-
-	if len(postOptions.EphemeralUserID) > 0 {
-		opts = append(opts, slack.MsgOptionPostEphemeral(postOptions.EphemeralUserID))
-	}
-
-	if postOptions.ScheduleTime != nil {
-		postAt := fmt.Sprintf("%d", postOptions.ScheduleTime.Unix())
-		opts = append(opts, slack.MsgOptionSchedule(postAt))
-	}
-
-	_, timestamp, err := spr.slack.client.SlackClient().PostMessageContext(
-		spr.slack.ctx,
-		channel,
-		opts...,
-	)
-	return timestamp, err
-}*/
-
 // Slack
 
 func (s *Slack) Name() string {
@@ -915,12 +876,20 @@ func (s *Slack) replyError(command string, m *slackMessageInfo,
 	return s.reply(command, m, replier, err.Error(), attachments, nil, nil, true)
 }
 
-func (s *Slack) getInteractionID(command, group string) string {
+func (s *Slack) buildInteractionID(command, group string) string {
 
 	if utils.IsEmpty(group) {
 		return command
 	}
 	return fmt.Sprintf("%s-%s", command, group)
+}
+
+func (s *Slack) buildActionID(interaction, name string) string {
+
+	if utils.IsEmpty(name) {
+		return interaction
+	}
+	return fmt.Sprintf("%s-%s", interaction, name)
 }
 
 /*func (s *Slack) findParamValue(re *regexp.Regexp, name, text string) string {
@@ -952,11 +921,11 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 
 	opts = append(opts, slacker.SetEphemeral(m.userID))
 	blocks := []slack.Block{}
-	interactionID := s.getInteractionID(command, group)
+	interactionID := s.buildInteractionID(command, group)
 
 	for _, field := range fields {
 
-		actionID := fmt.Sprintf("%s-%s", interactionID, field.Name)
+		actionID := s.buildActionID(interactionID, field.Name)
 		def := ""
 		if !utils.IsEmpty(params[field.Name]) {
 			def = fmt.Sprintf("%v", params[field.Name])
@@ -1058,33 +1027,41 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 				e.InitialTime = timeS
 			}
 			el = e
-		case common.FieldTypeSelect:
+		case common.FieldTypeSelect, common.FieldTypeDynamicSelect:
 			options := []*slack.OptionBlockObject{}
 			var dBlock *slack.OptionBlockObject
-			for _, v := range field.Values {
-				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
-				if v == def {
-					dBlock = block
+			optType := slack.OptTypeExternal
+			if field.Type == common.FieldTypeSelect {
+				for _, v := range field.Values {
+					block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
+					if v == def {
+						dBlock = block
+					}
+					options = append(options, block)
 				}
-				options = append(options, block)
+				optType = slack.OptTypeStatic
 			}
-			e := slack.NewOptionsSelectBlockElement(slack.OptTypeStatic, h, actionID, options...)
+			e := slack.NewOptionsSelectBlockElement(optType, h, actionID, options...)
 			if dBlock != nil {
 				e.InitialOption = dBlock
 			}
 			el = e
-		case common.FieldTypeMultiSelect:
+		case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
 			options := []*slack.OptionBlockObject{}
 			dBlocks := []*slack.OptionBlockObject{}
-			arr := common.RemoveEmptyStrings(strings.Split(def, ","))
-			for _, v := range field.Values {
-				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
-				if utils.Contains(arr, v) {
-					dBlocks = append(dBlocks, block)
+			optType := slack.MultiOptTypeExternal
+			if field.Type == common.FieldTypeMultiSelect {
+				arr := common.RemoveEmptyStrings(strings.Split(def, ","))
+				for _, v := range field.Values {
+					block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
+					if utils.Contains(arr, v) {
+						dBlocks = append(dBlocks, block)
+					}
+					options = append(options, block)
 				}
-				options = append(options, block)
+				optType = slack.MultiOptTypeStatic
 			}
-			e := slack.NewOptionsMultiSelectBlockElement(slack.MultiOptTypeStatic, h, actionID, options...)
+			e := slack.NewOptionsMultiSelectBlockElement(optType, h, actionID, options...)
 			if len(dBlocks) > 0 {
 				e.InitialOptions = dBlocks
 			}
@@ -1330,6 +1307,24 @@ func (s *Slack) interactionNeeded(fields []common.Field, params map[string]inter
 	return len(required) > len(arr)
 }
 
+func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
+
+	r := []string{}
+
+	fields := cmd.Fields(s, nil, nil)
+	if len(fields) == 0 {
+		return r
+	}
+
+	for _, field := range fields {
+
+		if utils.Contains(types, string(field.Type)) {
+			r = append(r, field.Name)
+		}
+	}
+	return r
+}
+
 func (s *Slack) Command(channel, text string, user common.User, parent common.Message, response common.Response) error {
 
 	if utils.IsEmpty(user) {
@@ -1370,7 +1365,10 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	fields := cmd.Fields(s, parent)
+	list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
+	only := s.getFieldsByType(cmd, list)
+
+	fields := cmd.Fields(s, parent, only)
 	if s.interactionNeeded(fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
 		return nil
@@ -1456,7 +1454,11 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rCmd := cName
 		rGroup := group
-		rFields := cmd.Fields(s, msg)
+
+		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
+		only := s.getFieldsByType(cmd, list)
+
+		rFields := cmd.Fields(s, msg, only)
 		rParams := eParams
 		confirmation := cmd.Confirmation()
 
@@ -1483,7 +1485,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			}
 
 			if wrappedCmd != nil {
-				rFields = wrappedCmd.Fields(s, msg)
+				rFields = wrappedCmd.Fields(s, msg, only)
 				confirmation = wrappedCmd.Confirmation()
 			}
 			rParams = wrappedParams
@@ -1511,7 +1513,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				}
 
 				switch f.Type {
-				case common.FieldTypeMultiSelect:
+				case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
 					v := fmt.Sprintf("%v", p)
 					rParams[f.Name] = common.RemoveEmptyStrings(strings.Split(v, ","))
 				}
@@ -1586,7 +1588,7 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker.InteractionDefinition {
 
 	cName := cmd.Name()
-	interactionID := s.getInteractionID(cName, group)
+	interactionID := s.buildInteractionID(cName, group)
 	def := &slacker.InteractionDefinition{
 		InteractionID: interactionID,
 		Type:          slack.InteractionTypeBlockActions,
@@ -1759,6 +1761,134 @@ func (s *Slack) Error(msg string, args ...any) {
 	s.logger.Error(msg, args...)
 }
 
+func (s *Slack) getCommandGroupField(ident string) (common.Command, string, string) {
+
+	if utils.IsEmpty(ident) {
+		return nil, "", ""
+	}
+
+	delim := "-"
+	arr := strings.Split(ident, delim)
+	if len(arr) < 1 {
+		return nil, "", ""
+	}
+
+	c := ""
+	g := ""
+	f := ""
+
+	if len(arr) > 0 {
+		c = strings.TrimSpace(arr[0])
+	}
+	if len(arr) > 1 {
+		g = strings.TrimSpace(arr[1])
+	}
+	if len(arr) > 2 {
+		f = strings.TrimSpace(arr[2])
+	}
+
+	cmd := s.processors.FindCommand(g, c)
+	if cmd == nil {
+		if len(arr) > 1 {
+			f = strings.TrimSpace(strings.Join(arr[1:], delim))
+		}
+		g = ""
+		cmd = s.processors.FindCommand(g, c)
+	}
+	return cmd, g, f
+}
+
+func (s *Slack) unsupportedInteractionHandler(ctx *slacker.InteractionContext) {
+
+	callback := ctx.Callback()
+
+	// process suggestions
+	if callback.Type == slack.InteractionTypeBlockSuggestion {
+
+		//replier := ctx.Response()
+
+		if utils.IsEmpty(callback.Value) {
+			return
+		}
+
+		cmd, _, name := s.getCommandGroupField(callback.ActionID)
+		if cmd == nil {
+			return
+		}
+
+		user := &SlackUser{
+			id: callback.User.ID,
+		}
+
+		channel := &SlackChannel{
+			id: callback.Container.ChannelID,
+		}
+
+		msg := &SlackMessage{
+			id:              callback.Container.MessageTs,
+			visible:         !callback.Container.IsEphemeral,
+			user:            user,
+			threadTimestamp: callback.Container.ThreadTs,
+			channel:         channel,
+		}
+
+		fields := cmd.Fields(s, msg, []string{name})
+		var field *common.Field
+
+		for _, f := range fields {
+			if f.Name == name {
+				field = &f
+				break
+			}
+		}
+
+		if field == nil {
+			return
+		}
+
+		options := []*slack.OptionBlockObject{}
+		value := strings.ToLower(callback.Value)
+
+		for _, v := range field.Values {
+
+			vl := strings.ToLower(v)
+			if strings.Contains(vl, value) {
+
+				var h *slack.TextBlockObject
+				if !utils.IsEmpty(field.Hint) {
+					h = slack.NewTextBlockObject(slack.PlainTextType, field.Hint, false, false)
+				}
+
+				options = append(options,
+					slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h))
+			}
+		}
+
+		if len(options) == 0 {
+			return
+		}
+
+		resposne := slack.OptionsResponse{
+			Options: options,
+		}
+
+		_, err := json.Marshal(resposne)
+		if err != nil {
+			s.logger.Error(err)
+			return
+		}
+
+		/*
+			err := utils.HttpPostRawWithHeaders()
+			if err != nil {
+				s.logger.Error(err)
+				return
+			}
+		*/
+		return
+	}
+}
+
 func (s *Slack) start() {
 
 	options := []slacker.ClientOption{
@@ -1768,6 +1898,7 @@ func (s *Slack) start() {
 	}
 	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, options...)
 	client.UnsupportedCommandHandler(s.unsupportedCommandHandler)
+	client.UnsupportedInteractionHandler(s.unsupportedInteractionHandler)
 
 	s.defaultDefinition = nil
 	s.helpDefinition = nil
@@ -1796,7 +1927,7 @@ func (s *Slack) start() {
 
 			def := s.commandDefinition(c, "")
 			client.AddCommand(def)
-			if len(c.Fields(s, nil)) > 0 {
+			if len(c.Fields(s, nil, nil)) > 0 {
 				client.AddInteraction(s.interactionDefinition(c, ""))
 			}
 		}
@@ -1825,7 +1956,7 @@ func (s *Slack) start() {
 			}
 
 			group.AddCommand(s.commandDefinition(c, pName))
-			if len(c.Fields(s, nil)) > 0 {
+			if len(c.Fields(s, nil, nil)) > 0 {
 				client.AddInteraction(s.interactionDefinition(c, pName))
 			}
 		}
@@ -1863,7 +1994,7 @@ func (s *Slack) start() {
 					client.Help(def)
 				}
 				groupRoot.AddCommand(def)
-				if len(c.Fields(s, nil)) > 0 {
+				if len(c.Fields(s, nil, nil)) > 0 {
 					client.AddInteraction(s.interactionDefinition(c, ""))
 				}
 			}

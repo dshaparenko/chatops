@@ -271,22 +271,35 @@ func (de *DefaultExecutor) fAddFile(name string, data interface{}, typ string) s
 }
 
 func (de *DefaultExecutor) fRunFile(path string, obj interface{}) (string, error) {
+	if !utils.FileExists(path) {
+		return "", fmt.Errorf("Default couldn't find file %s", path)
+	}
 	return de.template.TemplateRenderFile(path, obj)
 }
 
 func (de *DefaultExecutor) fRunCommand(fileName string, obj interface{}) (string, error) {
 	s := de.filePath(de.command.processor.options.CommandsDir, fileName)
+	if !utils.FileExists(s) {
+		return "", fmt.Errorf("Default couldn't find command file %s", s)
+	}
 	return de.template.TemplateRenderFile(s, obj)
 }
 
 func (de *DefaultExecutor) fRunTemplate(fileName string, obj interface{}) (string, error) {
 	s := de.filePath(de.command.processor.options.TemplatesDir, fileName)
+	if !utils.FileExists(s) {
+		return "", fmt.Errorf("Default couldn't find template file %s", s)
+	}
 	return de.template.TemplateRenderFile(s, obj)
 }
 
 func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) (string, error) {
 
 	s := de.filePath(de.command.processor.options.RunbooksDir, fileName)
+	if !utils.FileExists(s) {
+		return "", fmt.Errorf("Default couldn't find runbook file %s", s)
+	}
+
 	ext := filepath.Ext(fileName)
 	name := strings.TrimSuffix(fileName, ext)
 
@@ -680,6 +693,10 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 
 func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams) (*DefaultExecutor, error) {
 
+	if !utils.FileExists(path) {
+		return nil, fmt.Errorf("Default couldn't find template %s", path)
+	}
+
 	content, err := utils.Content(path)
 	if err != nil {
 		return nil, fmt.Errorf("Default couldn't read template %s, error: %s", path, err)
@@ -984,113 +1001,123 @@ func (dc *DefaultCommand) Aliases() []string {
 	return dc.config.Aliases
 }
 
-func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message) []common.Field {
+func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []string) []common.Field {
 
-	if dc.config != nil {
-		if utils.IsEmpty(message) {
-			return dc.config.Fields
-		}
-
-		fields := &sync.Map{}
-		wGroup := &sync.WaitGroup{}
-
-		for _, field := range dc.config.Fields {
-
-			fPath := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), field.Template)
-			if utils.FileExists(fPath) {
-
-				wGroup.Add(1)
-				go func(wg *sync.WaitGroup, path string, f common.Field, fs *sync.Map) {
-					defer wGroup.Done()
-
-					name := fmt.Sprintf("%s-%s", dc.name, f.Name)
-					content, err := utils.Content(path)
-					if err != nil {
-						dc.logger.Error("Default template %s command %s field %s error: %s", path, dc.name, f.Name, err)
-						return
-					}
-
-					tOpts := toolsRender.TemplateOptions{
-						Name:    fmt.Sprintf("default-internal-%s", name),
-						Content: string(content),
-					}
-
-					t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
-					if err != nil {
-						dc.logger.Error("Default template %s command %s field %s create error: %s", path, dc.name, f.Name, err)
-						return
-					}
-
-					m := make(map[string]interface{})
-					m["bot"] = bot
-					m["message"] = message
-					m["channel"] = message.Channel()
-					m["user"] = message.User()
-					m["field"] = f
-
-					b, err := t.RenderObject(m)
-					if err != nil {
-						dc.logger.Error("Default template %s command %s field %s render error: %s", path, dc.name, f.Name, err)
-						return
-					}
-
-					var fnew = common.Field{}
-					err = json.Unmarshal(b, &fnew)
-					if err != nil {
-						dc.logger.Error("Default template %s command %s unmarshall field %s error: %s", path, dc.name, f.Name, err)
-						return
-					}
-					fields.Store(f.Name, fnew)
-
-				}(wGroup, fPath, field, fields)
-			}
-		}
-		wGroup.Wait()
-
-		newFields := []common.Field{}
-		for _, field := range dc.config.Fields {
-
-			newField := common.Field{
-				Name:     field.Name,
-				Type:     field.Type,
-				Label:    field.Label,
-				Default:  field.Default,
-				Hint:     field.Hint,
-				Required: field.Required,
-				Values:   field.Values,
-				Template: field.Template,
-			}
-			r, ok := fields.Load(field.Name)
-			if ok {
-				f, ok := r.(common.Field)
-				if !ok {
-					continue
-				}
-				if f.Type != "" {
-					newField.Type = f.Type
-				}
-				if !utils.IsEmpty(f.Label) {
-					newField.Label = f.Label
-				}
-				if !utils.IsEmpty(f.Default) {
-					newField.Default = f.Default
-				}
-				if !utils.IsEmpty(f.Hint) {
-					newField.Hint = f.Hint
-				}
-				if f.Required && !newField.Required {
-					newField.Required = f.Required
-				}
-				if len(f.Values) != 0 {
-					newField.Values = f.Values
-				}
-			}
-			newFields = append(newFields, newField)
-		}
-
-		return newFields
+	if dc.config == nil {
+		return []common.Field{}
 	}
-	return []common.Field{}
+
+	if utils.IsEmpty(message) {
+		return dc.config.Fields
+	}
+
+	fields := &sync.Map{}
+	wGroup := &sync.WaitGroup{}
+
+	for _, field := range dc.config.Fields {
+
+		skip := utils.IsEmpty(dc.processor.options.TemplatesDir)
+		if !skip && len(only) > 0 {
+			skip = !utils.Contains(only, field.Name)
+		}
+
+		if skip {
+			continue
+		}
+
+		fPath := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), field.Template)
+		if utils.FileExists(fPath) {
+
+			wGroup.Add(1)
+			go func(wg *sync.WaitGroup, path string, f common.Field, fs *sync.Map) {
+				defer wGroup.Done()
+
+				name := fmt.Sprintf("%s-%s", dc.name, f.Name)
+				content, err := utils.Content(path)
+				if err != nil {
+					dc.logger.Error("Default template %s command %s field %s error: %s", path, dc.name, f.Name, err)
+					return
+				}
+
+				tOpts := toolsRender.TemplateOptions{
+					Name:    fmt.Sprintf("default-internal-%s", name),
+					Content: string(content),
+				}
+
+				t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
+				if err != nil {
+					dc.logger.Error("Default template %s command %s field %s create error: %s", path, dc.name, f.Name, err)
+					return
+				}
+
+				m := make(map[string]interface{})
+				m["bot"] = bot
+				m["message"] = message
+				m["channel"] = message.Channel()
+				m["user"] = message.User()
+				m["field"] = f
+
+				b, err := t.RenderObject(m)
+				if err != nil {
+					dc.logger.Error("Default template %s command %s field %s render error: %s", path, dc.name, f.Name, err)
+					return
+				}
+
+				var fnew = common.Field{}
+				err = json.Unmarshal(b, &fnew)
+				if err != nil {
+					dc.logger.Error("Default template %s command %s unmarshall field %s error: %s", path, dc.name, f.Name, err)
+					return
+				}
+				fields.Store(f.Name, fnew)
+
+			}(wGroup, fPath, field, fields)
+		}
+	}
+	wGroup.Wait()
+
+	newFields := []common.Field{}
+	for _, field := range dc.config.Fields {
+
+		newField := common.Field{
+			Name:     field.Name,
+			Type:     field.Type,
+			Label:    field.Label,
+			Default:  field.Default,
+			Hint:     field.Hint,
+			Required: field.Required,
+			Values:   field.Values,
+			Template: field.Template,
+		}
+		r, ok := fields.Load(field.Name)
+		if ok {
+			f, ok := r.(common.Field)
+			if !ok {
+				continue
+			}
+			if f.Type != "" {
+				newField.Type = f.Type
+			}
+			if !utils.IsEmpty(f.Label) {
+				newField.Label = f.Label
+			}
+			if !utils.IsEmpty(f.Default) {
+				newField.Default = f.Default
+			}
+			if !utils.IsEmpty(f.Hint) {
+				newField.Hint = f.Hint
+			}
+			if f.Required && !newField.Required {
+				newField.Required = f.Required
+			}
+			if len(f.Values) != 0 {
+				newField.Values = f.Values
+			}
+		}
+		newFields = append(newFields, newField)
+	}
+
+	return newFields
 }
 
 func (dc *DefaultCommand) Priority() int {
