@@ -13,10 +13,11 @@ import (
 	"time"
 
 	"github.com/devopsext/chatops/common"
+	"github.com/devopsext/slacker"
 	sreCommon "github.com/devopsext/sre/common"
 	"github.com/devopsext/utils"
 	"github.com/slack-go/slack"
-	"github.com/slack-io/slacker"
+	"github.com/slack-go/slack/socketmode"
 )
 
 type SlackOptions struct {
@@ -1593,7 +1594,7 @@ func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker
 		InteractionID: interactionID,
 		Type:          slack.InteractionTypeBlockActions,
 	}
-	def.Handler = func(ic *slacker.InteractionContext) {
+	def.Handler = func(ic *slacker.InteractionContext, req *socketmode.Request) {
 
 		callback := ic.Callback()
 		replier := ic.Response()
@@ -1798,7 +1799,7 @@ func (s *Slack) getCommandGroupField(ident string) (common.Command, string, stri
 	return cmd, g, f
 }
 
-func (s *Slack) unsupportedInteractionHandler(ctx *slacker.InteractionContext) {
+func (s *Slack) unsupportedInteractionHandler(ctx *slacker.InteractionContext, req *socketmode.Request) {
 
 	callback := ctx.Callback()
 
@@ -1872,19 +1873,16 @@ func (s *Slack) unsupportedInteractionHandler(ctx *slacker.InteractionContext) {
 			Options: options,
 		}
 
-		_, err := json.Marshal(resposne)
+		res := socketmode.Response{
+			EnvelopeID: req.EnvelopeID,
+			Payload:    resposne,
+		}
+
+		err := s.client.SocketModeClient().SendCtx(s.ctx, res)
 		if err != nil {
 			s.logger.Error(err)
 			return
 		}
-
-		/*
-			err := utils.HttpPostRawWithHeaders()
-			if err != nil {
-				s.logger.Error(err)
-				return
-			}
-		*/
 		return
 	}
 }
