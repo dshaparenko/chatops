@@ -4,17 +4,19 @@ go 1.22
 
 replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.31.2
 
+replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-2
+
 //replace github.com/devopsext/tools => ./../tools
 //replace github.com/devopsext/slacker => ./../slacker
 
 require (
-	github.com/devopsext/slacker v0.1.1-2
 	github.com/devopsext/sre v0.4.0
 	github.com/devopsext/tools v0.14.15
 	github.com/devopsext/utils v0.4.2
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0
 	github.com/slack-go/slack v0.13.0
+	github.com/slack-io/slacker v0.1.1
 	github.com/spf13/cobra v1.8.0
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	gopkg.in/yaml.v2 v2.4.0

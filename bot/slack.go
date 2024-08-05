@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/devopsext/chatops/common"
-	"github.com/devopsext/slacker"
 	sreCommon "github.com/devopsext/sre/common"
 	"github.com/devopsext/utils"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	slacker "github.com/slack-io/slacker"
 )
 
 type SlackOptions struct {
