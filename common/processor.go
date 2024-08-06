@@ -62,7 +62,7 @@ type Command interface {
 	Params() []string
 	Aliases() []string
 	Confirmation() string
-	Fields(bot Bot, message Message) []Field
+	Fields(bot Bot, message Message, only []string) []Field
 	Priority() int
 	Wrapper() bool
 	Schedule() string
@@ -93,17 +93,19 @@ const (
 )
 
 const (
-	FieldTypeUnknown     = ""
-	FieldTypeEdit        = "edit"
-	FieldTypeMultiEdit   = "multiedit"
-	FieldTypeInteger     = "integer"
-	FieldTypeFloat       = "float"
-	FieldTypeURL         = "url"
-	FieldTypeDate        = "date"
-	FieldTypeTime        = "time"
-	FieldTypeSelect      = "select"
-	FieldTypeMultiSelect = "multiselect"
-	FieldTypeBool        = "bool"
+	FieldTypeUnknown            = ""
+	FieldTypeEdit               = "edit"
+	FieldTypeMultiEdit          = "multiedit"
+	FieldTypeInteger            = "integer"
+	FieldTypeFloat              = "float"
+	FieldTypeURL                = "url"
+	FieldTypeDate               = "date"
+	FieldTypeTime               = "time"
+	FieldTypeSelect             = "select"
+	FieldTypeMultiSelect        = "multiselect"
+	FieldTypeDynamicSelect      = "dynamicselect"
+	FieldTypeDynamicMultiSelect = "dynamicmultiselect"
+	FieldTypeBool               = "bool"
 )
 
 func (ps *Processors) Add(p Processor) {
