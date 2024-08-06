@@ -1661,9 +1661,9 @@ func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker
 							v = v2.SelectedDate
 						case "timepicker":
 							v = v2.SelectedTime
-						case "static_select":
+						case "static_select", "external_select":
 							v = v2.SelectedOption.Value
-						case "multi_static_select":
+						case "multi_static_select", "multi_external_select":
 							arr := []string{}
 							for _, v2 := range v2.SelectedOptions {
 								arr = append(arr, v2.Value)
