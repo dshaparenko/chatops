@@ -21,20 +21,21 @@ import (
 )
 
 type SlackOptions struct {
-	BotToken        string
-	AppToken        string
-	Debug           bool
-	ReactionDoing   string
-	ReactionDone    string
-	ReactionFailed  string
-	ReactionDialog  string
-	DefaultCommand  string
-	HelpCommand     string
-	Permisssions    string
-	Timeout         int
-	PublicChannel   string
-	AttachmentColor string
-	ErrorColor      string
+	BotToken         string
+	AppToken         string
+	Debug            bool
+	ReactionDoing    string
+	ReactionDone     string
+	ReactionFailed   string
+	ReactionDialog   string
+	DefaultCommand   string
+	HelpCommand      string
+	GroupPermissions string
+	UserPermissions  string
+	Timeout          int
+	PublicChannel    string
+	AttachmentColor  string
+	ErrorColor       string
 }
 
 type SlackUser struct {
@@ -458,10 +459,10 @@ func (s *Slack) findGroup(groups []slack.UserGroup, userID string, group *regexp
 }
 
 // .*=^(help|news|app|application|catalog)$,some=^(escalate)$
-func (s *Slack) denyAccess(userID string, command string) bool {
+func (s *Slack) denyGroupAccess(userID string, command string) bool {
 
-	if utils.IsEmpty(s.options.Permisssions) {
-		return false
+	if utils.IsEmpty(s.options.GroupPermissions) {
+		return true
 	}
 
 	if s.auth == nil {
@@ -479,7 +480,7 @@ func (s *Slack) denyAccess(userID string, command string) bool {
 		return false
 	}
 
-	permissions := utils.MapGetKeyValues(s.options.Permisssions)
+	permissions := utils.MapGetKeyValues(s.options.GroupPermissions)
 	for group, value := range permissions {
 
 		reCommand, err := regexp.Compile(value)
@@ -501,6 +502,49 @@ func (s *Slack) denyAccess(userID string, command string) bool {
 
 		mGroup := s.findGroup(groups, userID, reGroup)
 		if mGroup != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// .*=^(help|news|app|application|catalog)$,some=^(escalate)$
+func (s *Slack) denyUserAccess(userID string, command string) bool {
+
+	if utils.IsEmpty(s.options.UserPermissions) {
+		return true
+	}
+
+	if s.auth == nil {
+		return false
+	}
+
+	// bot itself
+	if s.auth.UserID == userID {
+		return false
+	}
+
+	userPermissions := utils.MapGetKeyValues(s.options.UserPermissions)
+	for user, value := range userPermissions {
+
+		reCommand, err := regexp.Compile(value)
+		if err != nil {
+			s.logger.Error("Slack command regex error: %s", err)
+			return true
+		}
+
+		mCommand := reCommand.MatchString(command)
+		if !mCommand {
+			continue
+		}
+
+		reUser, err := regexp.Compile(user)
+		if err != nil {
+			s.logger.Error("Slack user regex error: %s", err)
+			return true
+		}
+
+		if reUser.MatchString(userID) {
 			return false
 		}
 	}
@@ -1361,7 +1405,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		groupName = fmt.Sprintf("%s/%s", group, groupName)
 	}
 
-	if s.denyAccess(m.userID, groupName) {
+	if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(m.userID, groupName) {
 		s.logger.Debug("Slack command user %s is not permitted to execute %s", m.userID, groupName)
 		return nil
 	}
@@ -1422,7 +1466,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		if (def != s.defaultDefinition) && (def != s.helpDefinition) {
-			if s.denyAccess(m.userID, groupName) {
+			if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(m.userID, groupName) {
 				s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, groupName)
 				s.unsupportedCommandHandler(cc)
 				return
@@ -1479,7 +1523,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				wrapperGroupName = fmt.Sprintf("%s/%s", rGroup, rCmd)
 			}
 
-			if s.denyAccess(m.userID, wrapperGroupName) {
+			if s.denyGroupAccess(m.userID, wrapperGroupName) && s.denyUserAccess(m.userID, wrapperGroupName) {
 				s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
 				s.unsupportedCommandHandler(cc)
 				return

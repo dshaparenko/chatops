@@ -61,20 +61,21 @@ var telegramOptions = bot.TelegramOptions{
 }
 
 var slackOptions = bot.SlackOptions{
-	BotToken:        envGet("SLACK_BOT_TOKEN", "").(string),
-	AppToken:        envGet("SLACK_APP_TOKEN", "").(string),
-	Debug:           envGet("SLACK_DEBUG", false).(bool),
-	ReactionDoing:   envGet("SLACK_REACTION_DOING", "spinner").(string),
-	ReactionDone:    envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
-	ReactionFailed:  envGet("SLACK_REACTION_FAILED", "x").(string),
-	ReactionDialog:  envGet("SLACK_REACTION_DIALOG", "question").(string),
-	DefaultCommand:  envGet("SLACK_DEFAULT_COMMAND", "").(string),
-	HelpCommand:     envGet("SLACK_HELP_COMMAND", "").(string),
-	Permisssions:    envGet("SLACK_PERMISSIONS", "").(string),
-	Timeout:         envGet("SLACK_TIMEOUT", 5).(int),
-	PublicChannel:   envGet("SLACK_PUBLIC_CHANNEL", "").(string),
-	AttachmentColor: envGet("SLACK_ATTACHMENT_COLOR", "#555555").(string),
-	ErrorColor:      envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
+	BotToken:         envGet("SLACK_BOT_TOKEN", "").(string),
+	AppToken:         envGet("SLACK_APP_TOKEN", "").(string),
+	Debug:            envGet("SLACK_DEBUG", false).(bool),
+	ReactionDoing:    envGet("SLACK_REACTION_DOING", "spinner").(string),
+	ReactionDone:     envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
+	ReactionFailed:   envGet("SLACK_REACTION_FAILED", "x").(string),
+	ReactionDialog:   envGet("SLACK_REACTION_DIALOG", "question").(string),
+	DefaultCommand:   envGet("SLACK_DEFAULT_COMMAND", "").(string),
+	HelpCommand:      envGet("SLACK_HELP_COMMAND", "").(string),
+	GroupPermissions: envGet("SLACK_GROUP_PERMISSIONS", "").(string),
+	UserPermissions:  envGet("SLACK_USER_PERMISSIONS", "").(string),
+	Timeout:          envGet("SLACK_TIMEOUT", 5).(int),
+	PublicChannel:    envGet("SLACK_PUBLIC_CHANNEL", "").(string),
+	AttachmentColor:  envGet("SLACK_ATTACHMENT_COLOR", "#555555").(string),
+	ErrorColor:       envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{
@@ -274,7 +275,8 @@ func Execute() {
 	flags.StringVar(&slackOptions.ReactionFailed, "slack-reaction-failed", slackOptions.ReactionFailed, "Slack reaction failed name")
 	flags.StringVar(&slackOptions.DefaultCommand, "slack-default-command", slackOptions.DefaultCommand, "Slack default command")
 	flags.StringVar(&slackOptions.HelpCommand, "slack-help-command", slackOptions.HelpCommand, "Slack help command")
-	flags.StringVar(&slackOptions.Permisssions, "slack-permissions", slackOptions.Permisssions, "Slack permissions")
+	flags.StringVar(&slackOptions.GroupPermissions, "slack-group-permissions", slackOptions.GroupPermissions, "Slack group permissions")
+	flags.StringVar(&slackOptions.UserPermissions, "slack-user-permissions", slackOptions.UserPermissions, "Slack user permissions")
 	flags.IntVar(&slackOptions.Timeout, "slack-timeout", slackOptions.Timeout, "Slack timeout")
 	flags.StringVar(&slackOptions.PublicChannel, "slack-public-channel", slackOptions.PublicChannel, "Slack public channel")
 	flags.StringVar(&slackOptions.AttachmentColor, "slack-attachment-color", slackOptions.AttachmentColor, "Slack attachment color")
