@@ -1,6 +1,6 @@
 module github.com/devopsext/chatops
 
-go 1.22
+go 1.23
 
 replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.31.2
 
@@ -11,8 +11,8 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-2
 
 require (
 	github.com/devopsext/sre v0.4.0
-	github.com/devopsext/tools v0.14.15
-	github.com/devopsext/utils v0.4.2
+	github.com/devopsext/tools v0.15.5
+	github.com/devopsext/utils v0.4.3
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0
 	github.com/slack-go/slack v0.13.0
