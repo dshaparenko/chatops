@@ -1,6 +1,6 @@
 module github.com/devopsext/chatops
 
-go 1.22
+go 1.23
 
 replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.31.2
 

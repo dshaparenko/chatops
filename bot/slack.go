@@ -134,6 +134,7 @@ type slackMessageInfo struct {
 	typ             string
 	text            string
 	userID          string
+	botID           string
 	channelID       string
 	timestamp       string
 	threadTimestamp string
@@ -509,7 +510,7 @@ func (s *Slack) denyGroupAccess(userID string, command string) bool {
 }
 
 // .*=^(help|news|app|application|catalog)$,some=^(escalate)$
-func (s *Slack) denyUserAccess(userID string, command string) bool {
+func (s *Slack) denyUserAccess(userID, userName string, command string) bool {
 
 	if utils.IsEmpty(s.options.UserPermissions) {
 		return true
@@ -538,13 +539,19 @@ func (s *Slack) denyUserAccess(userID string, command string) bool {
 			continue
 		}
 
-		reUser, err := regexp.Compile(user)
+		reUserID, err := regexp.Compile(user)
 		if err != nil {
-			s.logger.Error("Slack user regex error: %s", err)
+			s.logger.Error("Slack user ID regex error: %s", err)
 			return true
 		}
 
-		if reUser.MatchString(userID) {
+		reUserName, err := regexp.Compile(user)
+		if err != nil {
+			s.logger.Error("Slack user name regex error: %s", err)
+			return true
+		}
+
+		if reUserID.MatchString(userID) || reUserName.MatchString(userName) {
 			return false
 		}
 	}
@@ -1377,10 +1384,14 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
+	userName := ""
 	u, err := s.client.SlackClient().GetUserInfo(user.ID())
 	if err != nil {
 		s.logger.Debug("Slack command has no user for text: %s", text)
 		return err
+	}
+	if u != nil {
+		userName = u.RealName
 	}
 
 	m := &slackMessageInfo{
@@ -1405,7 +1416,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		groupName = fmt.Sprintf("%s/%s", group, groupName)
 	}
 
-	if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(m.userID, groupName) {
+	if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(m.userID, userName, groupName) {
 		s.logger.Debug("Slack command user %s is not permitted to execute %s", m.userID, groupName)
 		return nil
 	}
@@ -1441,21 +1452,62 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 	def.Handler = func(cc *slacker.CommandContext) {
 
 		event := cc.Event()
+
+		if utils.IsEmpty(event.UserID) && utils.IsEmpty(event.BotID) {
+			s.logger.Error("Slack has no user nor bot ID")
+		}
+
+		var user *slack.User
+
+		userName := ""
+		userID := ""
+
+		if !utils.IsEmpty(event.UserID) {
+
+			u, err := cc.SlackClient().GetUserInfo(event.UserID)
+			if err != nil {
+				s.logger.Error("Slack couldn't get user for %s: %s", event.UserID, err)
+			}
+			if u != nil {
+				user = u
+				userName = u.RealName
+				userID = u.ID
+			}
+		} else if !utils.IsEmpty(event.BotID) {
+
+			bot, err := cc.SlackClient().GetBotInfo(slack.GetBotInfoParameters{Bot: event.BotID})
+			if err != nil {
+				s.logger.Error("Slack couldn't get bot for %s: %s", event.BotID, err)
+			}
+			if bot != nil {
+				u, err := cc.SlackClient().GetUserInfo(bot.UserID)
+				if err != nil {
+					s.logger.Error("Slack couldn't get user for %s: %s", bot.UserID, err)
+				}
+				if u != nil {
+					user = u
+					userName = u.RealName
+					userID = u.ID
+				}
+			}
+		}
+
+		if utils.IsEmpty(userID) {
+			s.logger.Error("Slack couldn't process command from unknown user")
+			return
+		}
+
 		m := &slackMessageInfo{
 			typ:             event.Type,
 			text:            event.Text,
-			userID:          event.UserID,
+			userID:          userID,
+			botID:           event.BotID,
 			channelID:       event.ChannelID,
 			timestamp:       event.TimeStamp,
 			threadTimestamp: event.ThreadTimeStamp,
 		}
 
 		replier := cc.Response()
-
-		user, err := cc.SlackClient().GetUserInfo(m.userID)
-		if err != nil {
-			s.logger.Error("Slack couldn't get user for %s: %s", m.userID, err)
-		}
 
 		text := s.prepareInputText(m.text, m.typ)
 		s.updateCounters(group, cName, text, m.userID)
@@ -1466,8 +1518,8 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		if (def != s.defaultDefinition) && (def != s.helpDefinition) {
-			if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(m.userID, groupName) {
-				s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, groupName)
+			if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(userID, userName, groupName) {
+				s.logger.Debug("Slack user %s is not permitted to execute %s", userID, groupName)
 				s.unsupportedCommandHandler(cc)
 				return
 			}
@@ -1523,7 +1575,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				wrapperGroupName = fmt.Sprintf("%s/%s", rGroup, rCmd)
 			}
 
-			if s.denyGroupAccess(m.userID, wrapperGroupName) && s.denyUserAccess(m.userID, wrapperGroupName) {
+			if s.denyGroupAccess(m.userID, wrapperGroupName) && s.denyUserAccess(userID, userName, wrapperGroupName) {
 				s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
 				s.unsupportedCommandHandler(cc)
 				return
@@ -1538,7 +1590,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
 
-		if s.interactionNeeded(rFields, rParams) {
+		if s.interactionNeeded(rFields, rParams) && user != nil {
 			shown, err := s.replyInteraction(rCmd, rGroup, confirmation, rFields, rParams, m, user, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
@@ -1567,7 +1619,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
 
-		err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
+		err := s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
@@ -1936,7 +1988,7 @@ func (s *Slack) start() {
 	options := []slacker.ClientOption{
 		slacker.WithDebug(s.options.Debug),
 		slacker.WithLogger(s),
-		slacker.WithBotMode(slacker.BotModeIgnoreNone),
+		slacker.WithBotMode(slacker.BotModeIgnoreApp),
 	}
 	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, options...)
 	client.UnsupportedCommandHandler(s.unsupportedCommandHandler)
