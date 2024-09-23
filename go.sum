@@ -52,8 +52,8 @@ github.com/devopsext/slacker v0.1.1-2 h1:HfYYL1rEy0yzvDudOK/kj7UNGx03QhoOnWjNwlD
 github.com/devopsext/slacker v0.1.1-2/go.mod h1:0dIY7rxW5j4aSRq+rg79dpg3My012uZdGrzFmewSKUA=
 github.com/devopsext/sre v0.4.0 h1:rhluc/yllYDmsGQarpywKhwIOFwj41qJYmWbuQJath8=
 github.com/devopsext/sre v0.4.0/go.mod h1:gAiuJZ+KwiR17KEqCo+rp2uUS2B5hyL9/CaKm2Pko7Q=
-github.com/devopsext/tools v0.15.6 h1:Licle16nxaxg7McJsqBd35tO26JT2I3s2IupghvfdK0=
-github.com/devopsext/tools v0.15.6/go.mod h1:FXft1ABAA2XYDnbg6ElDyQHPUXXp/GRPQRFQ1R1Cz8Y=
+github.com/devopsext/tools v0.15.9 h1:BymhFTWImkpi/EId54hqFsvHCvulCqKEv1ox4tKNaCQ=
+github.com/devopsext/tools v0.15.9/go.mod h1:hxODvfP8DSHPqvc73cOcRdLWkFUvCPJYdp12lmQQGjs=
 github.com/devopsext/utils v0.4.3 h1:PbAlmjtWjppKFBG479xKkiD5U8OUbXcDRivRMW7L4Pg=
 github.com/devopsext/utils v0.4.3/go.mod h1:Vg3Jxxr4i9JXPmhaZo7TvY+OEr3W3QlZDXmbN8ScU5k=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
