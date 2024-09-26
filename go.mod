@@ -11,8 +11,8 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-2
 
 require (
 	github.com/devopsext/sre v0.4.0
-	github.com/devopsext/tools v0.15.9
-	github.com/devopsext/utils v0.4.3
+	github.com/devopsext/tools v0.15.11
+	github.com/devopsext/utils v0.4.6
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jinzhu/copier v0.4.0
 	github.com/slack-go/slack v0.13.0
