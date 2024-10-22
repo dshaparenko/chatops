@@ -936,6 +936,18 @@ func (s *Slack) buildInteractionID(command, group string) string {
 	return fmt.Sprintf("%s-%s", command, group)
 }
 
+func (s *Slack) getInteractionGroupCommand(interactionID string) (string, string) {
+
+	items := strings.Split(interactionID, "-")
+	if len(items) == 1 {
+		return items[0], ""
+	}
+	if len(items) == 2 {
+		return items[1], items[0]
+	}
+	return interactionID, ""
+}
+
 func (s *Slack) buildActionID(interaction, name string) string {
 
 	if utils.IsEmpty(name) {
@@ -1526,7 +1538,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		wrapper := cmd.Wrapper()
-		eParams, eCmd, _, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
+		eParams, eCmd, eGroup, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
 
 		if s.auth != nil && s.auth.UserID == m.userID && eCmd == nil {
 			return
@@ -1550,7 +1562,17 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		rCmd := cName
+
+		eCmdName := eCmd.Name()
+		if !utils.IsEmpty(eCmdName) {
+			cmd = eCmd
+			rCmd = eCmdName
+		}
+
 		rGroup := group
+		if !utils.IsEmpty(eGroup) {
+			rGroup = eGroup
+		}
 
 		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
 		only := s.getFieldsByType(cmd, list)
@@ -1691,6 +1713,12 @@ func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker
 		Type:          slack.InteractionTypeBlockActions,
 	}
 	def.Handler = func(ic *slacker.InteractionContext, req *socketmode.Request) {
+
+		cName, cGroup := s.getInteractionGroupCommand(interactionID)
+		eCmd := s.processors.FindCommand(cGroup, cName)
+		if eCmd != nil {
+			cmd = eCmd
+		}
 
 		callback := ic.Callback()
 		replier := ic.Response()
