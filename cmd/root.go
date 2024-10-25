@@ -14,6 +14,7 @@ import (
 	"github.com/devopsext/chatops/bot"
 	"github.com/devopsext/chatops/common"
 	"github.com/devopsext/chatops/processor"
+	"github.com/slack-go/slack"
 
 	sreCommon "github.com/devopsext/sre/common"
 	sreProvider "github.com/devopsext/sre/provider"
@@ -61,21 +62,25 @@ var telegramOptions = bot.TelegramOptions{
 }
 
 var slackOptions = bot.SlackOptions{
-	BotToken:         envGet("SLACK_BOT_TOKEN", "").(string),
-	AppToken:         envGet("SLACK_APP_TOKEN", "").(string),
-	Debug:            envGet("SLACK_DEBUG", false).(bool),
-	ReactionDoing:    envGet("SLACK_REACTION_DOING", "spinner").(string),
-	ReactionDone:     envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
-	ReactionFailed:   envGet("SLACK_REACTION_FAILED", "x").(string),
-	ReactionDialog:   envGet("SLACK_REACTION_DIALOG", "question").(string),
-	DefaultCommand:   envGet("SLACK_DEFAULT_COMMAND", "").(string),
-	HelpCommand:      envGet("SLACK_HELP_COMMAND", "").(string),
-	GroupPermissions: envGet("SLACK_GROUP_PERMISSIONS", "").(string),
-	UserPermissions:  envGet("SLACK_USER_PERMISSIONS", "").(string),
-	Timeout:          envGet("SLACK_TIMEOUT", 5).(int),
-	PublicChannel:    envGet("SLACK_PUBLIC_CHANNEL", "").(string),
-	AttachmentColor:  envGet("SLACK_ATTACHMENT_COLOR", "#555555").(string),
-	ErrorColor:       envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
+	BotToken:            envGet("SLACK_BOT_TOKEN", "").(string),
+	AppToken:            envGet("SLACK_APP_TOKEN", "").(string),
+	Debug:               envGet("SLACK_DEBUG", false).(bool),
+	ReactionDoing:       envGet("SLACK_REACTION_DOING", "spinner").(string),
+	ReactionDone:        envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
+	ReactionFailed:      envGet("SLACK_REACTION_FAILED", "x").(string),
+	ReactionDialog:      envGet("SLACK_REACTION_DIALOG", "question").(string),
+	DefaultCommand:      envGet("SLACK_DEFAULT_COMMAND", "").(string),
+	HelpCommand:         envGet("SLACK_HELP_COMMAND", "").(string),
+	GroupPermissions:    envGet("SLACK_GROUP_PERMISSIONS", "").(string),
+	UserPermissions:     envGet("SLACK_USER_PERMISSIONS", "").(string),
+	Timeout:             envGet("SLACK_TIMEOUT", 5).(int),
+	PublicChannel:       envGet("SLACK_PUBLIC_CHANNEL", "").(string),
+	AttachmentColor:     envGet("SLACK_ATTACHMENT_COLOR", "#555555").(string),
+	ErrorColor:          envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
+	ButtonSubmitCaption: envGet("SLACK_BUTTON_SUBMIT_CAPTION", "Submit").(string),
+	ButtonSubmitStyle:   envGet("SLACK_BUTTON_SUBMIT_STYLE", string(slack.StylePrimary)).(string),
+	ButtonCancelCaption: envGet("SLACK_BUTTON_CANCEL_CAPTION", "Cancel").(string),
+	ButtonCancelStyle:   envGet("SLACK_BUTTON_CANCEL_STYLE", "").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{

@@ -21,21 +21,25 @@ import (
 )
 
 type SlackOptions struct {
-	BotToken         string
-	AppToken         string
-	Debug            bool
-	ReactionDoing    string
-	ReactionDone     string
-	ReactionFailed   string
-	ReactionDialog   string
-	DefaultCommand   string
-	HelpCommand      string
-	GroupPermissions string
-	UserPermissions  string
-	Timeout          int
-	PublicChannel    string
-	AttachmentColor  string
-	ErrorColor       string
+	BotToken            string
+	AppToken            string
+	Debug               bool
+	ReactionDoing       string
+	ReactionDone        string
+	ReactionFailed      string
+	ReactionDialog      string
+	DefaultCommand      string
+	HelpCommand         string
+	GroupPermissions    string
+	UserPermissions     string
+	Timeout             int
+	PublicChannel       string
+	AttachmentColor     string
+	ErrorColor          string
+	ButtonSubmitCaption string
+	ButtonSubmitStyle   string
+	ButtonCancelCaption string
+	ButtonCancelStyle   string
 }
 
 type SlackUser struct {
@@ -956,23 +960,6 @@ func (s *Slack) buildActionID(interaction, name string) string {
 	return fmt.Sprintf("%s-%s", interaction, name)
 }
 
-/*func (s *Slack) findParamValue(re *regexp.Regexp, name, text string) string {
-
-	if re == nil {
-		return text
-	}
-	match := re.FindStringSubmatch(text)
-	if len(match) != 0 {
-		names := re.SubexpNames()
-		for i, n := range names {
-			if i != 0 && n == name {
-				return match[i]
-			}
-		}
-	}
-	return text
-}*/
-
 func (s *Slack) replyInteraction(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
 	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
@@ -1175,8 +1162,8 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 	}
 	sv := base64.StdEncoding.EncodeToString(data)
 
-	submit := slack.NewButtonBlockElement(slackSubmitAction, sv, slack.NewTextBlockObject(slack.PlainTextType, "Submit", false, false))
-	submit.Style = slack.StylePrimary
+	submit := slack.NewButtonBlockElement(slackSubmitAction, sv, slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonSubmitCaption, false, false))
+	submit.Style = slack.Style(s.options.ButtonSubmitStyle)
 
 	if !utils.IsEmpty(confirmation) {
 		submit.Confirm = slack.NewConfirmationBlockObject(
@@ -1187,7 +1174,8 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 		)
 	}
 
-	cancel := slack.NewButtonBlockElement(slackCancelAction, sv, slack.NewTextBlockObject(slack.PlainTextType, "Cancel", false, false))
+	cancel := slack.NewButtonBlockElement(slackCancelAction, sv, slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonCancelCaption, false, false))
+	cancel.Style = slack.Style(s.options.ButtonCancelStyle)
 
 	ab := slack.NewActionBlock(interactionID, submit, cancel)
 	blocks = append(blocks, ab)
@@ -1200,14 +1188,6 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 	}
 	return true, nil
 }
-
-/*func (s *Slack) messageInThread(messageId, threadId string, visible bool) bool {
-
-	if
-	if !visible {
-		return
-	}
-}*/
 
 func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slack.User,
 	replier interface{}, params common.ExecuteParams, response common.Response, reaction bool) error {
@@ -1343,7 +1323,7 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 	return executor.After(msg2)
 }
 
-func (s *Slack) interactionNeeded(fields []common.Field, params map[string]interface{}) bool {
+func (s *Slack) interactionNeeded(confirmation string, fields []common.Field, params map[string]interface{}) bool {
 
 	if params == nil {
 		return len(fields) > 0
@@ -1368,7 +1348,7 @@ func (s *Slack) interactionNeeded(fields []common.Field, params map[string]inter
 			}
 		}
 	}
-	return len(required) > len(arr)
+	return len(required) > len(arr) || !utils.IsEmpty(confirmation)
 }
 
 func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
@@ -1437,7 +1417,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	only := s.getFieldsByType(cmd, list)
 
 	fields := cmd.Fields(s, parent, only)
-	if s.interactionNeeded(fields, params) {
+	if s.interactionNeeded(cmd.Confirmation(), fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
 		return nil
 	}
@@ -1540,7 +1520,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		wrapper := cmd.Wrapper()
 		eParams, eCmd, eGroup, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
 
-		if s.auth != nil && s.auth.UserID == m.userID && eCmd == nil {
+		if s.auth != nil && s.auth.UserID == m.userID {
 			return
 		}
 
@@ -1563,10 +1543,12 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rCmd := cName
 
-		eCmdName := eCmd.Name()
-		if !utils.IsEmpty(eCmdName) {
-			cmd = eCmd
-			rCmd = eCmdName
+		if eCmd != nil {
+			eCmdName := eCmd.Name()
+			if !utils.IsEmpty(eCmdName) {
+				cmd = eCmd
+				rCmd = eCmdName
+			}
 		}
 
 		rGroup := group
@@ -1612,7 +1594,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
 
-		if s.interactionNeeded(rFields, rParams) && user != nil {
+		if s.interactionNeeded(confirmation, rFields, rParams) && user != nil {
 			shown, err := s.replyInteraction(rCmd, rGroup, confirmation, rFields, rParams, m, user, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
