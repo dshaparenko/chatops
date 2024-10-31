@@ -21,25 +21,35 @@ import (
 )
 
 type SlackOptions struct {
-	BotToken            string
-	AppToken            string
-	Debug               bool
-	ReactionDoing       string
-	ReactionDone        string
-	ReactionFailed      string
-	ReactionDialog      string
-	DefaultCommand      string
-	HelpCommand         string
-	GroupPermissions    string
-	UserPermissions     string
-	Timeout             int
-	PublicChannel       string
-	AttachmentColor     string
-	ErrorColor          string
-	ButtonSubmitCaption string
-	ButtonSubmitStyle   string
-	ButtonCancelCaption string
-	ButtonCancelStyle   string
+	BotToken          string
+	AppToken          string
+	Debug             bool
+	DefaultCommand    string
+	HelpCommand       string
+	GroupPermissions  string
+	UserPermissions   string
+	Timeout           int
+	PublicChannel     string
+	AttachmentColor   string
+	ErrorColor        string
+	TitleConfirmation string
+	ApprovedMessage   string
+	RejectedMessage   string
+
+	ReactionDoing    string
+	ReactionDone     string
+	ReactionFailed   string
+	ReactionDialog   string
+	ReactionApproved string
+	ReactionRejected string
+
+	ButtonSubmitCaption  string
+	ButtonSubmitStyle    string
+	ButtonCancelCaption  string
+	ButtonCancelStyle    string
+	ButtonConfirmCaption string
+	ButtonRejectCaption  string
+	ButtonApproveCaption string
 }
 
 type SlackUser struct {
@@ -123,9 +133,20 @@ type SlackFileBlock struct {
 	BlockID    string                 `json:"block_id,omitempty"`
 }
 
+const (
+	SlackButtonValueFormType     string = "form"
+	SlackButtonValueApprovalType string = "approval"
+)
+
 type SlackButtonValue struct {
+	Type      string
 	Timestamp string
+	ChannelID string
+	UserID    string
 	Text      string
+	Command   string
+	Group     string
+	Params    common.ExecuteParams
 	Wrapped   string
 	Wrapper   string
 }
@@ -161,8 +182,6 @@ const (
 	slackMaxTextBlockLength          = 3000
 	slackSubmitAction                = "submit"
 	slackCancelAction                = "cancel"
-	slackConfirmAction               = "confirm"
-	slackTitleConfirmation           = "Confirmation"
 )
 
 // SlackRichTextQuote
@@ -901,7 +920,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	}
 
 	// default => command as text
-	// durty trick
+	// dirty trick
 
 	slackOpts := []slack.MsgOption{
 		slack.MsgOptionText("", false),
@@ -960,7 +979,7 @@ func (s *Slack) buildActionID(interaction, name string) string {
 	return fmt.Sprintf("%s-%s", interaction, name)
 }
 
-func (s *Slack) replyInteraction(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
+func (s *Slack) replyForm(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
 	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
 	threadTS := m.threadTimestamp
@@ -1151,6 +1170,12 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 
 	// pass message timestamp & text to each button
 	value := &SlackButtonValue{
+		Type:      SlackButtonValueFormType,
+		ChannelID: m.channelID,
+		UserID:    m.userID,
+		Command:   command,
+		Group:     group,
+		Params:    params,
 		Timestamp: m.timestamp,
 		Text:      m.text,
 		Wrapped:   m.wrapped,
@@ -1167,10 +1192,10 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 
 	if !utils.IsEmpty(confirmation) {
 		submit.Confirm = slack.NewConfirmationBlockObject(
-			slack.NewTextBlockObject(slack.PlainTextType, slackTitleConfirmation, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, s.options.TitleConfirmation, false, false),
 			slack.NewTextBlockObject(slack.PlainTextType, confirmation, false, false),
-			slack.NewTextBlockObject(slack.PlainTextType, slackConfirmAction, false, false),
-			slack.NewTextBlockObject(slack.PlainTextType, slackCancelAction, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonConfirmCaption, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonRejectCaption, false, false),
 		)
 	}
 
@@ -1182,6 +1207,77 @@ func (s *Slack) replyInteraction(command, group, confirmation string, fields []c
 
 	s.addReaction(m, s.options.ReactionDialog)
 	_, err = replier.PostBlocks(m.channelID, blocks, opts...)
+	if err != nil {
+		s.removeReaction(m, s.options.ReactionDialog)
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Slack) askApproval(approval common.Approval, command, group string,
+	m *slackMessageInfo, u *slack.User, params common.ExecuteParams, replier *slacker.ResponseReplier) (bool, error) {
+
+	opts := []slacker.PostOption{}
+
+	blocks := []slack.Block{}
+	interactionID := s.buildInteractionID(command, group)
+
+	user := &SlackUser{
+		id: m.userID,
+	}
+	if u != nil {
+		user.name = u.Profile.DisplayName
+		user.timezone = u.TZ
+	}
+
+	channel := &SlackChannel{
+		id: m.channelID,
+	}
+
+	msg := &SlackMessage{
+		id:              m.timestamp,
+		user:            user,
+		threadTimestamp: m.threadTimestamp,
+		channel:         channel,
+	}
+
+	message := approval.Message(s, msg, params)
+
+	blocks = append(blocks, slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, message, false, false),
+		[]*slack.TextBlockObject{}, nil,
+	))
+
+	// pass message timestamp & text to each button
+	value := &SlackButtonValue{
+		Type:      SlackButtonValueApprovalType,
+		ChannelID: m.channelID,
+		UserID:    m.userID,
+		Command:   command,
+		Group:     group,
+		Params:    params,
+		Timestamp: m.timestamp,
+		Text:      m.text,
+		Wrapped:   m.wrapped,
+		Wrapper:   m.wrapper,
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	sv := base64.StdEncoding.EncodeToString(data)
+
+	submit := slack.NewButtonBlockElement(slackSubmitAction, sv, slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonApproveCaption, false, false))
+	submit.Style = slack.Style(s.options.ButtonSubmitStyle)
+
+	cancel := slack.NewButtonBlockElement(slackCancelAction, sv, slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonRejectCaption, false, false))
+	cancel.Style = slack.Style(s.options.ButtonCancelStyle)
+
+	ab := slack.NewActionBlock(interactionID, submit, cancel)
+	blocks = append(blocks, ab)
+
+	s.addReaction(m, s.options.ReactionDialog)
+	_, err = replier.PostBlocks(approval.Channel(), blocks, opts...)
 	if err != nil {
 		s.removeReaction(m, s.options.ReactionDialog)
 		return false, err
@@ -1323,7 +1419,7 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 	return executor.After(msg2)
 }
 
-func (s *Slack) interactionNeeded(confirmation string, fields []common.Field, params map[string]interface{}) bool {
+func (s *Slack) formNeeded(confirmation string, fields []common.Field, params map[string]interface{}) bool {
 
 	if params == nil {
 		return len(fields) > 0
@@ -1349,6 +1445,14 @@ func (s *Slack) interactionNeeded(confirmation string, fields []common.Field, pa
 		}
 	}
 	return len(required) > len(arr) || !utils.IsEmpty(confirmation)
+}
+
+func (s *Slack) approvalNeeded(approval common.Approval) bool {
+
+	if approval == nil {
+		return false
+	}
+	return !utils.IsEmpty(approval.Channel())
 }
 
 func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
@@ -1417,7 +1521,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	only := s.getFieldsByType(cmd, list)
 
 	fields := cmd.Fields(s, parent, only)
-	if s.interactionNeeded(cmd.Confirmation(), fields, params) {
+	if s.formNeeded(cmd.Confirmation(), fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
 		return nil
 	}
@@ -1594,8 +1698,8 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			m.wrapper = fmt.Sprintf("%s/%s", group, cName)
 		}
 
-		if s.interactionNeeded(confirmation, rFields, rParams) && user != nil {
-			shown, err := s.replyInteraction(rCmd, rGroup, confirmation, rFields, rParams, m, user, replier)
+		if s.formNeeded(confirmation, rFields, rParams) && user != nil {
+			shown, err := s.replyForm(rCmd, rGroup, confirmation, rFields, rParams, m, user, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -1621,6 +1725,19 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			}
 		}
 
+		approval := cmd.Approval()
+		if s.approvalNeeded(approval) {
+			shown, err := s.askApproval(approval, rCmd, rGroup, m, user, rParams, replier)
+			if err != nil {
+				s.replyError(cName, m, replier, err, []*common.Attachment{})
+				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+				return
+			}
+			if shown {
+				return
+			}
+		}
+
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
 
 		err := s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
@@ -1632,12 +1749,52 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 	return def
 }
 
-func (s *Slack) hideInteraction(m *slackMessageInfo, responseURL string) {
+func (s *Slack) removeMessage(m *slackMessageInfo, responseURL string) {
 	s.client.SlackClient().PostEphemeral(m.channelID, m.userID,
 		slack.MsgOptionReplaceOriginal(responseURL),
 		slack.MsgOptionDeleteOriginal(responseURL),
 	)
 }
+
+func (s *Slack) replaceMessage(m *slackMessageInfo, responseURL string, blocks []slack.Block) {
+
+	s.client.SlackClient().PostEphemeral(m.channelID, m.userID,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionReplaceOriginal(responseURL),
+	)
+}
+
+func (s *Slack) replaceApprovalMessage(m *slackMessageInfo, responseURL string, mblocks []slack.Block, message string) {
+
+	blocks := []slack.Block{}
+	for _, block := range mblocks {
+		if block.BlockType() != slack.MBTAction {
+			blocks = append(blocks, block)
+		}
+	}
+
+	if !utils.IsEmpty(message) {
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, message, false, false),
+			[]*slack.TextBlockObject{}, nil,
+		))
+	}
+	s.replaceMessage(m, responseURL, blocks)
+}
+
+/*func (s *Slack) replyInThread(m *slackMessageInfo, message string) {
+
+	blocks := []slack.Block{}
+	blocks = append(blocks, slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, message, false, false),
+		[]*slack.TextBlockObject{}, nil,
+	))
+
+	s.client.SlackClient().PostMessage(m.channelID,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionTS(m.timestamp),
+	)
+}*/
 
 func (s *Slack) Post(channel string, message string, attachments []*common.Attachment, user common.User, parent common.Message, response common.Response) error {
 
@@ -1686,137 +1843,175 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 	return err
 }
 
-func (s *Slack) interactionDefinition(cmd common.Command, group string) *slacker.InteractionDefinition {
+func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 
-	cName := cmd.Name()
+	callback := ctx.Callback()
+	replier := ctx.Response()
+
+	m := &slackMessageInfo{
+		typ:             callback.Container.Type,
+		text:            "", // get this from button value
+		userID:          callback.User.ID,
+		channelID:       callback.Container.ChannelID,
+		timestamp:       "",                          // get this from button value
+		threadTimestamp: callback.Container.ThreadTs, // keep thread TS
+	}
+
+	actions := callback.ActionCallback.BlockActions
+	if len(actions) == 0 {
+		s.logger.Error("Slack actions are not defined.")
+		s.removeReaction(m, s.options.ReactionDialog)
+		return
+	}
+
+	action := actions[0]
+
+	data, err := base64.StdEncoding.DecodeString(action.Value)
+	if err != nil {
+		s.removeReaction(m, s.options.ReactionDialog)
+		return
+	}
+
+	value := &SlackButtonValue{}
+	err = json.Unmarshal(data, value)
+	if err != nil {
+		s.removeReaction(m, s.options.ReactionDialog)
+		return
+	}
+
+	cmd := s.processors.FindCommand(value.Group, value.Command)
+	if cmd == nil {
+		s.logger.Error("Slack command is missed.")
+		s.removeReaction(m, s.options.ReactionDialog)
+		return
+	}
+
+	params := make(common.ExecuteParams)
+	interactionID := s.buildInteractionID(value.Command, value.Group)
+
+	switch value.Type {
+	case SlackButtonValueFormType:
+
+		// set original message TS & text
+		m.timestamp = value.Timestamp
+		m.text = value.Text
+		s.removeMessage(m, callback.ResponseURL)
+
+	case SlackButtonValueApprovalType:
+
+		if callback.User.ID == value.UserID {
+			s.logger.Error("Slack same user cannot approve its action.")
+			return
+		}
+
+		// this is approval message TS
+		m.timestamp = callback.Container.MessageTs
+
+		message := ""
+		reaction := common.IfDef(action.ActionID == slackSubmitAction, s.options.ReactionApproved, s.options.ReactionRejected)
+		mdef := common.IfDef(action.ActionID == slackSubmitAction, s.options.ApprovedMessage, s.options.RejectedMessage)
+		if !utils.IsEmpty(mdef) {
+			user := fmt.Sprintf("@%s", callback.User.Name)
+			message = fmt.Sprintf(mdef.(string), user, time.Now().Format("15:04:05"))
+			message = fmt.Sprintf(":%s: %s", reaction, message)
+		}
+		s.replaceApprovalMessage(m, callback.ResponseURL, callback.Message.Blocks.BlockSet, message)
+
+		// set original message TS & text
+		m.timestamp = value.Timestamp
+		m.text = value.Text
+		m.channelID = value.ChannelID
+		params = value.Params
+	}
+
+	s.removeReaction(m, s.options.ReactionDialog)
+
+	switch action.ActionID {
+	case slackSubmitAction:
+
+		user, err := s.client.SlackClient().GetUserInfo(m.userID)
+		if err != nil {
+			s.logger.Error("Slack couldn't get user for %s: %s", m.userID, err)
+		}
+
+		states := callback.BlockActionState
+		if states != nil && len(states.Values) > 0 {
+
+			for _, v1 := range states.Values {
+				for k2, v2 := range v1 {
+					name := strings.Replace(k2, fmt.Sprintf("%s-", interactionID), "", 1)
+
+					var v interface{}
+					v = v2.Value
+					switch v2.Type {
+					case "number_input":
+						v = v2.Value
+					case "datepicker":
+						v = v2.SelectedDate
+					case "timepicker":
+						v = v2.SelectedTime
+					case "static_select", "external_select":
+						v = v2.SelectedOption.Value
+					case "multi_static_select", "multi_external_select":
+						arr := []string{}
+						for _, v2 := range v2.SelectedOptions {
+							arr = append(arr, v2.Value)
+						}
+						v = arr
+					case "checkboxes":
+						arr := []string{}
+						for _, v2 := range v2.SelectedOptions {
+							arr = append(arr, v2.Value)
+						}
+						v = strings.Join(arr, ",")
+						if utils.IsEmpty(v) {
+							v = fmt.Sprintf("%v", false)
+						}
+					}
+					params[name] = v
+				}
+			}
+		}
+
+		// do unwrap
+
+		if !utils.IsEmpty(value.Wrapper) {
+			arr := strings.Split(value.Wrapper, "/")
+			if len(arr) == 2 {
+				cmd = s.processors.FindCommand(arr[0], arr[1])
+			}
+		}
+
+		rParams := params
+		if !utils.IsEmpty(value.Wrapped) {
+			arr := strings.Split(value.Wrapped, "/")
+			if len(arr) == 2 {
+				eParams, _, _, _, _, _ := s.findParams(!utils.IsEmpty(value.Wrapper), m)
+				rParams = common.MergeInterfaceMaps(rParams, eParams)
+			}
+		}
+
+		err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
+		if err != nil {
+			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+			return
+		}
+
+	default:
+		s.addReaction(m, s.options.ReactionFailed)
+	}
+}
+
+func (s *Slack) formCallbackDefinition(name, group string) *slacker.InteractionDefinition {
+
+	cName := name
 	interactionID := s.buildInteractionID(cName, group)
 	def := &slacker.InteractionDefinition{
 		InteractionID: interactionID,
 		Type:          slack.InteractionTypeBlockActions,
 	}
-	def.Handler = func(ic *slacker.InteractionContext, req *socketmode.Request) {
-
-		cName, cGroup := s.getInteractionGroupCommand(interactionID)
-		eCmd := s.processors.FindCommand(cGroup, cName)
-		if eCmd != nil {
-			cmd = eCmd
-		}
-
-		callback := ic.Callback()
-		replier := ic.Response()
-
-		m := &slackMessageInfo{
-			typ:             callback.Container.Type,
-			text:            "", // get this from button value
-			userID:          callback.User.ID,
-			channelID:       callback.Container.ChannelID,
-			timestamp:       "",                          // get this from button value
-			threadTimestamp: callback.Container.ThreadTs, // keep thread TS
-		}
-
-		actions := callback.ActionCallback.BlockActions
-		if len(actions) == 0 {
-			s.logger.Error("Slack actions are not defined.")
-			s.removeReaction(m, s.options.ReactionDialog)
-			return
-		}
-
-		action := actions[0]
-
-		data, err := base64.StdEncoding.DecodeString(action.Value)
-		if err != nil {
-			s.removeReaction(m, s.options.ReactionDialog)
-			return
-		}
-
-		value := &SlackButtonValue{}
-		err = json.Unmarshal(data, value)
-		if err != nil {
-			s.removeReaction(m, s.options.ReactionDialog)
-			return
-		}
-
-		m.timestamp = value.Timestamp // this is original message TS
-		m.text = value.Text           // this is original message text
-
-		s.hideInteraction(m, callback.ResponseURL)
-		s.removeReaction(m, s.options.ReactionDialog)
-
-		switch action.ActionID {
-		case slackSubmitAction:
-
-			user, err := s.client.SlackClient().GetUserInfo(m.userID)
-			if err != nil {
-				s.logger.Error("Slack couldn't get user for %s: %s", m.userID, err)
-			}
-
-			params := make(common.ExecuteParams)
-			states := callback.BlockActionState
-			if states != nil && len(states.Values) > 0 {
-
-				for _, v1 := range states.Values {
-					for k2, v2 := range v1 {
-						name := strings.Replace(k2, fmt.Sprintf("%s-", interactionID), "", 1)
-
-						var v interface{}
-						v = v2.Value
-						switch v2.Type {
-						case "number_input":
-							v = v2.Value
-						case "datepicker":
-							v = v2.SelectedDate
-						case "timepicker":
-							v = v2.SelectedTime
-						case "static_select", "external_select":
-							v = v2.SelectedOption.Value
-						case "multi_static_select", "multi_external_select":
-							arr := []string{}
-							for _, v2 := range v2.SelectedOptions {
-								arr = append(arr, v2.Value)
-							}
-							v = arr
-						case "checkboxes":
-							arr := []string{}
-							for _, v2 := range v2.SelectedOptions {
-								arr = append(arr, v2.Value)
-							}
-							v = strings.Join(arr, ",")
-							if utils.IsEmpty(v) {
-								v = fmt.Sprintf("%v", false)
-							}
-						}
-						params[name] = v
-					}
-				}
-			}
-
-			// do unwrap
-
-			if !utils.IsEmpty(value.Wrapper) {
-				arr := strings.Split(value.Wrapper, "/")
-				if len(arr) == 2 {
-					cmd = s.processors.FindCommand(arr[0], arr[1])
-				}
-			}
-
-			rParams := params
-			if !utils.IsEmpty(value.Wrapped) {
-				arr := strings.Split(value.Wrapped, "/")
-				if len(arr) == 2 {
-					eParams, _, _, _, _, _ := s.findParams(!utils.IsEmpty(value.Wrapper), m)
-					rParams = common.MergeInterfaceMaps(rParams, eParams)
-				}
-			}
-
-			err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
-			if err != nil {
-				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
-				return
-			}
-
-		default:
-			s.addReaction(m, s.options.ReactionFailed)
-		}
+	def.Handler = func(ctx *slacker.InteractionContext, req *socketmode.Request) {
+		s.formCallbackHandler(ctx)
 	}
 	return def
 }
@@ -1905,91 +2100,96 @@ func (s *Slack) getCommandGroupField(ident string) (common.Command, string, stri
 	return cmd, g, f
 }
 
+func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *socketmode.Request) {
+
+	callback := ctx.Callback()
+
+	if utils.IsEmpty(callback.Value) {
+		return
+	}
+
+	cmd, _, name := s.getCommandGroupField(callback.ActionID)
+	if cmd == nil {
+		return
+	}
+
+	user := &SlackUser{
+		id: callback.User.ID,
+	}
+
+	channel := &SlackChannel{
+		id: callback.Container.ChannelID,
+	}
+
+	msg := &SlackMessage{
+		id:              callback.Container.MessageTs,
+		visible:         !callback.Container.IsEphemeral,
+		user:            user,
+		threadTimestamp: callback.Container.ThreadTs,
+		channel:         channel,
+	}
+
+	fields := cmd.Fields(s, msg, []string{name})
+	var field *common.Field
+
+	for _, f := range fields {
+		if f.Name == name {
+			field = &f
+			break
+		}
+	}
+
+	if field == nil {
+		return
+	}
+
+	options := []*slack.OptionBlockObject{}
+	value := strings.ToLower(callback.Value)
+
+	for _, v := range field.Values {
+
+		vl := strings.ToLower(v)
+		if strings.Contains(vl, value) {
+
+			var h *slack.TextBlockObject
+			if !utils.IsEmpty(field.Hint) {
+				h = slack.NewTextBlockObject(slack.PlainTextType, field.Hint, false, false)
+			}
+
+			options = append(options,
+				slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h))
+		}
+	}
+
+	if len(options) == 0 {
+		return
+	}
+
+	resposne := slack.OptionsResponse{
+		Options: options,
+	}
+
+	res := socketmode.Response{
+		EnvelopeID: req.EnvelopeID,
+		Payload:    resposne,
+	}
+
+	err := s.client.SocketModeClient().SendCtx(s.ctx, res)
+	if err != nil {
+		s.logger.Error(err)
+		return
+	}
+}
+
 func (s *Slack) unsupportedInteractionHandler(ctx *slacker.InteractionContext, req *socketmode.Request) {
 
 	callback := ctx.Callback()
 
-	// process suggestions
-	if callback.Type == slack.InteractionTypeBlockSuggestion {
-
-		//replier := ctx.Response()
-
-		if utils.IsEmpty(callback.Value) {
-			return
-		}
-
-		cmd, _, name := s.getCommandGroupField(callback.ActionID)
-		if cmd == nil {
-			return
-		}
-
-		user := &SlackUser{
-			id: callback.User.ID,
-		}
-
-		channel := &SlackChannel{
-			id: callback.Container.ChannelID,
-		}
-
-		msg := &SlackMessage{
-			id:              callback.Container.MessageTs,
-			visible:         !callback.Container.IsEphemeral,
-			user:            user,
-			threadTimestamp: callback.Container.ThreadTs,
-			channel:         channel,
-		}
-
-		fields := cmd.Fields(s, msg, []string{name})
-		var field *common.Field
-
-		for _, f := range fields {
-			if f.Name == name {
-				field = &f
-				break
-			}
-		}
-
-		if field == nil {
-			return
-		}
-
-		options := []*slack.OptionBlockObject{}
-		value := strings.ToLower(callback.Value)
-
-		for _, v := range field.Values {
-
-			vl := strings.ToLower(v)
-			if strings.Contains(vl, value) {
-
-				var h *slack.TextBlockObject
-				if !utils.IsEmpty(field.Hint) {
-					h = slack.NewTextBlockObject(slack.PlainTextType, field.Hint, false, false)
-				}
-
-				options = append(options,
-					slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h))
-			}
-		}
-
-		if len(options) == 0 {
-			return
-		}
-
-		resposne := slack.OptionsResponse{
-			Options: options,
-		}
-
-		res := socketmode.Response{
-			EnvelopeID: req.EnvelopeID,
-			Payload:    resposne,
-		}
-
-		err := s.client.SocketModeClient().SendCtx(s.ctx, res)
-		if err != nil {
-			s.logger.Error(err)
-			return
-		}
-		return
+	switch callback.Type {
+	case slack.InteractionTypeBlockActions:
+		s.formCallbackHandler(ctx)
+	case slack.InteractionTypeBlockSuggestion:
+		s.formSuggestionHandler(ctx, req)
 	}
 }
 
@@ -2032,7 +2232,7 @@ func (s *Slack) start() {
 			def := s.commandDefinition(c, "")
 			client.AddCommand(def)
 			if len(c.Fields(s, nil, nil)) > 0 {
-				client.AddInteraction(s.interactionDefinition(c, ""))
+				client.AddInteraction(s.formCallbackDefinition(c.Name(), ""))
 			}
 		}
 	}
@@ -2061,7 +2261,7 @@ func (s *Slack) start() {
 
 			group.AddCommand(s.commandDefinition(c, pName))
 			if len(c.Fields(s, nil, nil)) > 0 {
-				client.AddInteraction(s.interactionDefinition(c, pName))
+				client.AddInteraction(s.formCallbackDefinition(c.Name(), pName))
 			}
 		}
 	}
@@ -2099,7 +2299,7 @@ func (s *Slack) start() {
 				}
 				groupRoot.AddCommand(def)
 				if len(c.Fields(s, nil, nil)) > 0 {
-					client.AddInteraction(s.interactionDefinition(c, ""))
+					client.AddInteraction(s.formCallbackDefinition(c.Name(), ""))
 				}
 			}
 		}
