@@ -62,15 +62,17 @@ var telegramOptions = bot.TelegramOptions{
 }
 
 var slackOptions = bot.SlackOptions{
-	BotToken:          envGet("SLACK_BOT_TOKEN", "").(string),
-	AppToken:          envGet("SLACK_APP_TOKEN", "").(string),
-	Debug:             envGet("SLACK_DEBUG", false).(bool),
-	DefaultCommand:    envGet("SLACK_DEFAULT_COMMAND", "").(string),
-	HelpCommand:       envGet("SLACK_HELP_COMMAND", "").(string),
-	GroupPermissions:  envGet("SLACK_GROUP_PERMISSIONS", "").(string),
-	UserPermissions:   envGet("SLACK_USER_PERMISSIONS", "").(string),
-	Timeout:           envGet("SLACK_TIMEOUT", 5).(int),
-	PublicChannel:     envGet("SLACK_PUBLIC_CHANNEL", "").(string),
+	BotToken:         envGet("SLACK_BOT_TOKEN", "").(string),
+	AppToken:         envGet("SLACK_APP_TOKEN", "").(string),
+	Debug:            envGet("SLACK_DEBUG", false).(bool),
+	DefaultCommand:   envGet("SLACK_DEFAULT_COMMAND", "").(string),
+	HelpCommand:      envGet("SLACK_HELP_COMMAND", "").(string),
+	GroupPermissions: envGet("SLACK_GROUP_PERMISSIONS", "").(string),
+	UserPermissions:  envGet("SLACK_USER_PERMISSIONS", "").(string),
+	Timeout:          envGet("SLACK_TIMEOUT", 5).(int),
+	PublicChannel:    envGet("SLACK_PUBLIC_CHANNEL", "").(string),
+	ApprovalAllowed:  envGet("SLACK_APPROVAL_ALLOWED", false).(bool),
+
 	AttachmentColor:   envGet("SLACK_ATTACHMENT_COLOR", "#555555").(string),
 	ErrorColor:        envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
 	TitleConfirmation: envGet("SLACK_TITLE_CONFIRMATION", "Confirmation").(string),

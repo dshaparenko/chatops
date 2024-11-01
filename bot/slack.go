@@ -21,17 +21,20 @@ import (
 )
 
 type SlackOptions struct {
-	BotToken          string
-	AppToken          string
-	Debug             bool
-	DefaultCommand    string
-	HelpCommand       string
-	GroupPermissions  string
-	UserPermissions   string
-	Timeout           int
-	PublicChannel     string
-	AttachmentColor   string
-	ErrorColor        string
+	BotToken         string
+	AppToken         string
+	Debug            bool
+	DefaultCommand   string
+	HelpCommand      string
+	GroupPermissions string
+	UserPermissions  string
+	Timeout          int
+	PublicChannel    string
+	ApprovalAllowed  bool
+
+	AttachmentColor string
+	ErrorColor      string
+
 	TitleConfirmation string
 	ApprovedMessage   string
 	RejectedMessage   string
@@ -1226,7 +1229,7 @@ func (s *Slack) askApproval(approval common.Approval, command, group string,
 		id: m.userID,
 	}
 	if u != nil {
-		user.name = u.Profile.DisplayName
+		user.name = u.Name
 		user.timezone = u.TZ
 	}
 
@@ -1296,7 +1299,7 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 		id: m.userID,
 	}
 	if u != nil {
-		user.name = u.Profile.DisplayName
+		user.name = u.Name
 		user.timezone = u.TZ
 	}
 
@@ -1481,13 +1484,10 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	}
 
 	userName := ""
-	u, err := s.client.SlackClient().GetUserInfo(user.ID())
-	if err != nil {
-		s.logger.Debug("Slack command has no user for text: %s", text)
-		return err
-	}
+	u := s.getSlackUser(user.ID(), "")
+
 	if u != nil {
-		userName = u.RealName
+		userName = u.Name
 	}
 
 	m := &slackMessageInfo{
@@ -1526,13 +1526,45 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	err = s.postUserCommand(cmd, m, u, nil, params, response, false)
+	err := s.postUserCommand(cmd, m, u, nil, params, response, false)
 	if err != nil {
 		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, m.userID, err)
 		return err
 	}
 
 	return nil
+}
+
+func (s *Slack) getSlackUser(userID, botID string) *slack.User {
+
+	var user *slack.User
+
+	if !utils.IsEmpty(userID) {
+
+		u, err := s.client.SlackClient().GetUserInfo(userID)
+		if err != nil {
+			s.logger.Error("Slack couldn't get user for %s: %s", userID, err)
+		}
+		if u != nil {
+			user = u
+		}
+	} else if !utils.IsEmpty(botID) {
+
+		bot, err := s.client.SlackClient().GetBotInfo(slack.GetBotInfoParameters{Bot: botID})
+		if err != nil {
+			s.logger.Error("Slack couldn't get bot for %s: %s", botID, err)
+		}
+		if bot != nil {
+			u, err := s.client.SlackClient().GetUserInfo(bot.UserID)
+			if err != nil {
+				s.logger.Error("Slack couldn't get user for %s: %s", bot.UserID, err)
+			}
+			if u != nil {
+				user = u
+			}
+		}
+	}
+	return user
 }
 
 func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
@@ -1553,39 +1585,14 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			s.logger.Error("Slack has no user nor bot ID")
 		}
 
-		var user *slack.User
-
 		userName := ""
 		userID := ""
 
-		if !utils.IsEmpty(event.UserID) {
+		user := s.getSlackUser(event.UserID, event.BotID)
 
-			u, err := cc.SlackClient().GetUserInfo(event.UserID)
-			if err != nil {
-				s.logger.Error("Slack couldn't get user for %s: %s", event.UserID, err)
-			}
-			if u != nil {
-				user = u
-				userName = u.RealName
-				userID = u.ID
-			}
-		} else if !utils.IsEmpty(event.BotID) {
-
-			bot, err := cc.SlackClient().GetBotInfo(slack.GetBotInfoParameters{Bot: event.BotID})
-			if err != nil {
-				s.logger.Error("Slack couldn't get bot for %s: %s", event.BotID, err)
-			}
-			if bot != nil {
-				u, err := cc.SlackClient().GetUserInfo(bot.UserID)
-				if err != nil {
-					s.logger.Error("Slack couldn't get user for %s: %s", bot.UserID, err)
-				}
-				if u != nil {
-					user = u
-					userName = u.RealName
-					userID = u.ID
-				}
-			}
+		if user != nil {
+			userName = user.Name
+			userID = user.ID
 		}
 
 		if utils.IsEmpty(userID) {
@@ -1634,7 +1641,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		mUser := &SlackUser{
 			id:       m.userID,
-			name:     user.Profile.DisplayName,
+			name:     user.Name,
 			timezone: user.TZ,
 		}
 
@@ -1853,8 +1860,8 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		text:            "", // get this from button value
 		userID:          callback.User.ID,
 		channelID:       callback.Container.ChannelID,
-		timestamp:       "",                          // get this from button value
-		threadTimestamp: callback.Container.ThreadTs, // keep thread TS
+		timestamp:       callback.Container.MessageTs,
+		threadTimestamp: callback.Container.ThreadTs,
 	}
 
 	actions := callback.ActionCallback.BlockActions
@@ -1886,53 +1893,11 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		return
 	}
 
-	params := make(common.ExecuteParams)
+	params := value.Params
+
 	interactionID := s.buildInteractionID(value.Command, value.Group)
 
-	switch value.Type {
-	case SlackButtonValueFormType:
-
-		// set original message TS & text
-		m.timestamp = value.Timestamp
-		m.text = value.Text
-		s.removeMessage(m, callback.ResponseURL)
-
-	case SlackButtonValueApprovalType:
-
-		if callback.User.ID == value.UserID {
-			s.logger.Error("Slack same user cannot approve its action.")
-			return
-		}
-
-		// this is approval message TS
-		m.timestamp = callback.Container.MessageTs
-
-		message := ""
-		reaction := common.IfDef(action.ActionID == slackSubmitAction, s.options.ReactionApproved, s.options.ReactionRejected)
-		mdef := common.IfDef(action.ActionID == slackSubmitAction, s.options.ApprovedMessage, s.options.RejectedMessage)
-		if !utils.IsEmpty(mdef) {
-			user := fmt.Sprintf("@%s", callback.User.Name)
-			message = fmt.Sprintf(mdef.(string), user, time.Now().Format("15:04:05"))
-			message = fmt.Sprintf(":%s: %s", reaction, message)
-		}
-		s.replaceApprovalMessage(m, callback.ResponseURL, callback.Message.Blocks.BlockSet, message)
-
-		// set original message TS & text
-		m.timestamp = value.Timestamp
-		m.text = value.Text
-		m.channelID = value.ChannelID
-		params = value.Params
-	}
-
-	s.removeReaction(m, s.options.ReactionDialog)
-
-	switch action.ActionID {
-	case slackSubmitAction:
-
-		user, err := s.client.SlackClient().GetUserInfo(m.userID)
-		if err != nil {
-			s.logger.Error("Slack couldn't get user for %s: %s", m.userID, err)
-		}
+	if action.ActionID == slackSubmitAction {
 
 		states := callback.BlockActionState
 		if states != nil && len(states.Values) > 0 {
@@ -1972,6 +1937,66 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 				}
 			}
 		}
+	}
+
+	switch value.Type {
+	case SlackButtonValueFormType:
+
+		m.userID = value.UserID
+		m.channelID = value.ChannelID
+		m.timestamp = value.Timestamp
+		m.text = value.Text
+
+		approval := cmd.Approval()
+		if action.ActionID == slackSubmitAction && s.approvalNeeded(approval) {
+
+			shown, err := s.askApproval(approval, value.Command, value.Group, m, &callback.User, params, replier)
+			if err != nil {
+				s.replyError(value.Command, m, replier, err, []*common.Attachment{})
+				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+				return
+			}
+			if shown {
+				s.removeMessage(m, callback.ResponseURL)
+				return
+			}
+		}
+
+		s.removeMessage(m, callback.ResponseURL)
+
+	case SlackButtonValueApprovalType:
+
+		if !s.options.ApprovalAllowed {
+			if callback.User.ID == value.UserID {
+				s.logger.Error("Slack same user cannot approve its action.")
+				return
+			}
+		}
+
+		// this is approval message TS
+		m.timestamp = callback.Container.MessageTs
+
+		message := ""
+		reaction := common.IfDef(action.ActionID == slackSubmitAction, s.options.ReactionApproved, s.options.ReactionRejected)
+		mdef := common.IfDef(action.ActionID == slackSubmitAction, s.options.ApprovedMessage, s.options.RejectedMessage)
+		if !utils.IsEmpty(mdef) {
+			user := fmt.Sprintf("@%s", callback.User.Name)
+			message = fmt.Sprintf(mdef.(string), user, time.Now().Format("15:04:05"))
+			message = fmt.Sprintf(":%s: %s", reaction, message)
+		}
+		s.replaceApprovalMessage(m, callback.ResponseURL, callback.Message.Blocks.BlockSet, message)
+
+		// set original message TS & text
+		m.timestamp = value.Timestamp
+		m.text = value.Text
+		m.channelID = value.ChannelID
+		m.userID = value.UserID
+	}
+
+	s.removeReaction(m, s.options.ReactionDialog)
+
+	switch action.ActionID {
+	case slackSubmitAction:
 
 		// do unwrap
 
@@ -1991,7 +2016,7 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 			}
 		}
 
-		err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
+		err = s.postUserCommand(cmd, m, &callback.User, replier, rParams, nil, true)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
