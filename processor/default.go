@@ -112,6 +112,11 @@ type DefaultReposne struct {
 	Duration bool
 }
 
+type DefaultApproval struct {
+	Channel  string
+	Template string
+}
+
 type DefaultCommandConfig struct {
 	Description  string
 	Params       []string
@@ -123,6 +128,11 @@ type DefaultCommandConfig struct {
 	Schedule     string
 	Channel      string
 	Confirmation string
+	Approval     *DefaultApproval
+}
+
+type DefaultCommandApproval struct {
+	command *DefaultCommand
 }
 
 type DefaultCommand struct {
@@ -178,6 +188,11 @@ func (de *DefaultExecutor) Original() bool {
 
 func (de *DefaultExecutor) Response() common.Response {
 	return de
+}
+
+func (de *DefaultExecutor) Approval() common.Approval {
+	// to do
+	return nil
 }
 
 func (de *DefaultExecutor) filePath(dir, fileName string) string {
@@ -949,6 +964,75 @@ func NewRunbook(name, path string, command *DefaultCommand, parentExecutor *Defa
 	return rb, nil
 }
 
+// DefaultCommandApproval
+
+func (dca *DefaultCommandApproval) approval() *DefaultApproval {
+	if dca.command.config == nil {
+		return nil
+	}
+	return dca.command.config.Approval
+}
+
+func (dca *DefaultCommandApproval) Channel() string {
+
+	a := dca.approval()
+	if a == nil {
+		return ""
+	}
+	return a.Channel
+}
+
+func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Message, params common.ExecuteParams) string {
+
+	a := dca.approval()
+	if a == nil {
+		return ""
+	}
+	if utils.IsEmpty(a.Template) {
+		return ""
+	}
+
+	content := ""
+	name := fmt.Sprintf("%s-approval", dca.command.name)
+	path := fmt.Sprintf("%s%s%s", dca.command.processor.options.TemplatesDir, string(os.PathSeparator), a.Template)
+
+	if utils.FileExists(path) {
+		data, err := utils.Content(path)
+		if err != nil {
+			dca.command.logger.Error("Default template %s command %s error: %s", path, dca.command.name, err)
+			return ""
+		}
+		content = string(data)
+	} else {
+		content = a.Template
+	}
+
+	tOpts := toolsRender.TemplateOptions{
+		Name:    fmt.Sprintf("default-internal-%s", name),
+		Content: string(content),
+	}
+
+	t, err := toolsRender.NewTextTemplate(tOpts, dca.command.processor.observability)
+	if err != nil {
+		dca.command.logger.Error("Default template %s command %s create error: %s", path, dca.command.name, err)
+		return ""
+	}
+
+	m := make(map[string]interface{})
+	m["bot"] = bot
+	m["message"] = message
+	m["channel"] = message.Channel()
+	m["user"] = message.User()
+	m["params"] = params
+
+	b, err := t.RenderObject(m)
+	if err != nil {
+		dca.command.logger.Error("Default template %s command %s render error: %s", path, dca.command.name, err)
+		return ""
+	}
+	return string(b)
+}
+
 // Default command
 
 func (dc *DefaultCommand) Name() string {
@@ -1016,6 +1100,10 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []
 
 	for _, field := range dc.config.Fields {
 
+		if utils.IsEmpty(field.Template) {
+			continue
+		}
+
 		skip := utils.IsEmpty(dc.processor.options.TemplatesDir)
 		if !skip && len(only) > 0 {
 			skip = !utils.Contains(only, field.Name)
@@ -1025,54 +1113,58 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []
 			continue
 		}
 
-		fPath := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), field.Template)
-		if utils.FileExists(fPath) {
+		content := ""
+		name := fmt.Sprintf("%s-%s", dc.name, field.Name)
 
-			wGroup.Add(1)
-			go func(wg *sync.WaitGroup, path string, f common.Field, fs *sync.Map) {
-				defer wGroup.Done()
-
-				name := fmt.Sprintf("%s-%s", dc.name, f.Name)
-				content, err := utils.Content(path)
-				if err != nil {
-					dc.logger.Error("Default template %s command %s field %s error: %s", path, dc.name, f.Name, err)
-					return
-				}
-
-				tOpts := toolsRender.TemplateOptions{
-					Name:    fmt.Sprintf("default-internal-%s", name),
-					Content: string(content),
-				}
-
-				t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
-				if err != nil {
-					dc.logger.Error("Default template %s command %s field %s create error: %s", path, dc.name, f.Name, err)
-					return
-				}
-
-				m := make(map[string]interface{})
-				m["bot"] = bot
-				m["message"] = message
-				m["channel"] = message.Channel()
-				m["user"] = message.User()
-				m["field"] = f
-
-				b, err := t.RenderObject(m)
-				if err != nil {
-					dc.logger.Error("Default template %s command %s field %s render error: %s", path, dc.name, f.Name, err)
-					return
-				}
-
-				var fnew = common.Field{}
-				err = json.Unmarshal(b, &fnew)
-				if err != nil {
-					dc.logger.Error("Default template %s command %s unmarshall field %s error: %s", path, dc.name, f.Name, err)
-					return
-				}
-				fields.Store(f.Name, fnew)
-
-			}(wGroup, fPath, field, fields)
+		path := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), field.Template)
+		if utils.FileExists(path) {
+			data, err := utils.Content(path)
+			if err != nil {
+				dc.logger.Error("Default template %s command %s field %s error: %s", path, dc.name, field.Name, err)
+				continue
+			}
+			content = string(data)
+		} else {
+			content = field.Template
 		}
+
+		wGroup.Add(1)
+		go func(wg *sync.WaitGroup, name, content string, f common.Field, fs *sync.Map) {
+			defer wGroup.Done()
+
+			tOpts := toolsRender.TemplateOptions{
+				Name:    fmt.Sprintf("default-internal-%s", name),
+				Content: string(content),
+			}
+
+			t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
+			if err != nil {
+				dc.logger.Error("Default template %s command %s field %s create error: %s", path, dc.name, f.Name, err)
+				return
+			}
+
+			m := make(map[string]interface{})
+			m["bot"] = bot
+			m["message"] = message
+			m["channel"] = message.Channel()
+			m["user"] = message.User()
+			m["field"] = f
+
+			b, err := t.RenderObject(m)
+			if err != nil {
+				dc.logger.Error("Default template %s command %s field %s render error: %s", path, dc.name, f.Name, err)
+				return
+			}
+
+			var fnew = common.Field{}
+			err = json.Unmarshal(b, &fnew)
+			if err != nil {
+				dc.logger.Error("Default template %s command %s unmarshall field %s error: %s", path, dc.name, f.Name, err)
+				return
+			}
+			fields.Store(f.Name, fnew)
+
+		}(wGroup, name, content, field, fields)
 	}
 	wGroup.Wait()
 
@@ -1153,6 +1245,16 @@ func (dc *DefaultCommand) Confirmation() string {
 		return dc.config.Confirmation
 	}
 	return ""
+}
+
+func (dc *DefaultCommand) Approval() common.Approval {
+
+	if dc.config != nil && dc.config.Approval != nil {
+		return &DefaultCommandApproval{
+			command: dc,
+		}
+	}
+	return nil
 }
 
 func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params common.ExecuteParams) (common.Executor, string, []*common.Attachment, error) {

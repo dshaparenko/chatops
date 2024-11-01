@@ -51,6 +51,11 @@ type Field struct {
 	Template string
 }
 
+type Approval interface {
+	Channel() string
+	Message(bot Bot, message Message, params ExecuteParams) string
+}
+
 type Executor interface {
 	Response() Response
 	After(message Message) error
@@ -62,12 +67,13 @@ type Command interface {
 	Params() []string
 	Aliases() []string
 	Confirmation() string
-	Fields(bot Bot, message Message, only []string) []Field
 	Priority() int
 	Wrapper() bool
 	Schedule() string
 	Channel() string
 	Execute(bot Bot, message Message, params ExecuteParams) (Executor, string, []*Attachment, error)
+	Fields(bot Bot, message Message, only []string) []Field
+	Approval() Approval
 }
 
 type Processor interface {
