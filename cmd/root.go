@@ -71,7 +71,9 @@ var slackOptions = bot.SlackOptions{
 	UserPermissions:  envGet("SLACK_USER_PERMISSIONS", "").(string),
 	Timeout:          envGet("SLACK_TIMEOUT", 5).(int),
 	PublicChannel:    envGet("SLACK_PUBLIC_CHANNEL", "").(string),
-	ApprovalAllowed:  envGet("SLACK_APPROVAL_ALLOWED", false).(bool),
+
+	ApprovalAllowed: envGet("SLACK_APPROVAL_ALLOWED", false).(bool),
+	ApprovalMessage: envGet("SLACK_APPROVAL_MESSAGE", "Please, approve or reject the execution").(string),
 
 	AttachmentColor:   envGet("SLACK_ATTACHMENT_COLOR", "#555555").(string),
 	ErrorColor:        envGet("SLACK_ERROR_COLOR", "#ff0000").(string),

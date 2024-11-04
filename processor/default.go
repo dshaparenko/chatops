@@ -131,6 +131,10 @@ type DefaultCommandConfig struct {
 	Approval     *DefaultApproval
 }
 
+type DefaultCommandResponse struct {
+	command *DefaultCommand
+}
+
 type DefaultCommandApproval struct {
 	command *DefaultCommand
 }
@@ -964,6 +968,33 @@ func NewRunbook(name, path string, command *DefaultCommand, parentExecutor *Defa
 	return rb, nil
 }
 
+// DefaultCommandResponse
+
+func (dcr *DefaultCommandResponse) Visible() bool {
+	if dcr.command.config != nil {
+		return dcr.command.config.Response.Visible
+	}
+	return false
+}
+
+func (dcr *DefaultCommandResponse) Duration() bool {
+	if dcr.command.config != nil {
+		return dcr.command.config.Response.Duration
+	}
+	return false
+}
+
+func (dcr *DefaultCommandResponse) Original() bool {
+	if dcr.command.config != nil {
+		return dcr.command.config.Response.Original
+	}
+	return false
+}
+
+func (dcr *DefaultCommandResponse) Error() bool {
+	return false
+}
+
 // DefaultCommandApproval
 
 func (dca *DefaultCommandApproval) approval() *DefaultApproval {
@@ -1255,6 +1286,13 @@ func (dc *DefaultCommand) Approval() common.Approval {
 		}
 	}
 	return nil
+}
+
+func (dc *DefaultCommand) Response() common.Response {
+
+	return &DefaultCommandResponse{
+		command: dc,
+	}
 }
 
 func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params common.ExecuteParams) (common.Executor, string, []*common.Attachment, error) {
