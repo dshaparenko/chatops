@@ -1385,16 +1385,16 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 	eResponse := executor.Response()
 	if !utils.IsEmpty(eResponse) {
 
-		r.visible = response.Visible()
-		r.error = response.Error()
-		r.duration = response.Duration()
-		r.original = response.Original()
-
-	} else if !utils.IsEmpty(response) {
 		r.visible = eResponse.Visible()
 		r.error = eResponse.Error()
 		r.duration = eResponse.Duration()
 		r.original = eResponse.Original()
+
+	} else if !utils.IsEmpty(response) {
+		r.visible = response.Visible()
+		r.error = response.Error()
+		r.duration = response.Duration()
+		r.original = response.Original()
 	}
 
 	ts := ""
