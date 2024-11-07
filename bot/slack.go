@@ -809,9 +809,32 @@ func (s *Slack) Delete(channel, message string) error {
 	return nil
 }
 
+func (s *Slack) textIsCommand(text string) bool {
+
+	prev := ""
+
+	items := strings.Split(text, ">")
+	if len(items) > 1 {
+		prev = strings.TrimSpace(items[0])
+	}
+
+	items = strings.Split(prev, "<")
+	if len(items) > 0 {
+		prev = strings.TrimSpace(items[0])
+	}
+
+	// some mention inside the text
+	return utils.IsEmpty(prev)
+}
+
 func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 
 	text := cc.Event().Text
+
+	if !s.textIsCommand(text) {
+		return
+	}
+
 	items := strings.Split(text, ">")
 	if len(items) > 1 {
 		text = strings.TrimSpace(items[1])
@@ -845,6 +868,10 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 		visible = response.visible
 		original = response.original
 		duration = response.duration
+	}
+
+	if !utils.IsEmpty(m.botID) && error {
+		visible = true
 	}
 
 	atts := []slack.Attachment{}
@@ -1012,7 +1039,10 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 		opts = append(opts, slacker.SetThreadTS(threadTS))
 	}
 
-	opts = append(opts, slacker.SetEphemeral(m.userID))
+	if utils.IsEmpty(m.botID) {
+		opts = append(opts, slacker.SetEphemeral(m.userID))
+	}
+
 	blocks := []slack.Block{}
 	interactionID := s.buildInteractionID(command, group)
 
@@ -1353,12 +1383,14 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 
 	r := &SlackResponse{}
 	eResponse := executor.Response()
-	if !utils.IsEmpty(response) {
+	if !utils.IsEmpty(eResponse) {
+
 		r.visible = response.Visible()
 		r.error = response.Error()
 		r.duration = response.Duration()
 		r.original = response.Original()
-	} else if !utils.IsEmpty(eResponse) {
+
+	} else if !utils.IsEmpty(response) {
 		r.visible = eResponse.Visible()
 		r.error = eResponse.Error()
 		r.duration = eResponse.Duration()
@@ -1537,7 +1569,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		groupName = fmt.Sprintf("%s/%s", group, groupName)
 	}
 
-	if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(m.userID, userName, groupName) {
+	if s.denyUserAccess(m.userID, userName, groupName) && s.denyGroupAccess(m.userID, groupName) {
 		s.logger.Debug("Slack command user %s is not permitted to execute %s", m.userID, groupName)
 		return nil
 	}
@@ -1594,10 +1626,8 @@ func (s *Slack) getSlackUser(userID, botID string) *slack.User {
 
 func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
 
-	cName := cmd.Name()
-
 	def := &slacker.CommandDefinition{
-		Command:     cName,
+		Command:     cmd.Name(),
 		Aliases:     cmd.Aliases(),
 		Description: cmd.Description(),
 		HideHelp:    true,
@@ -1605,6 +1635,10 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 	def.Handler = func(cc *slacker.CommandContext) {
 
 		event := cc.Event()
+
+		if !s.textIsCommand(event.Text) {
+			return
+		}
 
 		if utils.IsEmpty(event.UserID) && utils.IsEmpty(event.BotID) {
 			s.logger.Error("Slack has no user nor bot ID")
@@ -1625,6 +1659,10 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			return
 		}
 
+		if s.auth != nil && s.auth.UserID == userID {
+			return
+		}
+
 		m := &slackMessageInfo{
 			typ:             event.Type,
 			text:            event.Text,
@@ -1637,8 +1675,27 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		replier := cc.Response()
 
-		text := s.prepareInputText(m.text, m.typ)
-		s.updateCounters(group, cName, text, m.userID)
+		if def == s.defaultDefinition {
+			err := s.postUserCommand(cmd, m, user, replier, nil, nil, true)
+			if err != nil {
+				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+			}
+			return
+		}
+
+		wrapper := cmd.Wrapper()
+		eParams, eCmd, eGroup, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
+
+		if eCmd == nil {
+			eCmd = cmd
+			eGroup = group
+		}
+
+		cName := eCmd.Name()
+		group = eGroup
+
+		text := s.prepareInputText(event.Text, event.Type)
+		s.updateCounters(group, cName, text, userID)
 
 		groupName := cName
 		if !utils.IsEmpty(group) {
@@ -1646,18 +1703,11 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		if (def != s.defaultDefinition) && (def != s.helpDefinition) {
-			if s.denyGroupAccess(m.userID, groupName) && s.denyUserAccess(userID, userName, groupName) {
+			if s.denyUserAccess(userID, userName, groupName) && s.denyGroupAccess(m.userID, groupName) {
 				s.logger.Debug("Slack user %s is not permitted to execute %s", userID, groupName)
 				s.unsupportedCommandHandler(cc)
 				return
 			}
-		}
-
-		wrapper := cmd.Wrapper()
-		eParams, eCmd, eGroup, wrappedParams, wrappedCmd, wrappedGroup := s.findParams(wrapper, m)
-
-		if s.auth != nil && s.auth.UserID == m.userID {
-			return
 		}
 
 		mChannel := &SlackChannel{
@@ -1722,10 +1772,12 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				wrapperGroupName = fmt.Sprintf("%s/%s", rGroup, rCommand)
 			}
 
-			if s.denyGroupAccess(m.userID, wrapperGroupName) && s.denyUserAccess(userID, userName, wrapperGroupName) {
-				s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
-				s.unsupportedCommandHandler(cc)
-				return
+			if (def != s.defaultDefinition) && (def != s.helpDefinition) {
+				if s.denyUserAccess(userID, userName, wrapperGroupName) && s.denyGroupAccess(m.userID, wrapperGroupName) {
+					s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
+					s.unsupportedCommandHandler(cc)
+					return
+				}
 			}
 
 			if wrappedCmd != nil {
@@ -2029,10 +2081,11 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		s.replaceApprovalMessage(m, callback.ResponseURL, callback.Message.Blocks.BlockSet, message)
 
 		// set original message TS & text
+		m.userID = value.UserID
+		m.channelID = value.ChannelID
 		m.timestamp = value.Timestamp
 		m.text = value.Text
-		m.channelID = value.ChannelID
-		m.userID = value.UserID
+		m.threadTimestamp = value.Timestamp
 	}
 
 	s.removeReaction(m, s.options.ReactionDialog)
