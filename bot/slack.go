@@ -1590,12 +1590,18 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
+	commands, err := s.listUserCommands(m.userID)
+	if err != nil {
+		s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
+		return err
+	}
+
 	groupName := cmd.Name()
 	if !utils.IsEmpty(group) {
 		groupName = fmt.Sprintf("%s/%s", group, groupName)
 	}
 
-	if !utils.Contains(user.Commands(), groupName) {
+	if !utils.Contains(commands, groupName) {
 		s.logger.Debug("Slack command user %s is not permitted to execute %s", m.userID, groupName)
 		return nil
 	}
@@ -1609,7 +1615,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	err := s.postUserCommand(cmd, m, u, nil, params, response, false)
+	err = s.postUserCommand(cmd, m, u, nil, params, response, false)
 	if err != nil {
 		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, m.userID, err)
 		return err
