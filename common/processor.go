@@ -6,6 +6,7 @@ type User interface {
 	ID() string
 	Name() string
 	TimeZone() string
+	Commands() []string
 }
 
 type Channel interface {

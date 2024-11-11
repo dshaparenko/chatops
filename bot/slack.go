@@ -61,6 +61,7 @@ type SlackUser struct {
 	id       string
 	name     string
 	timezone string
+	commands []string
 }
 
 type SlackChannel struct {
@@ -238,6 +239,10 @@ func (su *SlackUser) Name() string {
 
 func (su *SlackUser) TimeZone() string {
 	return su.timezone
+}
+
+func (su *SlackUser) Commands() []string {
+	return su.commands
 }
 
 // SlackChannel
@@ -506,7 +511,7 @@ func (s *Slack) findGroup(groups []slack.UserGroup, userID string, group *regexp
 }
 
 // .*=^(help|news|app|application|catalog)$,some=^(escalate)$
-func (s *Slack) denyGroupAccess(userID string, command string) bool {
+func (s *Slack) denyGroupAccess(userID, command string, groups []slack.UserGroup) bool {
 
 	if utils.IsEmpty(s.options.GroupPermissions) {
 		return true
@@ -518,12 +523,6 @@ func (s *Slack) denyGroupAccess(userID string, command string) bool {
 
 	// bot itself
 	if s.auth.UserID == userID {
-		return false
-	}
-
-	groups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
-	if err != nil {
-		s.logger.Error("Slack getting user group error: %s", err)
 		return false
 	}
 
@@ -602,6 +601,31 @@ func (s *Slack) denyUserAccess(userID, userName string, command string) bool {
 		}
 	}
 	return true
+}
+
+func (s *Slack) listUserCommands(userID string) ([]string, error) {
+
+	commands := []string{}
+	slackGroups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
+	if err != nil {
+		s.logger.Error("Slack getting user group error: %s", err)
+		return commands, err
+	}
+
+	for _, p := range s.processors.Items() {
+		for _, c := range p.Commands() {
+			groupName := c.Name()
+			if !utils.IsEmpty(p.Name()) {
+				groupName = fmt.Sprintf("%s/%s", p.Name(), groupName)
+			}
+			if s.denyUserAccess(userID, "", groupName) && s.denyGroupAccess(userID, groupName, slackGroups) {
+				continue
+			} else {
+				commands = append(commands, groupName)
+			}
+		}
+	}
+	return commands, nil
 }
 
 func (s *Slack) matchParam(text, param string) (map[string]string, []string) {
@@ -1348,8 +1372,15 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 
 	cName := cmd.Name()
 
+	commands, err := s.listUserCommands(m.userID)
+	if err != nil {
+		s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
+		return err
+	}
+
 	user := &SlackUser{
-		id: m.userID,
+		id:       m.userID,
+		commands: commands,
 	}
 	if u != nil {
 		user.name = u.Name
@@ -1540,12 +1571,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	userName := ""
 	u := s.getSlackUser(user.ID(), "")
-
-	if u != nil {
-		userName = u.Name
-	}
 
 	m := &slackMessageInfo{
 		typ:       "message",
@@ -1564,12 +1590,18 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
+	commands, err := s.listUserCommands(m.userID)
+	if err != nil {
+		s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
+		return err
+	}
+
 	groupName := cmd.Name()
 	if !utils.IsEmpty(group) {
 		groupName = fmt.Sprintf("%s/%s", group, groupName)
 	}
 
-	if s.denyUserAccess(m.userID, userName, groupName) && s.denyGroupAccess(m.userID, groupName) {
+	if !utils.Contains(commands, groupName) {
 		s.logger.Debug("Slack command user %s is not permitted to execute %s", m.userID, groupName)
 		return nil
 	}
@@ -1583,7 +1615,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	err := s.postUserCommand(cmd, m, u, nil, params, response, false)
+	err = s.postUserCommand(cmd, m, u, nil, params, response, false)
 	if err != nil {
 		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, m.userID, err)
 		return err
@@ -1644,13 +1676,11 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			s.logger.Error("Slack has no user nor bot ID")
 		}
 
-		userName := ""
 		userID := ""
 
 		user := s.getSlackUser(event.UserID, event.BotID)
 
 		if user != nil {
-			userName = user.Name
 			userID = user.ID
 		}
 
@@ -1697,15 +1727,25 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		text := s.prepareInputText(event.Text, event.Type)
 		s.updateCounters(group, cName, text, userID)
 
+		commands, err := s.listUserCommands(userID)
+		if err != nil {
+			s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
+			return
+		}
+
 		groupName := cName
 		if !utils.IsEmpty(group) {
 			groupName = fmt.Sprintf("%s/%s", group, cName)
 		}
 
 		if (def != s.defaultDefinition) && (def != s.helpDefinition) {
-			if s.denyUserAccess(userID, userName, groupName) && s.denyGroupAccess(m.userID, groupName) {
-				s.logger.Debug("Slack user %s is not permitted to execute %s", userID, groupName)
+			if !utils.Contains(commands, groupName) {
+
+				s.logger.Error("Slack user %s is not permitted to execute %s", userID, groupName)
+
+				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 				s.unsupportedCommandHandler(cc)
+
 				return
 			}
 		}
@@ -1718,6 +1758,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			id:       m.userID,
 			name:     user.Name,
 			timezone: user.TZ,
+			commands: commands,
 		}
 
 		msg := &SlackMessage{
@@ -1773,7 +1814,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			}
 
 			if (def != s.defaultDefinition) && (def != s.helpDefinition) {
-				if s.denyUserAccess(userID, userName, wrapperGroupName) && s.denyGroupAccess(m.userID, wrapperGroupName) {
+				if !utils.Contains(commands, wrapperGroupName) {
 					s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
 					s.unsupportedCommandHandler(cc)
 					return
@@ -1836,7 +1877,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
 
-		err := s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
+		err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
