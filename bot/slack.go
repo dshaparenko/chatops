@@ -604,7 +604,6 @@ func (s *Slack) denyUserAccess(userID, userName string, command string) bool {
 }
 
 func (s *Slack) listUserCommands(userID string) ([]string, error) {
-
 	commands := []string{}
 	slackGroups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
 	if err != nil {
@@ -616,13 +615,12 @@ func (s *Slack) listUserCommands(userID string) ([]string, error) {
 		for _, c := range p.Commands() {
 			groupName := c.Name()
 			if !utils.IsEmpty(p.Name()) {
-				groupName = fmt.Sprintf("%s/%s", p.Name(), groupName)
+				groupName = p.Name() + "/" + groupName
 			}
 			if s.denyUserAccess(userID, "", groupName) && s.denyGroupAccess(userID, groupName, slackGroups) {
 				continue
-			} else {
-				commands = append(commands, groupName)
 			}
+			commands = append(commands, groupName)
 		}
 	}
 	return commands, nil
@@ -1727,26 +1725,24 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		text := s.prepareInputText(event.Text, event.Type)
 		s.updateCounters(group, cName, text, userID)
 
-		commands, err := s.listUserCommands(userID)
-		if err != nil {
-			s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
-			return
-		}
-
 		groupName := cName
 		if !utils.IsEmpty(group) {
 			groupName = fmt.Sprintf("%s/%s", group, cName)
 		}
+		if groupName != "show" && groupName != "help" {
 
-		if (def != s.defaultDefinition) && (def != s.helpDefinition) {
-			if !utils.Contains(commands, groupName) {
-
-				s.logger.Error("Slack user %s is not permitted to execute %s", userID, groupName)
-
-				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
-				s.unsupportedCommandHandler(cc)
-
+			commands, err := s.listUserCommands(userID)
+			if err != nil {
+				s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
 				return
+			}
+
+			if (def != s.defaultDefinition) && (def != s.helpDefinition) {
+				if !utils.Contains(commands, groupName) {
+					s.logger.Error("Slack user %s is not permitted to execute %s", userID, groupName)
+					s.unsupportedCommandHandler(cc)
+					return
+				}
 			}
 		}
 
@@ -1758,7 +1754,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			id:       m.userID,
 			name:     user.Name,
 			timezone: user.TZ,
-			commands: commands,
+			commands: []string{groupName},
 		}
 
 		msg := &SlackMessage{
@@ -1813,11 +1809,20 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				wrapperGroupName = fmt.Sprintf("%s/%s", rGroup, rCommand)
 			}
 
-			if (def != s.defaultDefinition) && (def != s.helpDefinition) {
-				if !utils.Contains(commands, wrapperGroupName) {
-					s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
-					s.unsupportedCommandHandler(cc)
+			if wrapperGroupName != "help" {
+
+				commands, err := s.listUserCommands(userID)
+				if err != nil {
+					s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
 					return
+				}
+
+				if (def != s.defaultDefinition) && (def != s.helpDefinition) {
+					if !utils.Contains(commands, wrapperGroupName) {
+						s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
+						s.unsupportedCommandHandler(cc)
+						return
+					}
 				}
 			}
 
@@ -1877,7 +1882,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
 
-		err = s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
+		err := s.postUserCommand(cmd, m, user, replier, rParams, nil, true)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
