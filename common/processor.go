@@ -76,6 +76,7 @@ type Command interface {
 	Execute(bot Bot, message Message, params ExecuteParams) (Executor, string, []*Attachment, error)
 	Fields(bot Bot, message Message, only []string) []Field
 	Approval() Approval
+	Permissions() bool
 }
 
 type Processor interface {

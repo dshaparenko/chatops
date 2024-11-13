@@ -171,6 +171,7 @@ type slackMessageInfo struct {
 	threadTimestamp string
 	wrapped         string
 	wrapper         string
+	commands        []string
 }
 
 type SlackResponse struct {
@@ -604,6 +605,7 @@ func (s *Slack) denyUserAccess(userID, userName string, command string) bool {
 }
 
 func (s *Slack) listUserCommands(userID string) ([]string, error) {
+
 	commands := []string{}
 	slackGroups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
 	if err != nil {
@@ -1370,10 +1372,14 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 
 	cName := cmd.Name()
 
-	commands, err := s.listUserCommands(m.userID)
-	if err != nil {
-		s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
-		return err
+	commands := m.commands
+	if len(commands) == 0 {
+		cmds, err := s.listUserCommands(m.userID)
+		if err != nil {
+			s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
+			return err
+		}
+		commands = cmds
 	}
 
 	user := &SlackUser{
@@ -1593,6 +1599,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
 		return err
 	}
+	m.commands = commands
 
 	groupName := cmd.Name()
 	if !utils.IsEmpty(group) {
@@ -1729,15 +1736,17 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		if !utils.IsEmpty(group) {
 			groupName = fmt.Sprintf("%s/%s", group, cName)
 		}
-		if groupName != "show" && groupName != "help" {
+
+		if eCmd.Permissions() {
 
 			commands, err := s.listUserCommands(userID)
 			if err != nil {
 				s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
 				return
 			}
+			m.commands = commands
 
-			if (def != s.defaultDefinition) && (def != s.helpDefinition) {
+			if def != s.defaultDefinition {
 				if !utils.Contains(commands, groupName) {
 					s.logger.Error("Slack user %s is not permitted to execute %s", userID, groupName)
 					s.unsupportedCommandHandler(cc)
@@ -1798,6 +1807,8 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			rCommand = ""
 			if wrappedCmd != nil {
 				rCommand = wrappedCmd.Name()
+			} else {
+				return
 			}
 			rGroup = wrappedGroup
 
@@ -1809,15 +1820,16 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				wrapperGroupName = fmt.Sprintf("%s/%s", rGroup, rCommand)
 			}
 
-			if wrapperGroupName != "help" {
+			if wrappedCmd.Permissions() {
 
 				commands, err := s.listUserCommands(userID)
 				if err != nil {
 					s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
 					return
 				}
+				m.commands = commands
 
-				if (def != s.defaultDefinition) && (def != s.helpDefinition) {
+				if def != s.defaultDefinition {
 					if !utils.Contains(commands, wrapperGroupName) {
 						s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
 						s.unsupportedCommandHandler(cc)
@@ -1826,10 +1838,9 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				}
 			}
 
-			if wrappedCmd != nil {
-				rFields = wrappedCmd.Fields(s, msg, only)
-				confirmation = wrappedCmd.Confirmation()
-			}
+			rFields = wrappedCmd.Fields(s, msg, only)
+			confirmation = wrappedCmd.Confirmation()
+
 			rParams = wrappedParams
 			m.wrapped = fmt.Sprintf("%s/%s", rGroup, rCommand)
 			m.wrapper = fmt.Sprintf("%s/%s", eGroup, eCommand)

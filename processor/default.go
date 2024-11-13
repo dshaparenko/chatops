@@ -129,6 +129,7 @@ type DefaultCommandConfig struct {
 	Channel      string
 	Confirmation string
 	Approval     *DefaultApproval
+	Permissions  *bool
 }
 
 type DefaultCommandResponse struct {
@@ -1286,6 +1287,14 @@ func (dc *DefaultCommand) Approval() common.Approval {
 		}
 	}
 	return nil
+}
+
+func (dc *DefaultCommand) Permissions() bool {
+
+	if dc.config != nil && dc.config.Permissions != nil {
+		return *dc.config.Permissions
+	}
+	return true
 }
 
 func (dc *DefaultCommand) Response() common.Response {
