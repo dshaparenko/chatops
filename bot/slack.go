@@ -61,6 +61,7 @@ type SlackUser struct {
 	id       string
 	name     string
 	timezone string
+	slack    *Slack
 }
 
 type SlackChannel struct {
