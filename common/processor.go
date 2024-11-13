@@ -42,14 +42,15 @@ type Response interface {
 type FieldType string
 
 type Field struct {
-	Name     string
-	Type     FieldType
-	Label    string
-	Default  string
-	Hint     string
-	Required bool
-	Values   []string
-	Template string
+	Name         string
+	Type         FieldType
+	Label        string
+	Default      string
+	Hint         string
+	Required     bool
+	Values       []string
+	Template     string
+	Dependencies []string
 }
 
 type Approval interface {

@@ -189,6 +189,8 @@ const (
 	slackMaxTextBlockLength          = 3000
 	slackSubmitAction                = "submit"
 	slackCancelAction                = "cancel"
+	slackTriggerOnCharacterEntered   = "on_character_entered"
+	slackTriggerOnEnterPressed       = "on_enter_pressed"
 )
 
 // SlackResponse
@@ -1053,6 +1055,17 @@ func (s *Slack) buildActionID(interaction, name string) string {
 	return fmt.Sprintf("%s-%s", interaction, name)
 }
 
+func (s *Slack) fieldDependencies(name string, fields []common.Field) []common.Field {
+
+	r := []common.Field{}
+	for _, field := range fields {
+		if utils.Contains(field.Dependencies, name) {
+			r = append(r, field)
+		}
+	}
+	return r
+}
+
 func (s *Slack) replyForm(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
 	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
@@ -1073,6 +1086,16 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 	for _, field := range fields {
 
 		actionID := s.buildActionID(interactionID, field.Name)
+
+		var dac *slack.DispatchActionConfig
+
+		deps := s.fieldDependencies(field.Name, fields)
+		if len(deps) > 0 {
+			dac = &slack.DispatchActionConfig{
+				TriggerActionsOn: []string{slackTriggerOnCharacterEntered},
+			}
+		}
+
 		def := ""
 		if !utils.IsEmpty(params[field.Name]) {
 			def = fmt.Sprintf("%v", params[field.Name])
@@ -1095,18 +1118,23 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
 			e.Multiline = true
 			e.InitialValue = def
+			e.DispatchActionConfig = dac
 			el = e
 		case common.FieldTypeInteger:
 			e := slack.NewNumberInputBlockElement(h, actionID, false)
 			e.InitialValue = def
+			e.DispatchActionConfig = dac
 			el = e
 		case common.FieldTypeFloat:
 			e := slack.NewNumberInputBlockElement(h, actionID, true)
 			e.InitialValue = def
+			e.DispatchActionConfig = dac
 			el = e
 		case common.FieldTypeURL:
 			e := slack.NewURLTextInputBlockElement(h, actionID)
 			e.InitialValue = def
+			e.DispatchActionConfig = dac
+			//e.FocusOnLoad = field.Focus
 			el = e
 		case common.FieldTypeDate:
 			e := slack.NewDatePickerBlockElement(actionID)
@@ -1231,11 +1259,13 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 		default:
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
 			e.InitialValue = def
+			e.DispatchActionConfig = dac
 			el = e
 		}
 
 		b = slack.NewInputBlock("", l, nil, el)
 		if b != nil {
+			b.DispatchAction = dac != nil
 			b.Optional = !field.Required
 			blocks = append(blocks, b)
 		}
@@ -1996,31 +2026,10 @@ func (s *Slack) Post(channel string, message string, attachments []*common.Attac
 	return err
 }
 
-func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
+func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.BlockAction, ctx *slacker.InteractionContext) {
 
 	callback := ctx.Callback()
 	replier := ctx.Response()
-
-	m := &slackMessageInfo{
-		typ:             callback.Container.Type,
-		text:            "", // get this from button value
-		userID:          callback.User.ID,
-		channelID:       callback.Container.ChannelID,
-		timestamp:       callback.Container.MessageTs,
-		threadTimestamp: callback.Container.ThreadTs,
-	}
-
-	actions := callback.ActionCallback.BlockActions
-	if len(actions) == 0 {
-		s.logger.Error("Slack actions are not defined.")
-		s.removeReaction(m, s.options.ReactionDialog)
-		return
-	}
-
-	action := actions[0]
-	if !utils.Contains([]string{slackSubmitAction, slackCancelAction}, action.ActionID) {
-		return
-	}
 
 	data, err := base64.StdEncoding.DecodeString(action.Value)
 	if err != nil {
@@ -2112,7 +2121,6 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 				return
 			}
 		}
-
 		s.removeMessage(m, callback.ResponseURL)
 
 	case SlackButtonValueApprovalType:
@@ -2195,6 +2203,52 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	default:
 		s.addReaction(m, s.options.ReactionFailed)
 	}
+}
+
+func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
+
+	callback := ctx.Callback()
+
+	m := &slackMessageInfo{
+		typ:             callback.Container.Type,
+		text:            "", // get this from button value
+		userID:          callback.User.ID,
+		channelID:       callback.Container.ChannelID,
+		timestamp:       callback.Container.MessageTs,
+		threadTimestamp: callback.Container.ThreadTs,
+	}
+
+	actions := callback.ActionCallback.BlockActions
+	if len(actions) == 0 {
+		s.logger.Error("Slack actions are not defined.")
+		s.removeReaction(m, s.options.ReactionDialog)
+		return
+	}
+
+	action := actions[0]
+	if utils.Contains([]string{slackSubmitAction, slackCancelAction}, action.ActionID) {
+		s.formButtonCallbackHandler(m, action, ctx)
+		return
+	}
+
+	arr := strings.Split(action.ActionID, "-")
+	if len(arr) == 0 {
+		return
+	}
+
+	name := arr[len(arr)-1]
+	if utils.IsEmpty(name) {
+		return
+	}
+
+	blocks := []slack.Block{}
+	for _, block := range callback.Message.Blocks.BlockSet {
+		if block.BlockType() != slack.MBTAction {
+			blocks = append(blocks, block)
+		}
+	}
+
+	s.replaceMessage(m, callback.ResponseURL, blocks)
 }
 
 func (s *Slack) formCallbackDefinition(name, group string) *slacker.InteractionDefinition {
@@ -2388,6 +2442,14 @@ func (s *Slack) unsupportedInteractionHandler(ctx *slacker.InteractionContext, r
 	}
 }
 
+func (s *Slack) unsupportedEventnHandler(event socketmode.Event) {
+
+	switch event.Type {
+	default:
+		s.logger.Debug("Slack unsupported event type: %s", event.Type)
+	}
+}
+
 func (s *Slack) start() {
 
 	options := []slacker.ClientOption{
@@ -2398,6 +2460,7 @@ func (s *Slack) start() {
 	client := slacker.NewClient(s.options.BotToken, s.options.AppToken, options...)
 	client.UnsupportedCommandHandler(s.unsupportedCommandHandler)
 	client.UnsupportedInteractionHandler(s.unsupportedInteractionHandler)
+	client.UnsupportedEventHandler(s.unsupportedEventnHandler)
 
 	s.defaultDefinition = nil
 	s.helpDefinition = nil
