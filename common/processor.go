@@ -75,7 +75,7 @@ type Command interface {
 	Channel() string
 	Response() Response
 	Execute(bot Bot, message Message, params ExecuteParams) (Executor, string, []*Attachment, error)
-	Fields(bot Bot, message Message, only []string) []Field
+	Fields(bot Bot, message Message, params ExecuteParams, only []string, eval bool) []Field
 	Approval() Approval
 	Permissions() bool
 }

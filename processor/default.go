@@ -1117,7 +1117,7 @@ func (dc *DefaultCommand) Aliases() []string {
 	return dc.config.Aliases
 }
 
-func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []string) []common.Field {
+func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params common.ExecuteParams, only []string, eval bool) []common.Field {
 
 	if dc.config == nil {
 		return []common.Field{}
@@ -1132,15 +1132,15 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []
 
 	for _, field := range dc.config.Fields {
 
+		if !eval {
+			continue
+		}
+
 		if utils.IsEmpty(field.Template) {
 			continue
 		}
 
 		skip := utils.IsEmpty(dc.processor.options.TemplatesDir)
-		if !skip && len(only) > 0 {
-			skip = !utils.Contains(only, field.Name)
-		}
-
 		if skip {
 			continue
 		}
@@ -1180,6 +1180,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []
 			m["message"] = message
 			m["channel"] = message.Channel()
 			m["user"] = message.User()
+			m["params"] = params
 			m["field"] = f
 
 			b, err := t.RenderObject(m)
@@ -1203,6 +1204,10 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []
 	newFields := []common.Field{}
 	for _, field := range dc.config.Fields {
 
+		if len(only) > 0 && !utils.Contains(only, field.Name) {
+			continue
+		}
+
 		newField := common.Field{
 			Name:         field.Name,
 			Type:         field.Type,
@@ -1214,34 +1219,44 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, only []
 			Template:     field.Template,
 			Dependencies: field.Dependencies,
 		}
-		r, ok := fields.Load(field.Name)
-		if ok {
-			f, ok := r.(common.Field)
-			if !ok {
-				continue
-			}
-			if f.Type != "" {
-				newField.Type = f.Type
-			}
-			if !utils.IsEmpty(f.Label) {
-				newField.Label = f.Label
-			}
-			if !utils.IsEmpty(f.Default) {
-				newField.Default = f.Default
-			}
-			if !utils.IsEmpty(f.Hint) {
-				newField.Hint = f.Hint
-			}
-			if f.Required && !newField.Required {
-				newField.Required = f.Required
-			}
-			if len(f.Values) != 0 {
-				newField.Values = f.Values
-			}
-			if len(f.Dependencies) != 0 {
-				newField.Dependencies = f.Dependencies
-			}
+
+		if !eval {
+			newFields = append(newFields, newField)
+			continue
 		}
+
+		r, ok := fields.Load(field.Name)
+		if !ok {
+			continue
+		}
+
+		f, ok := r.(common.Field)
+		if !ok {
+			continue
+		}
+
+		if f.Type != "" {
+			newField.Type = f.Type
+		}
+		if !utils.IsEmpty(f.Label) {
+			newField.Label = f.Label
+		}
+		if !utils.IsEmpty(f.Default) {
+			newField.Default = f.Default
+		}
+		if !utils.IsEmpty(f.Hint) {
+			newField.Hint = f.Hint
+		}
+		if f.Required && !newField.Required {
+			newField.Required = f.Required
+		}
+		if len(f.Values) != 0 {
+			newField.Values = f.Values
+		}
+		if len(f.Dependencies) != 0 {
+			newField.Dependencies = f.Dependencies
+		}
+
 		newFields = append(newFields, newField)
 	}
 

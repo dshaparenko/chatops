@@ -1066,21 +1066,11 @@ func (s *Slack) fieldDependencies(name string, fields []common.Field) []common.F
 	return r
 }
 
-func (s *Slack) replyForm(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
-	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
-
-	threadTS := m.threadTimestamp
-	opts := []slacker.PostOption{}
-	replyInThread := !utils.IsEmpty(threadTS)
-	if replyInThread {
-		opts = append(opts, slacker.SetThreadTS(threadTS))
-	}
-
-	if utils.IsEmpty(m.botID) {
-		opts = append(opts, slacker.SetEphemeral(m.userID))
-	}
+func (s *Slack) formBlocks(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
+	m *slackMessageInfo, u *slack.User) ([]slack.Block, error) {
 
 	blocks := []slack.Block{}
+
 	interactionID := s.buildInteractionID(command, group)
 
 	for _, field := range fields {
@@ -1092,7 +1082,7 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 		deps := s.fieldDependencies(field.Name, fields)
 		if len(deps) > 0 {
 			dac = &slack.DispatchActionConfig{
-				TriggerActionsOn: []string{slackTriggerOnCharacterEntered},
+				TriggerActionsOn: []string{slackTriggerOnEnterPressed},
 			}
 		}
 
@@ -1272,7 +1262,7 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 	}
 
 	if len(blocks) == 0 {
-		return false, nil
+		return blocks, nil
 	}
 
 	// pass message timestamp & text to each button
@@ -1290,7 +1280,7 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 	}
 	data, err := json.Marshal(value)
 	if err != nil {
-		return false, err
+		return blocks, err
 	}
 	sv := base64.StdEncoding.EncodeToString(data)
 
@@ -1311,6 +1301,28 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 
 	ab := slack.NewActionBlock(interactionID, submit, cancel)
 	blocks = append(blocks, ab)
+
+	return blocks, nil
+}
+
+func (s *Slack) replyForm(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
+	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
+
+	threadTS := m.threadTimestamp
+	opts := []slacker.PostOption{}
+	replyInThread := !utils.IsEmpty(threadTS)
+	if replyInThread {
+		opts = append(opts, slacker.SetThreadTS(threadTS))
+	}
+
+	if utils.IsEmpty(m.botID) {
+		opts = append(opts, slacker.SetEphemeral(m.userID))
+	}
+
+	blocks, err := s.formBlocks(command, group, confirmation, fields, params, m, u)
+	if err != nil {
+		return false, err
+	}
 
 	s.addReaction(m, s.options.ReactionDialog)
 	_, err = replier.PostBlocks(m.channelID, blocks, opts...)
@@ -1584,7 +1596,7 @@ func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
 
 	r := []string{}
 
-	fields := cmd.Fields(s, nil, nil)
+	fields := cmd.Fields(s, nil, nil, nil, false)
 	if len(fields) == 0 {
 		return r
 	}
@@ -1641,10 +1653,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
-	only := s.getFieldsByType(cmd, list)
-
-	fields := cmd.Fields(s, parent, only)
+	fields := cmd.Fields(s, parent, params, nil, true)
 	if s.formNeeded(cmd.Confirmation(), fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
 		return nil
@@ -1819,10 +1828,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			rGroup = eGroup
 		}
 
-		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
-		only := s.getFieldsByType(cmd, list)
-
-		rFields := cmd.Fields(s, msg, only)
+		rFields := cmd.Fields(s, msg, eParams, nil, false)
 		rParams := eParams
 
 		confirmation := cmd.Confirmation()
@@ -1868,7 +1874,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				}
 			}
 
-			rFields = wrappedCmd.Fields(s, msg, only)
+			rFields = wrappedCmd.Fields(s, msg, rParams, nil, false)
 			confirmation = wrappedCmd.Confirmation()
 
 			rParams = wrappedParams
@@ -2213,6 +2219,7 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		typ:             callback.Container.Type,
 		text:            "", // get this from button value
 		userID:          callback.User.ID,
+		botID:           "",
 		channelID:       callback.Container.ChannelID,
 		timestamp:       callback.Container.MessageTs,
 		threadTimestamp: callback.Container.ThreadTs,
@@ -2231,21 +2238,60 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		return
 	}
 
-	arr := strings.Split(action.ActionID, "-")
-	if len(arr) == 0 {
+	// update form according to the action and dependencies
+
+	cmd, group, name := s.getCommandGroupField(action.ActionID)
+	if cmd == nil {
 		return
 	}
+	command := cmd.Name()
 
-	name := arr[len(arr)-1]
-	if utils.IsEmpty(name) {
-		return
+	user := &SlackUser{
+		id: m.userID,
 	}
 
-	blocks := []slack.Block{}
-	for _, block := range callback.Message.Blocks.BlockSet {
-		if block.BlockType() != slack.MBTAction {
-			blocks = append(blocks, block)
+	channel := &SlackChannel{
+		id: m.channelID,
+	}
+
+	msg := &SlackMessage{
+		id:              m.timestamp,
+		visible:         !callback.Container.IsEphemeral,
+		user:            user,
+		threadTimestamp: m.threadTimestamp,
+		channel:         channel,
+	}
+
+	// find all fields that depend on name
+	deps := []string{}
+
+	allFields := cmd.Fields(s, msg, nil, nil, false)
+	for _, field := range allFields {
+		if utils.Contains(field.Dependencies, name) {
+			deps = append(deps, field.Name)
 		}
+	}
+
+	if len(deps) == 0 {
+		return
+	}
+
+	params := make(common.ExecuteParams)
+	params[name] = action.Value
+
+	// get dependent fields with default values and set params
+	depFields := cmd.Fields(s, msg, params, deps, true)
+	for _, field := range depFields {
+		params[field.Name] = field.Default
+	}
+
+	confirmation := cmd.Confirmation()
+	u := s.getSlackUser(m.userID, m.botID)
+
+	blocks, err := s.formBlocks(command, group, confirmation, allFields, params, m, u)
+	if err != nil {
+		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
+		return
 	}
 
 	s.replaceMessage(m, callback.ResponseURL, blocks)
@@ -2378,7 +2424,7 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 		channel:         channel,
 	}
 
-	fields := cmd.Fields(s, msg, []string{name})
+	fields := cmd.Fields(s, msg, nil, []string{name}, true)
 	var field *common.Field
 
 	for _, f := range fields {
@@ -2489,7 +2535,7 @@ func (s *Slack) start() {
 
 			def := s.commandDefinition(c, "")
 			client.AddCommand(def)
-			if len(c.Fields(s, nil, nil)) > 0 {
+			if len(c.Fields(s, nil, nil, nil, false)) > 0 {
 				client.AddInteraction(s.formCallbackDefinition(c.Name(), ""))
 			}
 		}
@@ -2518,7 +2564,7 @@ func (s *Slack) start() {
 			}
 
 			group.AddCommand(s.commandDefinition(c, pName))
-			if len(c.Fields(s, nil, nil)) > 0 {
+			if len(c.Fields(s, nil, nil, nil, false)) > 0 {
 				client.AddInteraction(s.formCallbackDefinition(c.Name(), pName))
 			}
 		}
@@ -2556,7 +2602,7 @@ func (s *Slack) start() {
 					client.Help(def)
 				}
 				groupRoot.AddCommand(def)
-				if len(c.Fields(s, nil, nil)) > 0 {
+				if len(c.Fields(s, nil, nil, nil, false)) > 0 {
 					client.AddInteraction(s.formCallbackDefinition(c.Name(), ""))
 				}
 			}
