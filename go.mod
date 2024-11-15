@@ -14,11 +14,12 @@ require (
 	github.com/devopsext/tools v0.15.15
 	github.com/devopsext/utils v0.4.6
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
+	github.com/jellydator/ttlcache/v3 v3.3.0
 	github.com/jinzhu/copier v0.4.0
 	github.com/slack-go/slack v0.13.0
 	github.com/slack-io/slacker v0.1.1-3
 	github.com/spf13/cobra v1.8.0
-	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/sync v0.8.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 

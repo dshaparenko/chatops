@@ -89,7 +89,7 @@ var slackOptions = bot.SlackOptions{
 	ReactionApproved: envGet("SLACK_REACTION_APPROVED", "white_check_mark").(string),
 	ReactionRejected: envGet("SLACK_REACTION_REJECTED", "x").(string),
 
-	ButtonSubmitCaption:  envGet("SLACK_BUTTON_SUBMIT_CAPTION", "Submit").(string),
+	ButtonSubmitCaption:  envGet("SLACK_BUTTON_SUBMIT_CAPTION", "OK").(string),
 	ButtonSubmitStyle:    envGet("SLACK_BUTTON_SUBMIT_STYLE", string(slack.StylePrimary)).(string),
 	ButtonCancelCaption:  envGet("SLACK_BUTTON_CANCEL_CAPTION", "Cancel").(string),
 	ButtonCancelStyle:    envGet("SLACK_BUTTON_CANCEL_STYLE", "").(string),
