@@ -96,6 +96,8 @@ var slackOptions = bot.SlackOptions{
 	ButtonConfirmCaption: envGet("SLACK_BUTTON_CONFIRM_CAPTION", "Confirm").(string),
 	ButtonRejectCaption:  envGet("SLACK_BUTTON_REJECT_CAPTION", "Reject").(string),
 	ButtonApproveCaption: envGet("SLACK_BUTTON_APPROVE_CAPTION", "Approve").(string),
+
+	CacheTTL: envGet("SLACK_CACHE_TTL", "1h").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{

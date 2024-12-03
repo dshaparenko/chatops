@@ -376,7 +376,7 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 
 	var err error
 	for _, ch := range chnls {
-		e := de.bot.Post(ch, message, atts, user, nil, de.Response())
+		e := de.bot.PostMessage(ch, message, atts, user, nil, de.Response())
 		if e != nil {
 			de.command.logger.Error(e)
 			err = e
@@ -396,23 +396,45 @@ func (de *DefaultExecutor) fSetInvisible() string {
 	return ""
 }
 
-func (de *DefaultExecutor) fDeleteMessage(channelID, messageTimestamp string) string {
+func (de *DefaultExecutor) fDeleteMessage(channelID, messageID string) string {
 
-	err := de.bot.Delete(channelID, messageTimestamp)
+	err := de.bot.DeleteMessage(channelID, messageID)
 
 	if err != nil {
 		e := true
 		de.error = &e
-		errorMessage := err.Error()
-
-		return errorMessage
+		return err.Error()
 	}
 	return ""
 }
 
-func (de *DefaultExecutor) fAddReaction(channelID, messageTimestamp, name string) string {
+func (de *DefaultExecutor) fReadMessage(channelID, messageID string) string {
 
-	de.bot.AddReaction(channelID, messageTimestamp, name)
+	text, err := de.bot.ReadMessage(channelID, messageID)
+
+	if err != nil {
+		e := true
+		de.error = &e
+		return err.Error()
+	}
+	return text
+}
+
+func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) string {
+
+	err := de.bot.UpdateMessage(channelID, messageID, text)
+
+	if err != nil {
+		e := true
+		de.error = &e
+		return err.Error()
+	}
+	return text
+}
+
+func (de *DefaultExecutor) fAddReaction(channelID, messageID, name string) string {
+
+	de.bot.AddReaction(channelID, messageID, name)
 
 	return ""
 }
@@ -565,7 +587,7 @@ func (de *DefaultExecutor) defaultAfter(post *DefaultPost, parent common.Message
 		m = nil
 	}
 
-	err = de.bot.Post(channel.ID(), text, atts, user, m, de.Response())
+	err = de.bot.PostMessage(channel.ID(), text, atts, user, m, de.Response())
 	if err != nil {
 		return err
 	}
@@ -599,7 +621,7 @@ func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, p
 
 	m := parent
 
-	err := de.bot.Post(channel.ID(), ret.Text, ret.Attachements, user, m, de.Response())
+	err := de.bot.PostMessage(channel.ID(), ret.Text, ret.Attachements, user, m, de.Response())
 	if err != nil {
 		return err
 	}
@@ -692,6 +714,8 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
+	funcs["readMessage"] = executor.fReadMessage
+	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["addReaction"] = executor.fAddReaction
 	funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
@@ -1164,9 +1188,20 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 		go func(wg *sync.WaitGroup, name, content string, f common.Field, fs *sync.Map) {
 			defer wGroup.Done()
 
+			funcs := make(map[string]any)
+			funcs["readMessage"] = func(channelID, messageID string) string {
+
+				text, err := bot.ReadMessage(channelID, messageID)
+				if err != nil {
+					return err.Error()
+				}
+				return text
+			}
+
 			tOpts := toolsRender.TemplateOptions{
 				Name:    fmt.Sprintf("default-internal-%s", name),
 				Content: string(content),
+				Funcs:   funcs,
 			}
 
 			t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
