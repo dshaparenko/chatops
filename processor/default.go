@@ -1239,10 +1239,6 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 	newFields := []common.Field{}
 	for _, field := range dc.config.Fields {
 
-		if len(only) > 0 && !utils.Contains(only, field.Name) {
-			continue
-		}
-
 		newField := common.Field{
 			Name:         field.Name,
 			Type:         field.Type,
@@ -1255,18 +1251,15 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 			Dependencies: field.Dependencies,
 		}
 
-		if !eval {
-			newFields = append(newFields, newField)
-			continue
-		}
-
 		r, ok := fields.Load(field.Name)
 		if !ok {
+			newFields = append(newFields, newField)
 			continue
 		}
 
 		f, ok := r.(common.Field)
 		if !ok {
+			newFields = append(newFields, newField)
 			continue
 		}
 
