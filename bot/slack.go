@@ -1847,7 +1847,10 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			rGroup = eGroup
 		}
 
-		rFields := cmd.Fields(s, msg, eParams, nil, false)
+		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
+		only := s.getFieldsByType(cmd, list)
+
+		rFields := cmd.Fields(s, msg, eParams, only, true)
 		rParams := eParams
 
 		confirmation := cmd.Confirmation()
@@ -1893,7 +1896,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				}
 			}
 
-			rFields = wrappedCmd.Fields(s, msg, rParams, nil, false)
+			rFields = wrappedCmd.Fields(s, msg, rParams, only, true)
 			confirmation = wrappedCmd.Confirmation()
 
 			rParams = wrappedParams
