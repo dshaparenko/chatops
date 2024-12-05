@@ -429,7 +429,7 @@ func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) str
 		de.error = &e
 		return err.Error()
 	}
-	return text
+	return ""
 }
 
 func (de *DefaultExecutor) fAddReaction(channelID, messageID, name string) string {
@@ -1141,7 +1141,7 @@ func (dc *DefaultCommand) Aliases() []string {
 	return dc.config.Aliases
 }
 
-func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params common.ExecuteParams, only []string, eval bool) []common.Field {
+func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params common.ExecuteParams, eval []string) []common.Field {
 
 	if dc.config == nil {
 		return []common.Field{}
@@ -1156,7 +1156,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 
 	for _, field := range dc.config.Fields {
 
-		if !eval {
+		if !utils.Contains(eval, field.Name) {
 			continue
 		}
 

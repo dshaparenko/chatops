@@ -1615,7 +1615,7 @@ func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
 
 	r := []string{}
 
-	fields := cmd.Fields(s, nil, nil, nil, false)
+	fields := cmd.Fields(s, nil, nil, nil)
 	if len(fields) == 0 {
 		return r
 	}
@@ -1672,7 +1672,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	fields := cmd.Fields(s, parent, params, nil, true)
+	fields := cmd.Fields(s, parent, params, nil)
 	if s.formNeeded(cmd.Confirmation(), fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
 		return nil
@@ -1850,7 +1850,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
 		only := s.getFieldsByType(cmd, list)
 
-		rFields := cmd.Fields(s, msg, eParams, only, true)
+		rFields := cmd.Fields(s, msg, eParams, only)
 		rParams := eParams
 
 		confirmation := cmd.Confirmation()
@@ -1896,7 +1896,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				}
 			}
 
-			rFields = wrappedCmd.Fields(s, msg, rParams, only, true)
+			rFields = wrappedCmd.Fields(s, msg, rParams, only)
 			confirmation = wrappedCmd.Confirmation()
 
 			rParams = wrappedParams
@@ -2309,7 +2309,7 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	// find all fields that depend on name
 	deps := []string{}
 
-	allFields := cmd.Fields(s, msg, nil, nil, false)
+	allFields := cmd.Fields(s, msg, nil, nil)
 	for _, field := range allFields {
 		if utils.Contains(field.Dependencies, name) {
 			deps = append(deps, field.Name)
@@ -2334,8 +2334,11 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	}
 
 	// get dependent fields with default values and set params
-	depFields := cmd.Fields(s, msg, params, deps, true)
+	depFields := cmd.Fields(s, msg, params, deps)
 	for _, field := range depFields {
+		if !utils.Contains(deps, field.Name) {
+			continue
+		}
 		params[field.Name] = field.Default
 	}
 
@@ -2501,7 +2504,7 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 		channel:         channel,
 	}
 
-	fields := cmd.Fields(s, msg, nil, []string{name}, true)
+	fields := cmd.Fields(s, msg, nil, []string{name})
 	var field *common.Field
 
 	for _, f := range fields {
@@ -2612,7 +2615,7 @@ func (s *Slack) start() {
 
 			def := s.commandDefinition(c, "")
 			client.AddCommand(def)
-			if len(c.Fields(s, nil, nil, nil, false)) > 0 {
+			if len(c.Fields(s, nil, nil, nil)) > 0 {
 				client.AddInteraction(s.formCallbackDefinition(c.Name(), ""))
 			}
 		}
@@ -2641,7 +2644,7 @@ func (s *Slack) start() {
 			}
 
 			group.AddCommand(s.commandDefinition(c, pName))
-			if len(c.Fields(s, nil, nil, nil, false)) > 0 {
+			if len(c.Fields(s, nil, nil, nil)) > 0 {
 				client.AddInteraction(s.formCallbackDefinition(c.Name(), pName))
 			}
 		}
@@ -2679,7 +2682,7 @@ func (s *Slack) start() {
 					client.Help(def)
 				}
 				groupRoot.AddCommand(def)
-				if len(c.Fields(s, nil, nil, nil, false)) > 0 {
+				if len(c.Fields(s, nil, nil, nil)) > 0 {
 					client.AddInteraction(s.formCallbackDefinition(c.Name(), ""))
 				}
 			}
