@@ -1847,7 +1847,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			rGroup = eGroup
 		}
 
-		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect}
+		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit}
 		only := s.getFieldsByType(cmd, list)
 
 		rFields := cmd.Fields(s, msg, eParams, only)
