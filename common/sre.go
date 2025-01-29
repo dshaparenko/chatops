@@ -33,6 +33,12 @@ func (o *Observability) Error(obj interface{}, args ...interface{}) {
 	}
 }
 
+func (o *Observability) Panic(obj interface{}, args ...interface{}) {
+	if o.logs != nil {
+		o.logs.Panic(obj, args...)
+	}
+}
+
 func (o *Observability) Logs() *sre.Logs {
 	return o.logs
 }
