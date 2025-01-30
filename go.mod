@@ -11,7 +11,7 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-3
 
 require (
 	github.com/devopsext/sre v0.4.0
-	github.com/devopsext/tools v0.15.17
+	github.com/devopsext/tools v0.15.18
 	github.com/devopsext/utils v0.4.7
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jellydator/ttlcache/v3 v3.3.0
@@ -37,6 +37,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.1.2 // indirect
 	github.com/go-logr/logr v1.2.1 // indirect
 	github.com/go-logr/stdr v1.2.0 // indirect
+	github.com/go-playground/form/v4 v4.2.1 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/uuid v1.2.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
