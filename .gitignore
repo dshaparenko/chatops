@@ -17,3 +17,5 @@ chatops
 .incident.json
 .image.png
 .old
+public.key
+.certs/

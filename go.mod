@@ -7,12 +7,13 @@ replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.3
 replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-3
 
 //replace github.com/devopsext/tools => ./../tools
+
 //replace github.com/devopsext/slacker => ./../slacker
 
 require (
 	github.com/devopsext/sre v0.4.0
-	github.com/devopsext/tools v0.15.16
-	github.com/devopsext/utils v0.4.7-0.20241210080327-58899f67cf93
+	github.com/devopsext/tools v0.16.0
+	github.com/devopsext/utils v0.4.7
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/jellydator/ttlcache/v3 v3.3.0
 	github.com/jinzhu/copier v0.4.0
