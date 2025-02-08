@@ -1124,6 +1124,7 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 			def = field.Default
 		}
 
+		// updating values from params if exists
 		currentValues := field.Values
 		if paramValues, exists := params[field.Name+"_values"]; exists {
 			switch v := paramValues.(type) {
@@ -2353,12 +2354,13 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		}
 	}
 
-	// get dependent fields with default values and set params
+	// get dependent fields
 	depFields := cmd.Fields(s, msg, params, deps)
 	for _, field := range depFields {
 		if !utils.Contains(deps, field.Name) {
 			continue
 		}
+		// check if fields have values to update
 		if len(field.Values) > 0 {
 			params[field.Name+"_values"] = field.Values
 		}
@@ -2367,7 +2369,7 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		}
 	}
 
-	// replace fields with new values
+	// replace dependant fields with new values
 	cParams := params
 	fields := s.fields.Get(callback.Container.MessageTs)
 	if fields != nil {
