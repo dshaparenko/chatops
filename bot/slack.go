@@ -1108,10 +1108,30 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 
 		def := ""
 		if !utils.IsEmpty(params[field.Name]) {
-			def = fmt.Sprintf("%v", params[field.Name])
+			switch field.Type {
+			case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
+				switch v := params[field.Name].(type) {
+				case []string:
+					def = strings.Join(v, ",")
+				case string:
+					def = v
+				}
+			default:
+				def = fmt.Sprintf("%v", params[field.Name])
+			}
 		}
 		if utils.IsEmpty(def) {
 			def = field.Default
+		}
+
+		currentValues := field.Values
+		if paramValues, exists := params[field.Name+"_values"]; exists {
+			switch v := paramValues.(type) {
+			case []string:
+				currentValues = v
+			case string:
+				currentValues = strings.Split(v, ",")
+			}
 		}
 
 		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
@@ -1217,7 +1237,7 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 			var dBlock *slack.OptionBlockObject
 			optType := slack.OptTypeExternal
 			if field.Type == common.FieldTypeSelect {
-				for _, v := range field.Values {
+				for _, v := range currentValues {
 					block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
 					if v == def {
 						dBlock = block
@@ -1244,7 +1264,7 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 						arr = common.RemoveEmptyStrings(strings.Split(s, " "))
 					}
 				}
-				for _, v := range field.Values {
+				for _, v := range currentValues {
 					block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
 					if utils.Contains(arr, v) {
 						dBlocks = append(dBlocks, block)
@@ -2339,7 +2359,12 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		if !utils.Contains(deps, field.Name) {
 			continue
 		}
-		params[field.Name] = field.Default
+		if len(field.Values) > 0 {
+			params[field.Name+"_values"] = field.Values
+		}
+		if !utils.IsEmpty(field.Default) {
+			params[field.Name] = field.Default
+		}
 	}
 
 	// replace fields with new values
@@ -2347,12 +2372,12 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	fields := s.fields.Get(callback.Container.MessageTs)
 	if fields != nil {
 		for k, v := range fields.Value() {
-			if _, ok := cParams[k]; ok {
-				continue
+			if utils.Contains(deps, k) {
+				cParams[k] = v
 			}
-			cParams[k] = v
 		}
 	}
+
 	s.fields.Set(callback.Container.MessageTs, cParams, ttlcache.PreviousOrDefaultTTL)
 
 	confirmation := cmd.Confirmation()
