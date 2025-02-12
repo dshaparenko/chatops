@@ -2369,7 +2369,7 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 		}
 	}
 
-	// replace dependant fields with new values
+	// keep old values if they exist (which not in params)
 	cParams := params
 	fields := s.fields.Get(callback.Container.MessageTs)
 	if fields != nil {
