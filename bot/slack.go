@@ -2374,9 +2374,10 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	fields := s.fields.Get(callback.Container.MessageTs)
 	if fields != nil {
 		for k, v := range fields.Value() {
-			if utils.Contains(deps, k) {
-				cParams[k] = v
+			if _, ok := cParams[k]; ok {
+				continue
 			}
+			cParams[k] = v
 		}
 	}
 
