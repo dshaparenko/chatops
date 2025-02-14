@@ -1319,9 +1319,31 @@ func (dc *DefaultCommand) Channel() string {
 	return ""
 }
 
-func (dc *DefaultCommand) Confirmation() string {
+func (dc *DefaultCommand) Confirmation(params common.ExecuteParams) string {
+
 	if dc.config != nil {
-		return dc.config.Confirmation
+
+		content := dc.config.Confirmation
+		name := fmt.Sprintf("%s-confirmation", dc.name)
+
+		tOpts := toolsRender.TemplateOptions{
+			Name:    fmt.Sprintf("default-internal-%s", name),
+			Content: string(content),
+		}
+
+		t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
+		if err != nil {
+			dc.logger.Error("Default command %s create error: %s", dc.name, err)
+			return ""
+		}
+
+		b, err := t.RenderObject(params)
+		if err != nil {
+			dc.logger.Error("Default command %s render error: %s", dc.name, err)
+			return ""
+		}
+		return string(b)
+
 	}
 	return ""
 }

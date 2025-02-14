@@ -1087,11 +1087,17 @@ func (s *Slack) fieldDependencies(name string, fields []common.Field) []common.F
 	return r
 }
 
-func (s *Slack) formBlocks(command, group, confirmation string, fields []common.Field, params common.ExecuteParams, u *slack.User) ([]slack.Block, error) {
+func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []common.Field, params common.ExecuteParams, u *slack.User) ([]slack.Block, error) {
 
 	blocks := []slack.Block{}
 
 	interactionID := s.buildInteractionID(command, group)
+
+	// to do
+	confirmationParams := make(common.ExecuteParams)
+	for k, v := range params {
+		confirmationParams[k] = v
+	}
 
 	for _, field := range fields {
 
@@ -1112,6 +1118,10 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 		}
 		if utils.IsEmpty(def) {
 			def = field.Default
+		}
+
+		if utils.IsEmpty(confirmationParams[field.Name]) {
+			confirmationParams[field.Name] = def
 		}
 
 		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
@@ -1226,6 +1236,9 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 				}
 				optType = slack.OptTypeStatic
 			}
+			if len(options) == 0 && !utils.IsEmpty(def) {
+				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+			}
 			e := slack.NewOptionsSelectBlockElement(optType, h, actionID, options...)
 			if dBlock != nil {
 				e.InitialOption = dBlock
@@ -1253,7 +1266,54 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 				}
 				optType = slack.MultiOptTypeStatic
 			}
+			if len(options) == 0 && !utils.IsEmpty(def) {
+				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+			}
 			e := slack.NewOptionsMultiSelectBlockElement(optType, h, actionID, options...)
+			if len(dBlocks) > 0 {
+				e.InitialOptions = dBlocks
+			}
+			el = e
+		case common.FieldTypeRadionButtons:
+			options := []*slack.OptionBlockObject{}
+			var dBlock *slack.OptionBlockObject
+			for _, v := range field.Values {
+				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
+				if v == def {
+					dBlock = block
+				}
+				options = append(options, block)
+			}
+			if len(options) == 0 && !utils.IsEmpty(def) {
+				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+			}
+			e := slack.NewRadioButtonsBlockElement(actionID, options...)
+			if dBlock != nil {
+				e.InitialOption = dBlock
+			}
+			el = e
+		case common.FieldTypeCheckboxes:
+			options := []*slack.OptionBlockObject{}
+			dBlocks := []*slack.OptionBlockObject{}
+			arr := common.RemoveEmptyStrings(strings.Split(def, ","))
+			if len(arr) == 1 {
+				s := arr[0]
+				if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+					s = s[1 : len(s)-1]
+					arr = common.RemoveEmptyStrings(strings.Split(s, " "))
+				}
+			}
+			for _, v := range field.Values {
+				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
+				if utils.Contains(arr, v) {
+					dBlocks = append(dBlocks, block)
+				}
+				options = append(options, block)
+			}
+			if len(options) == 0 && !utils.IsEmpty(def) {
+				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+			}
+			e := slack.NewCheckboxGroupsBlockElement(actionID, options...)
 			if len(dBlocks) > 0 {
 				e.InitialOptions = dBlocks
 			}
@@ -1295,10 +1355,14 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 	submit := slack.NewButtonBlockElement(slackSubmitAction, "", slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonSubmitCaption, false, false))
 	submit.Style = slack.Style(s.options.ButtonSubmitStyle)
 
+	// to think about it, not sure if it's needed
+	confirmation := cmd.Confirmation(confirmationParams)
 	if !utils.IsEmpty(confirmation) {
+
+		tmp := confirmation
 		submit.Confirm = slack.NewConfirmationBlockObject(
 			slack.NewTextBlockObject(slack.PlainTextType, s.options.TitleConfirmation, false, false),
-			slack.NewTextBlockObject(slack.PlainTextType, confirmation, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, tmp, false, false),
 			slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonConfirmCaption, false, false),
 			slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonRejectCaption, false, false),
 		)
@@ -1313,7 +1377,7 @@ func (s *Slack) formBlocks(command, group, confirmation string, fields []common.
 	return blocks, nil
 }
 
-func (s *Slack) replyForm(command, group, confirmation string, fields []common.Field, params common.ExecuteParams,
+func (s *Slack) replyForm(cmd common.Command, command, group string, fields []common.Field, params common.ExecuteParams,
 	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
 	threadTS := m.threadTimestamp
@@ -1341,7 +1405,7 @@ func (s *Slack) replyForm(command, group, confirmation string, fields []common.F
 		Wrapper:   m.wrapper,
 	}
 
-	blocks, err := s.formBlocks(command, group, confirmation, fields, params, u)
+	blocks, err := s.formBlocks(cmd, command, group, fields, params, u)
 	if err != nil {
 		return false, err
 	}
@@ -1575,7 +1639,7 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 	return executor.After(msg2)
 }
 
-func (s *Slack) formNeeded(confirmation string, fields []common.Field, params map[string]interface{}) bool {
+func (s *Slack) formNeeded(fields []common.Field, params map[string]interface{}) bool {
 
 	if params == nil {
 		return len(fields) > 0
@@ -1600,7 +1664,7 @@ func (s *Slack) formNeeded(confirmation string, fields []common.Field, params ma
 			}
 		}
 	}
-	return len(required) > len(arr) || !utils.IsEmpty(confirmation)
+	return len(required) > len(arr)
 }
 
 func (s *Slack) approvalNeeded(approval common.Approval) bool {
@@ -1673,7 +1737,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	}
 
 	fields := cmd.Fields(s, parent, params, nil)
-	if s.formNeeded(cmd.Confirmation(), fields, params) {
+	if s.formNeeded(fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
 		return nil
 	}
@@ -1853,8 +1917,6 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		rFields := cmd.Fields(s, msg, eParams, only)
 		rParams := eParams
 
-		confirmation := cmd.Confirmation()
-
 		approvalCmd := cmd
 		approvalCommand := rCommand
 		approvalGroup := rGroup
@@ -1897,7 +1959,6 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			}
 
 			rFields = wrappedCmd.Fields(s, msg, rParams, only)
-			confirmation = wrappedCmd.Confirmation()
 
 			rParams = wrappedParams
 			m.wrapped = fmt.Sprintf("%s/%s", rGroup, rCommand)
@@ -1909,8 +1970,8 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			approvalParams = rParams
 		}
 
-		if s.formNeeded(confirmation, rFields, rParams) && user != nil {
-			shown, err := s.replyForm(rCommand, rGroup, confirmation, rFields, rParams, m, user, replier)
+		if s.formNeeded(rFields, rParams) && user != nil {
+			shown, err := s.replyForm(cmd, rCommand, rGroup, rFields, rParams, m, user, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -2073,7 +2134,7 @@ func (s *Slack) getActionValue(state slack.BlockAction) interface{} {
 			arr = append(arr, v2.Value)
 		}
 		v = arr
-	case "checkboxes":
+	case "checkboxes", "radion_buttons":
 		arr := []string{}
 		for _, v2 := range state.SelectedOptions {
 			arr = append(arr, v2.Value)
@@ -2344,9 +2405,9 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 
 	// replace fields with new values
 	cParams := params
-	fields := s.fields.Get(callback.Container.MessageTs)
-	if fields != nil {
-		for k, v := range fields.Value() {
+	cache := s.fields.Get(callback.Container.MessageTs)
+	if cache != nil {
+		for k, v := range cache.Value() {
 			if _, ok := cParams[k]; ok {
 				continue
 			}
@@ -2355,7 +2416,6 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	}
 	s.fields.Set(callback.Container.MessageTs, cParams, ttlcache.PreviousOrDefaultTTL)
 
-	confirmation := cmd.Confirmation()
 	u := s.getSlackUser(m.userID, m.botID)
 
 	m.userID = value.UserID
@@ -2365,7 +2425,7 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	m.wrapped = value.Wrapped
 	m.wrapper = value.Wrapper
 
-	blocks, err := s.formBlocks(command, group, confirmation, allFields, params, u)
+	blocks, err := s.formBlocks(cmd, command, group, allFields, params, u)
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return
@@ -2504,7 +2564,18 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 		channel:         channel,
 	}
 
-	fields := cmd.Fields(s, msg, nil, []string{name})
+	params := make(common.ExecuteParams)
+	cache := s.fields.Get(callback.Container.MessageTs)
+	if cache != nil {
+		for k, v := range cache.Value() {
+			if _, ok := params[k]; ok {
+				continue
+			}
+			params[k] = v
+		}
+	}
+
+	fields := cmd.Fields(s, msg, params, []string{name})
 	var field *common.Field
 
 	for _, f := range fields {
@@ -2519,12 +2590,19 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 	}
 
 	options := []*slack.OptionBlockObject{}
-	value := strings.ToLower(callback.Value)
+	value := callback.Value
+	if utils.IsEmpty(value) {
+		return
+	}
+
+	re := regexp.MustCompile(value)
+	if re == nil {
+		return
+	}
 
 	for _, v := range field.Values {
 
-		vl := strings.ToLower(v)
-		if strings.Contains(vl, value) {
+		if re.MatchString(v) {
 
 			var h *slack.TextBlockObject
 			if !utils.IsEmpty(field.Hint) {

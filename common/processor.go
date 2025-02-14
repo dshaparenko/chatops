@@ -68,7 +68,7 @@ type Command interface {
 	Description() string
 	Params() []string
 	Aliases() []string
-	Confirmation() string
+	Confirmation(params ExecuteParams) string
 	Priority() int
 	Wrapper() bool
 	Schedule() string
@@ -115,6 +115,8 @@ const (
 	FieldTypeMultiSelect        = "multiselect"
 	FieldTypeDynamicSelect      = "dynamicselect"
 	FieldTypeDynamicMultiSelect = "dynamicmultiselect"
+	FieldTypeRadionButtons      = "radiobuttons"
+	FieldTypeCheckboxes         = "checkboxes"
 	FieldTypeBool               = "bool"
 )
 
