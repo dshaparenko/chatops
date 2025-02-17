@@ -1151,6 +1151,7 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 			h = slack.NewTextBlockObject(slack.PlainTextType, field.Hint, false, false)
 		}
 
+		addToBlocks := true
 		var b *slack.InputBlock
 		var el slack.BlockElement
 
@@ -1256,9 +1257,11 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 					options = append(options, block)
 				}
 				optType = slack.OptTypeStatic
-			}
-			if len(options) == 0 && !utils.IsEmpty(def) {
-				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+				if len(options) == 0 && !utils.IsEmpty(def) {
+					options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+				}
+			} else if !utils.IsEmpty(def) {
+				dBlock = slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h)
 			}
 			e := slack.NewOptionsSelectBlockElement(optType, h, actionID, options...)
 			if dBlock != nil {
@@ -1286,9 +1289,11 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 					options = append(options, block)
 				}
 				optType = slack.MultiOptTypeStatic
-			}
-			if len(options) == 0 && !utils.IsEmpty(def) {
-				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+				if len(options) == 0 && !utils.IsEmpty(def) {
+					options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
+				}
+			} else if !utils.IsEmpty(def) {
+				dBlocks = append(dBlocks, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
 			}
 			e := slack.NewOptionsMultiSelectBlockElement(optType, h, actionID, options...)
 			if len(dBlocks) > 0 {
@@ -1354,6 +1359,10 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 				e.InitialOptions = dBlocks
 			}
 			el = e
+		case common.FieldTypeMarkdown:
+			e := slack.NewTextBlockObject(slack.MarkdownType, def, false, false)
+			blocks = append(blocks, slack.NewSectionBlock(e, nil, nil))
+			addToBlocks = false
 		default:
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
 			e.InitialValue = def
@@ -1361,11 +1370,13 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 			el = e
 		}
 
-		b = slack.NewInputBlock("", l, nil, el)
-		if b != nil {
-			b.DispatchAction = dac != nil
-			b.Optional = !field.Required
-			blocks = append(blocks, b)
+		if addToBlocks {
+			b = slack.NewInputBlock("", l, nil, el)
+			if b != nil {
+				b.DispatchAction = dac != nil
+				b.Optional = !field.Required
+				blocks = append(blocks, b)
+			}
 		}
 	}
 
@@ -1437,6 +1448,13 @@ func (s *Slack) replyForm(cmd common.Command, command, group string, fields []co
 		s.removeReaction(m, s.options.ReactionDialog)
 		return false, err
 	}
+
+	nParams := make(common.ExecuteParams)
+	for _, v := range fields {
+		nParams[v.Name] = v.Default
+	}
+
+	s.fields.Set(ts, nParams, ttlcache.PreviousOrDefaultTTL)
 	s.buttons.Set(ts, button, ttlcache.PreviousOrDefaultTTL)
 	return true, nil
 }
@@ -2038,6 +2056,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
 		}
+		s.fields.Set(m.timestamp, rParams, ttlcache.PreviousOrDefaultTTL)
 	}
 	return def
 }
@@ -2147,7 +2166,7 @@ func (s *Slack) getActionValue(state slack.BlockAction) interface{} {
 		v = state.SelectedDate
 	case "timepicker":
 		v = state.SelectedTime
-	case "static_select", "external_select":
+	case "static_select", "external_select", "radio_buttons":
 		v = state.SelectedOption.Value
 	case "multi_static_select", "multi_external_select":
 		arr := []string{}
@@ -2155,7 +2174,7 @@ func (s *Slack) getActionValue(state slack.BlockAction) interface{} {
 			arr = append(arr, v2.Value)
 		}
 		v = arr
-	case "checkboxes", "radion_buttons":
+	case "checkboxes":
 		arr := []string{}
 		for _, v2 := range state.SelectedOptions {
 			arr = append(arr, v2.Value)
@@ -2314,7 +2333,6 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			return
 		}
-
 		s.fields.Set(callback.Container.MessageTs, rParams, ttlcache.PreviousOrDefaultTTL)
 
 	default:

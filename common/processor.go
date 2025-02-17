@@ -118,6 +118,7 @@ const (
 	FieldTypeRadionButtons      = "radiobuttons"
 	FieldTypeCheckboxes         = "checkboxes"
 	FieldTypeBool               = "bool"
+	FieldTypeMarkdown           = "markdown"
 )
 
 func (ps *Processors) Add(p Processor) {

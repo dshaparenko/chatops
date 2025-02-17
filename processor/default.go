@@ -1188,6 +1188,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 		go func(wg *sync.WaitGroup, name, content string, f common.Field, fs *sync.Map) {
 			defer wGroup.Done()
 
+			// define field template functions, need to make FieldExecutor
 			funcs := make(map[string]any)
 			funcs["readMessage"] = func(channelID, messageID string) string {
 
@@ -1197,6 +1198,31 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 				}
 				return text
 			}
+			funcs["runTemplate"] = func(fileName string, obj interface{}) (string, error) {
+
+				s := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
+				if !utils.FileExists(s) {
+					return "", fmt.Errorf("Default couldn't find template file %s", s)
+				}
+
+				content, err := utils.Content(s)
+				if err != nil {
+					return "", fmt.Errorf("Default couldn't read template file %s, error: %s", s, err)
+				}
+
+				tOpts := toolsRender.TemplateOptions{
+					Name:    fmt.Sprintf("default-internal-field-%s", dc.name),
+					Content: string(content),
+					Funcs:   funcs,
+				}
+				t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
+				if err != nil {
+					return "", err
+				}
+				return t.TemplateRenderFile(s, obj)
+			}
+			funcs["setError"] = func() string { return "" }
+			funcs["setInvisible"] = func() string { return "" }
 
 			tOpts := toolsRender.TemplateOptions{
 				Name:    fmt.Sprintf("default-internal-%s", name),
