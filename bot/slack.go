@@ -2621,6 +2621,13 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 		}
 	}
 
+	options := []*slack.OptionBlockObject{}
+	value := callback.Value
+	if utils.IsEmpty(value) {
+		return
+	}
+	params[name] = value
+
 	fields := cmd.Fields(s, msg, params, []string{name})
 	var field *common.Field
 
@@ -2632,12 +2639,6 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 	}
 
 	if field == nil {
-		return
-	}
-
-	options := []*slack.OptionBlockObject{}
-	value := callback.Value
-	if utils.IsEmpty(value) {
 		return
 	}
 
