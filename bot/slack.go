@@ -55,7 +55,8 @@ type SlackOptions struct {
 	ButtonRejectCaption  string
 	ButtonApproveCaption string
 
-	CacheTTL string
+	CacheTTL   string
+	MaxOptions int
 }
 
 type SlackUser struct {
@@ -2649,6 +2650,10 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 
 	for _, v := range field.Values {
 
+		if len(options) >= s.options.MaxOptions {
+			break
+		}
+
 		if re.MatchString(v) {
 
 			var h *slack.TextBlockObject
@@ -2662,7 +2667,8 @@ func (s *Slack) formSuggestionHandler(ctx *slacker.InteractionContext, req *sock
 	}
 
 	if len(options) == 0 {
-		return
+		options = append(options,
+			slack.NewOptionBlockObject(" ", slack.NewTextBlockObject(slack.PlainTextType, " ", false, false), nil))
 	}
 
 	resposne := slack.OptionsResponse{
