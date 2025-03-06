@@ -2484,8 +2484,8 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	}
 
 	options := []slack.MsgOption{}
-	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(callback.ResponseURL), slack.MsgOptionPostEphemeral(m.userID)) // section doesn't work
-	//options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(callback.ResponseURL), slack.MsgOptionTS(m.threadTS)) // section works :(
+	//options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(callback.ResponseURL), slack.MsgOptionPostEphemeral(m.userID)) // section doesn't work
+	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(callback.ResponseURL), slack.MsgOptionTS(m.threadTS)) // section works :(
 
 	s.client.SlackClient().UpdateMessage(callback.Container.ChannelID, callback.Container.MessageTs, options...)
 }
