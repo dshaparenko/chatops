@@ -1365,6 +1365,26 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 			e := slack.NewTextBlockObject(slack.MarkdownType, def, false, false)
 			blocks = append(blocks, slack.NewSectionBlock(e, nil, nil))
 			addToBlocks = false
+		case common.FieldTypeUser:
+			e := slack.NewOptionsSelectBlockElement(slack.OptTypeUser, h, actionID)
+			e.InitialUser = def
+			el = e
+		case common.FieldTypeMultiUser:
+			e := slack.NewOptionsMultiSelectBlockElement(slack.MultiOptTypeUser, h, actionID)
+			if !utils.IsEmpty(def) {
+				e.InitialUsers = strings.Split(def, ",")
+			}
+			el = e
+		case common.FieldTypeChannel:
+			e := slack.NewOptionsSelectBlockElement(slack.OptTypeChannels, h, actionID)
+			e.InitialChannel = def
+			el = e
+		case common.FieldTypeMultiChannel:
+			e := slack.NewOptionsMultiSelectBlockElement(slack.MultiOptTypeChannels, h, actionID)
+			if !utils.IsEmpty(def) {
+				e.InitialChannels = strings.Split(def, ",")
+			}
+			el = e
 		default:
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
 			e.InitialValue = def
@@ -2163,7 +2183,8 @@ func (s *Slack) getActionValue(state slack.BlockAction) interface{} {
 
 	var v interface{}
 	v = state.Value
-	switch state.Type {
+	st := string(state.Type)
+	switch st {
 	case "number_input":
 		v = state.Value
 	case "datepicker":
@@ -2187,6 +2208,18 @@ func (s *Slack) getActionValue(state slack.BlockAction) interface{} {
 		if utils.IsEmpty(v) {
 			v = fmt.Sprintf("%v", false)
 		}
+	case "users_select":
+		v = state.SelectedUser
+	case "multi_users_select":
+		arr := []string{}
+		arr = append(arr, state.SelectedUsers...)
+		v = arr
+	case "channels_select":
+		v = state.SelectedChannel
+	case "multi_channels_select":
+		arr := []string{}
+		arr = append(arr, state.SelectedChannels...)
+		v = arr
 	}
 	return v
 }

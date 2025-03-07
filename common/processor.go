@@ -119,6 +119,10 @@ const (
 	FieldTypeCheckboxes         = "checkboxes"
 	FieldTypeBool               = "bool"
 	FieldTypeMarkdown           = "markdown"
+	FieldTypeUser               = "user"
+	FieldTypeMultiUser          = "multiuser"
+	FieldTypeChannel            = "channel"
+	FieldTypeMultiChannel       = "multichannel"
 )
 
 func (ps *Processors) Add(p Processor) {
