@@ -1275,6 +1275,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 			Values:       field.Values,
 			Template:     field.Template,
 			Dependencies: field.Dependencies,
+			Filter:       field.Filter,
 		}
 
 		r, ok := fields.Load(field.Name)
@@ -1309,6 +1310,9 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 		}
 		if len(f.Dependencies) != 0 {
 			newField.Dependencies = f.Dependencies
+		}
+		if !utils.IsEmpty(f.Filter) {
+			newField.Filter = f.Filter
 		}
 
 		newFields = append(newFields, newField)

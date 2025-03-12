@@ -97,8 +97,9 @@ var slackOptions = bot.SlackOptions{
 	ButtonRejectCaption:  envGet("SLACK_BUTTON_REJECT_CAPTION", "Reject").(string),
 	ButtonApproveCaption: envGet("SLACK_BUTTON_APPROVE_CAPTION", "Approve").(string),
 
-	CacheTTL:   envGet("SLACK_CACHE_TTL", "1h").(string),
-	MaxOptions: envGet("SLACK_MAX_OPTIONS", 15).(int),
+	CacheTTL:        envGet("SLACK_CACHE_TTL", "1h").(string),
+	MaxQueryOptions: envGet("SLACK_MAX_QUERY_OPTIONS", 15).(int),
+	MinQueryLength:  envGet("SLACK_MIN_QUERY_LENGTH", 2).(int),
 }
 
 var defaultOptions = processor.DefaultOptions{

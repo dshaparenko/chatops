@@ -51,6 +51,7 @@ type Field struct {
 	Values       []string
 	Template     string
 	Dependencies []string
+	Filter       string
 }
 
 type Approval interface {
@@ -123,6 +124,8 @@ const (
 	FieldTypeMultiUser          = "multiuser"
 	FieldTypeChannel            = "channel"
 	FieldTypeMultiChannel       = "multichannel"
+	FieldTypeGroup              = "group"
+	FieldTypeMultiGroup         = "multigroup"
 )
 
 func (ps *Processors) Add(p Processor) {
