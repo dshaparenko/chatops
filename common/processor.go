@@ -55,8 +55,10 @@ type Field struct {
 }
 
 type Approval interface {
-	Channel() string
+	Channel(bot Bot, message Message, params ExecuteParams) string
 	Message(bot Bot, message Message, params ExecuteParams) string
+	Reasons() []string
+	Description() bool
 }
 
 type Executor interface {

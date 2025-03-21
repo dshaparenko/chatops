@@ -30,8 +30,10 @@ type SlackOptions struct {
 	Timeout          int
 	PublicChannel    string
 
-	ApprovalAllowed bool
-	ApprovalMessage string
+	ApprovalAllowed     bool
+	ApprovalReply       string
+	ApprovalReasons     string
+	ApprovalDescription string
 
 	AttachmentColor string
 	ErrorColor      string
@@ -144,11 +146,6 @@ type SlackFileBlock struct {
 	BlockID    string                 `json:"block_id,omitempty"`
 }
 
-const (
-	SlackButtonFormType     string = "form"
-	SlackButtonApprovalType string = "approval"
-)
-
 type SlackButton struct {
 	Type      string
 	Timestamp string
@@ -189,10 +186,19 @@ const (
 	slackFilesCompleteUploadExternal = "files.completeUploadExternal"
 	slackFilesSharedPublicURL        = "files.sharedPublicURL"
 	slackMaxTextBlockLength          = 3000
-	slackSubmitAction                = "submit"
-	slackCancelAction                = "cancel"
 	slackTriggerOnCharacterEntered   = "on_character_entered"
 	slackTriggerOnEnterPressed       = "on_enter_pressed"
+)
+
+const (
+	slackSubmitAction               = "submit"
+	slackCancelAction               = "cancel"
+	slackButtonFormType             = "form"
+	slackButtonApprovalType         = "approval"
+	slackApprovalReasons            = "approval-reasons"
+	slackApprovalDescription        = "approval-description"
+	slackApprovalReasonsCaption     = "Reasons"
+	slackApprovalDescriptionCaption = "Description"
 )
 
 // SlackResponse
@@ -914,13 +920,36 @@ func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 	s.updateCounters("", "", text, cc.Event().UserID)
 }
 
+func (s *Slack) getChannelAndTimestamp(channel string, m *slackMessageInfo) (string, string, string) {
+
+	mThreadTS := ""
+	mTimestamp := ""
+	mChannel := ""
+	if m != nil {
+		mChannel = m.channelID
+		mTimestamp = m.timestamp
+		mThreadTS = m.threadTS
+	}
+
+	if !utils.IsEmpty(channel) {
+		if mChannel != channel {
+			mChannel = channel
+			mTimestamp = ""
+			mThreadTS = ""
+		}
+	}
+
+	return mChannel, mTimestamp, mThreadTS
+}
+
 func (s *Slack) reply(command string, m *slackMessageInfo,
-	replier interface{}, message string, attachments []*common.Attachment,
+	replier interface{}, message, channel string, attachments []*common.Attachment,
 	response *SlackResponse, start *time.Time, error bool) (string, error) {
 
-	threadTS := m.threadTS
+	mChannel, _, mThreadTS := s.getChannelAndTimestamp(channel, m)
+
 	text := s.prepareInputText(m.text, m.typ)
-	replyInThread := !utils.IsEmpty(threadTS)
+	replyInThread := !utils.IsEmpty(mThreadTS)
 
 	visible := false
 	original := false
@@ -961,7 +990,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	}
 
 	if replyInThread {
-		opts = append(opts, slacker.SetThreadTS(threadTS))
+		opts = append(opts, slacker.SetThreadTS(mThreadTS))
 	}
 
 	if !visible {
@@ -1014,7 +1043,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	// ResponseReplier => commands
 	rr, ok := replier.(*slacker.ResponseReplier)
 	if ok {
-		ts, err := rr.PostBlocks(m.channelID, blocks, opts...)
+		ts, err := rr.PostBlocks(mChannel, blocks, opts...)
 		if err != nil {
 			return "", err
 		}
@@ -1024,7 +1053,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	// ResponseWriter => jobs
 	rw, ok := replier.(*slacker.ResponseWriter)
 	if ok {
-		ts, err := rw.PostBlocks(m.channelID, blocks, opts...)
+		ts, err := rw.PostBlocks(mChannel, blocks, opts...)
 		if err != nil {
 			return "", err
 		}
@@ -1041,7 +1070,7 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 	}
 
 	if replyInThread {
-		slackOpts = append(slackOpts, slack.MsgOptionTS(threadTS))
+		slackOpts = append(slackOpts, slack.MsgOptionTS(mThreadTS))
 	}
 
 	if !visible {
@@ -1050,17 +1079,17 @@ func (s *Slack) reply(command string, m *slackMessageInfo,
 
 	_, timestamp, err := s.client.SlackClient().PostMessageContext(
 		s.ctx,
-		m.channelID,
+		mChannel,
 		slackOpts...,
 	)
 	return timestamp, err
 }
 
 func (s *Slack) replyError(command string, m *slackMessageInfo,
-	replier interface{}, err error, attachments []*common.Attachment) (string, error) {
+	replier interface{}, err error, channel string, attachments []*common.Attachment) (string, error) {
 
 	s.logger.Error("Slack reply error: %s", err)
-	return s.reply(command, m, replier, err.Error(), attachments, nil, nil, true)
+	return s.reply(command, m, replier, err.Error(), channel, attachments, nil, nil, true)
 }
 
 func (s *Slack) buildInteractionID(command, group string) string {
@@ -1068,7 +1097,7 @@ func (s *Slack) buildInteractionID(command, group string) string {
 	if utils.IsEmpty(group) {
 		return command
 	}
-	return fmt.Sprintf("%s-%s", command, group)
+	return fmt.Sprintf("%s/%s", command, group)
 }
 
 func (s *Slack) buildActionID(interaction, name string) string {
@@ -1077,6 +1106,18 @@ func (s *Slack) buildActionID(interaction, name string) string {
 		return interaction
 	}
 	return fmt.Sprintf("%s-%s", interaction, name)
+}
+
+func (s *Slack) getActionID(ident string) (string, string) {
+
+	if utils.IsEmpty(ident) {
+		return "", ""
+	}
+	arr := strings.SplitN(ident, "-", 2)
+	if len(arr) < 2 && len(arr) > 0 {
+		return arr[0], ""
+	}
+	return arr[0], arr[1]
 }
 
 func (s *Slack) fieldDependencies(name string, fields []common.Field) []common.Field {
@@ -1187,11 +1228,6 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 		if utils.IsEmpty(def) {
 			def = field.Default
 		}
-
-		/*var reFilter regexp.Regexp
-		if !utils.IsEmpty(field.Filter) {
-			reFilter, _ = regexp.Compile(field.Filter)
-		}*/
 
 		if utils.IsEmpty(confirmationParams[field.Name]) {
 			confirmationParams[field.Name] = def
@@ -1497,6 +1533,9 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 		return blocks, nil
 	}
 
+	divider := slack.NewDividerBlock()
+	blocks = append(blocks, divider)
+
 	submit := slack.NewButtonBlockElement(slackSubmitAction, "", slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonSubmitCaption, false, false))
 	submit.Style = slack.Style(s.options.ButtonSubmitStyle)
 
@@ -1525,11 +1564,11 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 func (s *Slack) replyForm(cmd common.Command, command, group string, fields []common.Field, params common.ExecuteParams,
 	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
 
-	threadTS := m.threadTS
+	mThreadTS := m.threadTS
 	opts := []slacker.PostOption{}
-	replyInThread := !utils.IsEmpty(threadTS)
+	replyInThread := !utils.IsEmpty(mThreadTS)
 	if replyInThread {
-		opts = append(opts, slacker.SetThreadTS(threadTS))
+		opts = append(opts, slacker.SetThreadTS(mThreadTS))
 	}
 
 	if utils.IsEmpty(m.botID) {
@@ -1538,14 +1577,14 @@ func (s *Slack) replyForm(cmd common.Command, command, group string, fields []co
 
 	// pass message timestamp & text to each button
 	button := &SlackButton{
-		Type:      SlackButtonFormType,
+		Type:      slackButtonFormType,
 		ChannelID: m.channelID,
 		UserID:    m.userID,
 		Command:   command,
 		Group:     group,
 		Params:    params,
 		Timestamp: m.timestamp,
-		ThreadTS:  threadTS,
+		ThreadTS:  mThreadTS,
 		Text:      m.text,
 		Wrapped:   m.wrapped,
 		Wrapper:   m.wrapper,
@@ -1557,6 +1596,7 @@ func (s *Slack) replyForm(cmd common.Command, command, group string, fields []co
 	}
 
 	s.addReaction(m, s.options.ReactionDialog)
+
 	ts, err := replier.PostBlocks(m.channelID, blocks, opts...)
 	if err != nil {
 		s.removeReaction(m, s.options.ReactionDialog)
@@ -1573,46 +1613,56 @@ func (s *Slack) replyForm(cmd common.Command, command, group string, fields []co
 	return true, nil
 }
 
-func (s *Slack) askApproval(approval common.Approval, command, group string,
-	m *slackMessageInfo, u *slack.User, params common.ExecuteParams, replier *slacker.ResponseReplier) (bool, error) {
+func (s *Slack) askApproval(approval common.Approval, message, channel string, command, group string,
+	params common.ExecuteParams, m *slackMessageInfo, replier *slacker.ResponseReplier) (bool, error) {
 
 	opts := []slacker.PostOption{}
 
 	blocks := []slack.Block{}
 	interactionID := s.buildInteractionID(command, group)
 
-	user := &SlackUser{
-		id: m.userID,
-	}
-	if u != nil {
-		user.name = u.Name
-		user.timezone = u.TZ
-	}
-
-	channel := &SlackChannel{
-		id: m.channelID,
-	}
-
-	msg := &SlackMessage{
-		id:       m.timestamp,
-		user:     user,
-		threadTS: m.threadTS,
-		channel:  channel,
-	}
-
-	message := approval.Message(s, msg, params)
-	if utils.IsEmpty(message) {
-		message = s.options.ApprovalMessage
-	}
-
 	blocks = append(blocks, slack.NewSectionBlock(
 		slack.NewTextBlockObject(slack.MarkdownType, message, false, false),
 		[]*slack.TextBlockObject{}, nil,
 	))
 
+	reasons := approval.Reasons()
+	if len(reasons) > 0 || approval.Description() {
+		divider := slack.NewDividerBlock()
+		blocks = append(blocks, divider)
+	}
+
+	if len(reasons) > 0 {
+
+		actionID := s.buildActionID(interactionID, slackApprovalReasons)
+		options := []*slack.OptionBlockObject{}
+		for _, v := range reasons {
+			block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), nil)
+			options = append(options, block)
+		}
+		e := slack.NewCheckboxGroupsBlockElement(actionID, options...)
+		l := slack.NewTextBlockObject(slack.PlainTextType, slackApprovalReasonsCaption, false, false)
+		b := slack.NewInputBlock("", l, nil, e)
+		if b != nil {
+			blocks = append(blocks, b)
+		}
+	}
+
+	if approval.Description() {
+
+		actionID := s.buildActionID(interactionID, slackApprovalDescription)
+		e := slack.NewPlainTextInputBlockElement(nil, actionID)
+		e.Multiline = true
+		l := slack.NewTextBlockObject(slack.PlainTextType, slackApprovalDescriptionCaption, false, false)
+		b := slack.NewInputBlock("", l, nil, e)
+		if b != nil {
+			blocks = append(blocks, b)
+		}
+	}
+
 	// pass message timestamp & text to each button
 	button := &SlackButton{
-		Type:      SlackButtonApprovalType,
+		Type:      slackButtonApprovalType,
 		ChannelID: m.channelID,
 		UserID:    m.userID,
 		Command:   command,
@@ -1635,7 +1685,7 @@ func (s *Slack) askApproval(approval common.Approval, command, group string,
 	blocks = append(blocks, ab)
 
 	s.addReaction(m, s.options.ReactionDialog)
-	ts, err := replier.PostBlocks(approval.Channel(), blocks, opts...)
+	ts, err := replier.PostBlocks(channel, blocks, opts...)
 	if err != nil {
 		s.removeReaction(m, s.options.ReactionDialog)
 		return false, err
@@ -1670,14 +1720,16 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 		user.timezone = u.TZ
 	}
 
+	mChannel, mTimeStamp, mThreadTS := s.getChannelAndTimestamp(cmd.Channel(), m)
+
 	channel := &SlackChannel{
-		id: m.channelID,
+		id: mChannel,
 	}
 
 	msg1 := &SlackMessage{
-		id:       m.timestamp,
+		id:       mTimeStamp,
 		user:     user,
-		threadTS: m.threadTS,
+		threadTS: mThreadTS,
 		channel:  channel,
 	}
 
@@ -1689,7 +1741,7 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 	executor, message, attachments, err := cmd.Execute(s, msg1, params)
 	if err != nil {
 		if reaction {
-			s.replyError(cName, m, replier, err, attachments)
+			s.replyError(cName, m, replier, err, "", attachments)
 			s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 		}
 		return err
@@ -1714,10 +1766,10 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 	ts := ""
 	if !utils.IsEmpty(message) {
 
-		ts, err = s.reply(cName, m, replier, message, attachments, r, &start, r.error)
+		ts, err = s.reply(cName, m, replier, message, mChannel, attachments, r, &start, r.error)
 		if err != nil {
 			if reaction {
-				s.replyError(cName, m, replier, err, attachments)
+				s.replyError(cName, m, replier, err, "", attachments)
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 			}
 			return err
@@ -1751,13 +1803,16 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 	replier interface{}) error {
 
 	cName := cmd.Name()
+
+	mChannel, mTimeStamp, mThreadTS := s.getChannelAndTimestamp(cmd.Channel(), m)
+
 	channel := &SlackChannel{
-		id: m.channelID,
+		id: mChannel,
 	}
 
 	msg1 := &SlackMessage{
-		id:       m.timestamp,
-		threadTS: m.threadTS,
+		id:       mTimeStamp,
+		threadTS: mThreadTS,
 		channel:  channel,
 	}
 
@@ -1778,7 +1833,7 @@ func (s *Slack) postJobCommand(cmd common.Command, m *slackMessageInfo,
 		r.error = response.Error()
 	}
 
-	ts, err := s.reply(cName, m, replier, message, attachments, r, &start, r.error)
+	ts, err := s.reply(cName, m, replier, message, mChannel, attachments, r, &start, r.error)
 	if err != nil {
 		return err
 	}
@@ -1821,12 +1876,44 @@ func (s *Slack) formNeeded(fields []common.Field, params map[string]interface{})
 	return len(required) > len(arr)
 }
 
-func (s *Slack) approvalNeeded(approval common.Approval) bool {
+func (s *Slack) approvalNeeded(approval common.Approval, m *slackMessageInfo, u *slack.User, params common.ExecuteParams) (string, string) {
 
 	if approval == nil {
-		return false
+		return "", ""
 	}
-	return !utils.IsEmpty(approval.Channel())
+
+	user := &SlackUser{
+		id: m.userID,
+	}
+	if u != nil {
+		user.name = u.Name
+		user.timezone = u.TZ
+	}
+
+	channel := &SlackChannel{
+		id: m.channelID,
+	}
+
+	msg := &SlackMessage{
+		id:       m.timestamp,
+		user:     user,
+		threadTS: m.threadTS,
+		channel:  channel,
+	}
+
+	chl := approval.Channel(s, msg, params)
+	chl = strings.TrimSpace(chl)
+	if utils.IsEmpty(chl) {
+		return "", ""
+	}
+
+	message := approval.Message(s, msg, params)
+	message = strings.TrimSpace(message)
+	if utils.IsEmpty(message) {
+		return "", chl
+	}
+
+	return message, chl
 }
 
 func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
@@ -2127,7 +2214,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		if s.formNeeded(rFields, rParams) && user != nil {
 			shown, err := s.replyForm(cmd, rCommand, rGroup, rFields, rParams, m, user, replier)
 			if err != nil {
-				s.replyError(cName, m, replier, err, []*common.Attachment{})
+				s.replyError(cName, m, replier, err, "", []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
@@ -2152,10 +2239,11 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		approval := approvalCmd.Approval()
-		if s.approvalNeeded(approval) {
-			shown, err := s.askApproval(approval, approvalCommand, approvalGroup, m, user, approvalParams, replier)
+		message, channel := s.approvalNeeded(approval, m, user, approvalParams)
+		if !utils.IsEmpty(message) {
+			shown, err := s.askApproval(approval, message, channel, approvalCommand, approvalGroup, approvalParams, m, replier)
 			if err != nil {
-				s.replyError(cName, m, replier, err, []*common.Attachment{})
+				s.replyError(cName, m, replier, err, "", []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
 				return
 			}
@@ -2195,7 +2283,10 @@ func (s *Slack) replaceApprovalMessage(m *slackMessageInfo, responseURL string, 
 
 	blocks := []slack.Block{}
 	for _, block := range mblocks {
-		if block.BlockType() != slack.MBTAction {
+
+		arr := []slack.MessageBlockType{slack.MBTInput, slack.MBTAction}
+
+		if !utils.Contains(arr, block.BlockType()) {
 			blocks = append(blocks, block)
 		}
 	}
@@ -2348,6 +2439,70 @@ func (s *Slack) findField(fields []common.Field, name string) *common.Field {
 	return nil
 }
 
+func (s *Slack) approvalReply(approvedRejected string, states *slack.BlockActionStates, m *slackMessageInfo, replier *slacker.ResponseReplier) {
+
+	if states == nil {
+		return
+	}
+
+	reasons := ""
+	description := ""
+
+	for _, v1 := range states.Values {
+		for k2, v2 := range v1 {
+
+			_, actionID := s.getActionID(k2)
+			if utils.IsEmpty(actionID) {
+				continue
+			}
+			switch actionID {
+			case slackApprovalReasons:
+				for _, v3 := range v2.SelectedOptions {
+					v := v3.Value
+					if utils.IsEmpty(v) {
+						continue
+					}
+					if utils.IsEmpty(reasons) {
+						reasons = v
+					} else {
+						reasons = fmt.Sprintf("%s, %s", reasons, v)
+					}
+				}
+			case slackApprovalDescription:
+				description = v2.Value
+			}
+		}
+	}
+
+	if !utils.IsEmpty(reasons) {
+		reasons = strings.TrimSpace(fmt.Sprintf("%s %s", s.options.ApprovalReasons, reasons))
+	}
+
+	if !utils.IsEmpty(description) {
+		description = strings.TrimSpace(fmt.Sprintf("%s %s", s.options.ApprovalDescription, description))
+	}
+
+	message := ""
+	if !utils.IsEmpty(reasons) {
+		message = reasons
+	}
+
+	if !utils.IsEmpty(description) {
+		message = fmt.Sprintf("%s\n%s", message, description)
+	}
+
+	if !utils.IsEmpty(approvedRejected) {
+		message = fmt.Sprintf("%s\n\n%s", message, approvedRejected)
+	}
+
+	if utils.IsEmpty(message) {
+		return
+	}
+
+	r := &SlackResponse{}
+	s.reply(m.text, m, replier, message, "", nil, r, nil, false)
+}
+
 func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.BlockAction, button *SlackButton, ctx *slacker.InteractionContext) {
 
 	callback := ctx.Callback()
@@ -2362,7 +2517,7 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 
 	params := button.Params
 
-	if action.ActionID == slackSubmitAction {
+	if action.ActionID == slackSubmitAction && button.Type == slackButtonFormType {
 
 		states := callback.BlockActionState
 		if states != nil && len(states.Values) > 0 {
@@ -2393,8 +2548,10 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 		params = cParams
 	}
 
+	approvedRejected := ""
+
 	switch button.Type {
-	case SlackButtonFormType:
+	case slackButtonFormType:
 
 		m.userID = button.UserID
 		m.channelID = button.ChannelID
@@ -2404,22 +2561,25 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 		m.wrapper = button.Wrapper
 
 		approval := cmd.Approval()
-		if action.ActionID == slackSubmitAction && s.approvalNeeded(approval) {
+		if action.ActionID == slackSubmitAction {
 
-			shown, err := s.askApproval(approval, button.Command, button.Group, m, &callback.User, params, replier)
-			if err != nil {
-				s.replyError(button.Command, m, replier, err, []*common.Attachment{})
-				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
-				return
-			}
-			if shown {
-				s.removeMessage(m, callback.ResponseURL)
-				return
+			message, channel := s.approvalNeeded(approval, m, &callback.User, params)
+			if !utils.IsEmpty(message) {
+				shown, err := s.askApproval(approval, message, channel, button.Command, button.Group, params, m, replier)
+				if err != nil {
+					s.replyError(button.Command, m, replier, err, "", []*common.Attachment{})
+					s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
+					return
+				}
+				if shown {
+					s.removeMessage(m, callback.ResponseURL)
+					return
+				}
 			}
 		}
 		s.removeMessage(m, callback.ResponseURL)
 
-	case SlackButtonApprovalType:
+	case slackButtonApprovalType:
 
 		if !s.options.ApprovalAllowed {
 			if callback.User.ID == button.UserID {
@@ -2431,15 +2591,14 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 		// this is approval message TS
 		m.timestamp = callback.Container.MessageTs
 
-		message := ""
 		reaction := common.IfDef(action.ActionID == slackSubmitAction, s.options.ReactionApproved, s.options.ReactionRejected)
 		mdef := common.IfDef(action.ActionID == slackSubmitAction, s.options.ApprovedMessage, s.options.RejectedMessage)
 		if !utils.IsEmpty(mdef) {
-			user := fmt.Sprintf("@%s", callback.User.Name)
-			message = fmt.Sprintf(mdef.(string), user, time.Now().Format("15:04:05"))
-			message = fmt.Sprintf(":%s: %s", reaction, message)
+			user := fmt.Sprintf("<@%s>", callback.User.ID)
+			approvedRejected = fmt.Sprintf(mdef.(string), user, time.Now().Format("15:04:05"))
+			approvedRejected = fmt.Sprintf(":%s: %s", reaction, approvedRejected)
 		}
-		s.replaceApprovalMessage(m, callback.ResponseURL, callback.Message.Blocks.BlockSet, message)
+		s.replaceApprovalMessage(m, callback.ResponseURL, callback.Message.Blocks.BlockSet, approvedRejected)
 
 		// set original message TS & text
 		m.userID = button.UserID
@@ -2490,6 +2649,10 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 			}
 		}
 
+		if button.Type == slackButtonApprovalType {
+			s.approvalReply(approvedRejected, callback.BlockActionState, m, replier)
+		}
+
 		err := s.postUserCommand(cmd, m, &callback.User, replier, rParams, response, true)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
@@ -2498,6 +2661,10 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 		s.fields.Set(callback.Container.MessageTs, rParams, ttlcache.PreviousOrDefaultTTL)
 
 	default:
+
+		if button.Type == slackButtonApprovalType {
+			s.approvalReply(approvedRejected, callback.BlockActionState, m, replier)
+		}
 		s.addReaction(m, s.options.ReactionFailed)
 	}
 	s.buttons.Delete(callback.Container.MessageTs)
@@ -2716,24 +2883,23 @@ func (s *Slack) getCommandGroupField(ident string) (common.Command, string, stri
 		return nil, "", ""
 	}
 
-	delim := "-"
-	arr := strings.Split(ident, delim)
+	interactionID, actionID := s.getActionID(ident)
+
+	delim := "/"
+	arr := strings.Split(interactionID, delim)
 	if len(arr) < 1 {
 		return nil, "", ""
 	}
 
 	c := ""
 	g := ""
-	f := ""
+	f := actionID
 
 	if len(arr) > 0 {
 		c = strings.TrimSpace(arr[0])
 	}
 	if len(arr) > 1 {
 		g = strings.TrimSpace(arr[1])
-	}
-	if len(arr) > 2 {
-		f = strings.TrimSpace(arr[2])
 	}
 
 	cmd := s.processors.FindCommand(g, c)

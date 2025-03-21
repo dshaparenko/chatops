@@ -119,8 +119,10 @@ type DefaultReposne struct {
 }
 
 type DefaultApproval struct {
-	Channel  string
-	Template string
+	Channel     string
+	Template    string
+	Reasons     []string
+	Description bool
 }
 
 type DefaultCommandConfig struct {
@@ -840,6 +842,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["addReaction"] = executor.fAddReaction
+
 	funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
 	funcs["getParams"] = executor.fGetParams
@@ -1152,13 +1155,81 @@ func (dca *DefaultCommandApproval) approval() *DefaultApproval {
 	return dca.command.config.Approval
 }
 
-func (dca *DefaultCommandApproval) Channel() string {
+func (dca *DefaultCommandApproval) Description() bool {
+
+	a := dca.approval()
+	if a == nil {
+		return false
+	}
+	return a.Description
+}
+
+func (dca *DefaultCommandApproval) Reasons() []string {
+
+	a := dca.approval()
+	if a == nil {
+		return []string{}
+	}
+	return a.Reasons
+}
+
+func (dca *DefaultCommandApproval) Channel(bot common.Bot, message common.Message, params common.ExecuteParams) string {
 
 	a := dca.approval()
 	if a == nil {
 		return ""
 	}
-	return a.Channel
+	if utils.IsEmpty(a.Channel) {
+		return ""
+	}
+
+	content := ""
+	name := fmt.Sprintf("%s-approval-channel", dca.command.name)
+	path := fmt.Sprintf("%s%s%s", dca.command.processor.options.TemplatesDir, string(os.PathSeparator), a.Channel)
+
+	if utils.FileExists(path) {
+		data, err := utils.Content(path)
+		if err != nil {
+			dca.command.logger.Error("Default approval channel %s command %s error: %s", path, dca.command.name, err)
+			return ""
+		}
+		content = string(data)
+	} else {
+		content = a.Channel
+	}
+
+	funcs := make(map[string]any)
+	funcs["getBot"] = func() interface{} { return bot }
+	funcs["getUser"] = func() interface{} { return message.User() }
+	funcs["getParams"] = func() interface{} { return params }
+	funcs["getMessage"] = func() interface{} { return message }
+	funcs["getChannel"] = func() interface{} { return message.Channel() }
+
+	tOpts := toolsRender.TemplateOptions{
+		Name:    fmt.Sprintf("default-internal-%s", name),
+		Content: string(content),
+		Funcs:   funcs,
+	}
+
+	t, err := toolsRender.NewTextTemplate(tOpts, dca.command.processor.observability)
+	if err != nil {
+		dca.command.logger.Error("Default approval channel %s command %s create error: %s", path, dca.command.name, err)
+		return ""
+	}
+
+	m := make(map[string]interface{})
+	m["bot"] = bot
+	m["message"] = message
+	m["channel"] = message.Channel()
+	m["user"] = message.User()
+	m["params"] = params
+
+	b, err := t.RenderObject(m)
+	if err != nil {
+		dca.command.logger.Error("Default approval channel %s command %s render error: %s", path, dca.command.name, err)
+		return err.Error()
+	}
+	return string(b)
 }
 
 func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Message, params common.ExecuteParams) string {
@@ -1172,13 +1243,13 @@ func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Messag
 	}
 
 	content := ""
-	name := fmt.Sprintf("%s-approval", dca.command.name)
+	name := fmt.Sprintf("%s-approval-message", dca.command.name)
 	path := fmt.Sprintf("%s%s%s", dca.command.processor.options.TemplatesDir, string(os.PathSeparator), a.Template)
 
 	if utils.FileExists(path) {
 		data, err := utils.Content(path)
 		if err != nil {
-			dca.command.logger.Error("Default template %s command %s error: %s", path, dca.command.name, err)
+			dca.command.logger.Error("Default approval template %s command %s error: %s", path, dca.command.name, err)
 			return ""
 		}
 		content = string(data)
@@ -1186,14 +1257,26 @@ func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Messag
 		content = a.Template
 	}
 
+	funcs := make(map[string]any)
+	funcs["getBot"] = func() interface{} { return bot }
+	funcs["getUser"] = func() interface{} { return message.User() }
+	funcs["getParams"] = func() interface{} { return params }
+	funcs["getMessage"] = func() interface{} {
+		return message
+	}
+	funcs["getChannel"] = func() interface{} {
+		return message.Channel()
+	}
+
 	tOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
 		Content: string(content),
+		Funcs:   funcs,
 	}
 
 	t, err := toolsRender.NewTextTemplate(tOpts, dca.command.processor.observability)
 	if err != nil {
-		dca.command.logger.Error("Default template %s command %s create error: %s", path, dca.command.name, err)
+		dca.command.logger.Error("Default approval template %s command %s create error: %s", path, dca.command.name, err)
 		return ""
 	}
 
@@ -1206,8 +1289,8 @@ func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Messag
 
 	b, err := t.RenderObject(m)
 	if err != nil {
-		dca.command.logger.Error("Default template %s command %s render error: %s", path, dca.command.name, err)
-		return ""
+		dca.command.logger.Error("Default approval template %s command %s render error: %s", path, dca.command.name, err)
+		return err.Error()
 	}
 	return string(b)
 }
