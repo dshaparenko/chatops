@@ -613,14 +613,9 @@ func (s *Slack) denyUserAccess(userID, userName string, command string) bool {
 	return true
 }
 
-func (s *Slack) listUserCommands(userID string) ([]string, error) {
+func (s *Slack) listUserCommands(userID string, groups []slack.UserGroup) ([]string, error) {
 
 	commands := []string{}
-	slackGroups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
-	if err != nil {
-		s.logger.Error("Slack getting user group error: %s", err)
-		return commands, err
-	}
 
 	for _, p := range s.processors.Items() {
 		for _, c := range p.Commands() {
@@ -628,7 +623,7 @@ func (s *Slack) listUserCommands(userID string) ([]string, error) {
 			if !utils.IsEmpty(p.Name()) {
 				groupName = p.Name() + "/" + groupName
 			}
-			if s.denyUserAccess(userID, "", groupName) && s.denyGroupAccess(userID, groupName, slackGroups) {
+			if s.denyUserAccess(userID, "", groupName) && s.denyGroupAccess(userID, groupName, groups) {
 				continue
 			}
 			commands = append(commands, groupName)
@@ -1243,6 +1238,9 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 				currentValues = strings.Split(v, ",")
 			}
 		}
+		if utils.IsEmpty(currentValues) {
+			currentValues = []string{" "}
+		}
 
 		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
 		var h *slack.TextBlockObject
@@ -1700,16 +1698,7 @@ func (s *Slack) postUserCommand(cmd common.Command, m *slackMessageInfo, u *slac
 	//  should check parent if its visible and its thread message
 
 	cName := cmd.Name()
-
 	commands := m.commands
-	if len(commands) == 0 {
-		cmds, err := s.listUserCommands(m.userID)
-		if err != nil {
-			s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
-			return err
-		}
-		commands = cmds
-	}
 
 	user := &SlackUser{
 		id:       m.userID,
@@ -1960,7 +1949,13 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		return nil
 	}
 
-	commands, err := s.listUserCommands(m.userID)
+	groups, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
+	if err != nil {
+		s.logger.Error("Slack getting user group error: %s", err)
+		return nil
+	}
+
+	commands, err := s.listUserCommands(m.userID, groups)
 	if err != nil {
 		s.logger.Error("Slack couldn't get commands for %s: %s", m.userID, err)
 		return err
@@ -2100,9 +2095,17 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			groupName = fmt.Sprintf("%s/%s", group, cName)
 		}
 
+		groups := []slack.UserGroup{}
 		if eCmd.Permissions() {
 
-			commands, err := s.listUserCommands(userID)
+			grps, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
+			if err != nil {
+				s.logger.Error("Slack getting user group error: %s", err)
+				return
+			}
+			groups = grps
+
+			commands, err := s.listUserCommands(userID, groups)
 			if err != nil {
 				s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
 				return
@@ -2169,6 +2172,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			if wrappedCmd != nil {
 				rCommand = wrappedCmd.Name()
 			} else {
+				s.unsupportedCommandHandler(cc)
 				return
 			}
 			rGroup = wrappedGroup
@@ -2183,7 +2187,17 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 			if wrappedCmd.Permissions() {
 
-				commands, err := s.listUserCommands(userID)
+				// check for wrapped command
+				if len(groups) == 0 {
+					grps, err := s.client.SlackClient().GetUserGroups(slack.GetUserGroupsOptionIncludeCount(true), slack.GetUserGroupsOptionIncludeUsers(true))
+					if err != nil {
+						s.logger.Error("Slack getting user group error: %s", err)
+						return
+					}
+					groups = grps
+				}
+
+				commands, err := s.listUserCommands(userID, groups)
 				if err != nil {
 					s.logger.Error("Slack couldn't get commands for %s: %s", userID, err)
 					return
@@ -2198,6 +2212,9 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 					}
 				}
 			}
+
+			list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit}
+			only := s.getFieldsByType(wrappedCmd, list)
 
 			rFields = wrappedCmd.Fields(s, msg, rParams, only)
 
@@ -2605,7 +2622,7 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 		m.channelID = button.ChannelID
 		m.timestamp = button.Timestamp
 		m.text = button.Text
-		m.threadTS = button.Timestamp
+		m.threadTS = button.ThreadTS
 	}
 
 	s.removeReaction(m, s.options.ReactionDialog)
