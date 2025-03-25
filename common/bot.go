@@ -12,7 +12,7 @@ type Bot interface {
 	Command(channel, text string, user User, parent Message, response Response) error
 	AddReaction(channel, ID, name string) error
 
-	PostMessage(channel string, text string, attachments []*Attachment, user User, parent Message, response Response) error
+	PostMessage(channel string, text string, attachments []*Attachment, user User, parent Message, response Response) (string, error)
 	DeleteMessage(channel, ID string) error
 	ReadMessage(channel, ID string) (string, error)
 	UpdateMessage(channel, ID, text string) error
