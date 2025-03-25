@@ -123,6 +123,7 @@ type DefaultApproval struct {
 	Template    string
 	Reasons     []string
 	Description bool
+	Visible     bool
 }
 
 type DefaultCommandConfig struct {
@@ -492,7 +493,12 @@ func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) str
 func (de *DefaultExecutor) fAddReaction(channelID, messageID, name string) string {
 
 	de.bot.AddReaction(channelID, messageID, name)
+	return ""
+}
 
+func (de *DefaultExecutor) fRemoveReaction(channelID, messageID, name string) string {
+
+	de.bot.RemoveReaction(channelID, messageID, name)
 	return ""
 }
 
@@ -842,6 +848,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["addReaction"] = executor.fAddReaction
+	funcs["removeReaction"] = executor.fRemoveReaction
 
 	funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
@@ -1162,6 +1169,15 @@ func (dca *DefaultCommandApproval) Description() bool {
 		return false
 	}
 	return a.Description
+}
+
+func (dca *DefaultCommandApproval) Visible() bool {
+
+	a := dca.approval()
+	if a == nil {
+		return false
+	}
+	return a.Visible
 }
 
 func (dca *DefaultCommandApproval) Reasons() []string {

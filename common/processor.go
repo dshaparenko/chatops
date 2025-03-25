@@ -59,6 +59,7 @@ type Approval interface {
 	Message(bot Bot, message Message, params ExecuteParams) string
 	Reasons() []string
 	Description() bool
+	Visible() bool
 }
 
 type Executor interface {
