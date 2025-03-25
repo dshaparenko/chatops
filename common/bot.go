@@ -11,6 +11,7 @@ type Bot interface {
 	Name() string
 	Command(channel, text string, user User, parent Message, response Response) error
 	AddReaction(channel, ID, name string) error
+	RemoveReaction(channel, ID, name string) error
 
 	PostMessage(channel string, text string, attachments []*Attachment, user User, parent Message, response Response) error
 	DeleteMessage(channel, ID string) error

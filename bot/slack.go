@@ -479,6 +479,16 @@ func (s *Slack) AddReaction(channelID, timestamp, name string) error {
 	return nil
 }
 
+func (s *Slack) RemoveReaction(channelID, timestamp, name string) error {
+
+	err := s.client.SlackClient().RemoveReaction(name, slack.NewRefToMessage(channelID, timestamp))
+	if err != nil {
+		s.logger.Error("Slack removing reaction error: %s", err)
+		return err
+	}
+	return nil
+}
+
 func (s *Slack) addReaction(m *slackMessageInfo, name string) {
 
 	if m.typ == "slash_commands" {
@@ -2455,7 +2465,8 @@ func (s *Slack) findField(fields []common.Field, name string) *common.Field {
 	return nil
 }
 
-func (s *Slack) approvalReply(approvedRejected string, states *slack.BlockActionStates, m *slackMessageInfo, replier *slacker.ResponseReplier) {
+func (s *Slack) approvalReply(approval common.Approval, approved bool, approvedRejected string,
+	states *slack.BlockActionStates, m *slackMessageInfo, replier *slacker.ResponseReplier) {
 
 	if states == nil {
 		return
@@ -2515,7 +2526,9 @@ func (s *Slack) approvalReply(approvedRejected string, states *slack.BlockAction
 		return
 	}
 
-	r := &SlackResponse{}
+	r := &SlackResponse{
+		visible: approval.Visible(),
+	}
 	s.reply(m.text, m, replier, message, "", nil, r, nil, false)
 }
 
@@ -2666,7 +2679,7 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 		}
 
 		if button.Type == slackButtonApprovalType {
-			s.approvalReply(approvedRejected, callback.BlockActionState, m, replier)
+			s.approvalReply(cmd.Approval(), true, approvedRejected, callback.BlockActionState, m, replier)
 		}
 
 		err := s.postUserCommand(cmd, m, &callback.User, replier, rParams, response, true)
@@ -2679,7 +2692,7 @@ func (s *Slack) formButtonCallbackHandler(m *slackMessageInfo, action *slack.Blo
 	default:
 
 		if button.Type == slackButtonApprovalType {
-			s.approvalReply(approvedRejected, callback.BlockActionState, m, replier)
+			s.approvalReply(cmd.Approval(), false, approvedRejected, callback.BlockActionState, m, replier)
 		}
 		s.addReaction(m, s.options.ReactionFailed)
 	}
