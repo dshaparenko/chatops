@@ -19,6 +19,7 @@ type Message interface {
 	User() User
 	Channel() Channel
 	ParentID() string
+	SetParentID(threadTS string)
 }
 
 type AttachmentType string

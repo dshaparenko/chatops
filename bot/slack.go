@@ -284,6 +284,10 @@ func (sm *SlackMessage) ParentID() string {
 	return sm.threadTS
 }
 
+func (sm *SlackMessage) SetParentID(threadTS string) {
+	sm.threadTS = threadTS
+}
+
 // Slack
 
 func (s *Slack) Name() string {
@@ -2326,7 +2330,7 @@ func (s *Slack) replaceApprovalMessage(m *slackMessageInfo, responseURL string, 
 	)
 }*/
 
-func (s *Slack) PostMessage(channel string, text string, attachments []*common.Attachment, user common.User, parent common.Message, response common.Response) error {
+func (s *Slack) PostMessage(channel string, text string, attachments []*common.Attachment, user common.User, parent common.Message, response common.Response) (string, error) {
 
 	channelID := channel
 	threadTS := ""
@@ -2347,7 +2351,7 @@ func (s *Slack) PostMessage(channel string, text string, attachments []*common.A
 
 	atts, err := s.buildAttachmentBlocks(attachments)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	blocks := []slack.Block{}
@@ -2369,8 +2373,8 @@ func (s *Slack) PostMessage(channel string, text string, attachments []*common.A
 	}
 
 	client := s.client.SlackClient()
-	_, _, err = client.PostMessage(channelID, options...)
-	return err
+	_, timeStamp, err := client.PostMessage(channelID, options...)
+	return timeStamp, err
 }
 
 func (s *Slack) getActionValue(field *common.Field, state slack.BlockAction) interface{} {
