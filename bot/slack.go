@@ -1174,7 +1174,8 @@ func (s *Slack) findUserGroupNameByID(groups []slack.UserGroup, ID string) strin
 	return ID
 }
 
-func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []common.Field, params common.ExecuteParams, u *slack.User) ([]slack.Block, error) {
+func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []common.Field, params common.ExecuteParams,
+	u *slack.User, groups []slack.UserGroup) ([]slack.Block, error) {
 
 	blocks := []slack.Block{}
 
@@ -1184,22 +1185,6 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 	confirmationParams := make(common.ExecuteParams)
 	for k, v := range params {
 		confirmationParams[k] = v
-	}
-
-	groupsNeeded := false
-	for _, field := range fields {
-		if utils.Contains([]common.FieldType{common.FieldTypeGroup, common.FieldTypeMultiGroup}, field.Type) {
-			groupsNeeded = true
-			break
-		}
-	}
-
-	groups := []slack.UserGroup{}
-	if groupsNeeded {
-		grs, err := s.client.SlackClient().GetUserGroups()
-		if err == nil {
-			groups = grs
-		}
 	}
 
 	for _, field := range fields {
@@ -1570,7 +1555,7 @@ func (s *Slack) formBlocks(cmd common.Command, command, group string, fields []c
 }
 
 func (s *Slack) replyForm(cmd common.Command, command, group string, fields []common.Field, params common.ExecuteParams,
-	m *slackMessageInfo, u *slack.User, replier *slacker.ResponseReplier) (bool, error) {
+	m *slackMessageInfo, u *slack.User, groups []slack.UserGroup, replier *slacker.ResponseReplier) (bool, error) {
 
 	mThreadTS := m.threadTS
 	opts := []slacker.PostOption{}
@@ -1598,7 +1583,7 @@ func (s *Slack) replyForm(cmd common.Command, command, group string, fields []co
 		Wrapper:   m.wrapper,
 	}
 
-	blocks, err := s.formBlocks(cmd, command, group, fields, params, u)
+	blocks, err := s.formBlocks(cmd, command, group, fields, params, u, groups)
 	if err != nil {
 		return false, err
 	}
@@ -2239,7 +2224,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		if s.formNeeded(rFields, rParams) && user != nil {
-			shown, err := s.replyForm(cmd, rCommand, rGroup, rFields, rParams, m, user, replier)
+			shown, err := s.replyForm(cmd, rCommand, rGroup, rFields, rParams, m, user, groups, replier)
 			if err != nil {
 				s.replyError(cName, m, replier, err, "", []*common.Attachment{})
 				s.addRemoveReactions(m, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -2767,11 +2752,15 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	// find all fields that depend on name
 	deps := []string{}
 	skip := []common.FieldType{common.FieldTypeDynamicSelect, common.FieldTypeDynamicMultiSelect}
+	groupsNeeded := false
 
 	allFields := cmd.Fields(s, msg, nil, nil)
 	for _, field := range allFields {
 		if utils.Contains(field.Dependencies, name) && !utils.Contains(skip, field.Type) {
 			deps = append(deps, field.Name)
+		}
+		if utils.Contains([]common.FieldType{common.FieldTypeGroup, common.FieldTypeMultiGroup}, field.Type) {
+			groupsNeeded = true
 		}
 	}
 
@@ -2823,6 +2812,9 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	}
 
 	u := s.getSlackUser(m.userID, m.botID)
+	if u == nil {
+		return
+	}
 
 	m.userID = value.UserID
 	m.channelID = value.ChannelID
@@ -2832,7 +2824,15 @@ func (s *Slack) formCallbackHandler(ctx *slacker.InteractionContext) {
 	m.wrapped = value.Wrapped
 	m.wrapper = value.Wrapper
 
-	blocks, err := s.formBlocks(cmd, command, group, allFields, params, u)
+	groups := []slack.UserGroup{}
+	if groupsNeeded {
+		grs, err := s.client.SlackClient().GetUserGroups()
+		if err == nil {
+			groups = grs
+		}
+	}
+
+	blocks, err := s.formBlocks(cmd, command, group, allFields, params, u, groups)
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return
