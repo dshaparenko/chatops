@@ -67,21 +67,15 @@ type DefaultPost struct {
 }
 
 type DefaultExecutor struct {
-	command      *DefaultCommand
-	visible      *bool
-	error        *bool
-	attachments  *sync.Map
-	posts        *sync.Map
-	bot          common.Bot
-	params       common.ExecuteParams
-	message      common.Message
-	template     *toolsRender.TextTemplate
-	threadParent *ThreadInfo
-}
-type ThreadInfo struct {
-	MessageID string
-	ChannelID string
-	User      common.User
+	command     *DefaultCommand
+	visible     *bool
+	error       *bool
+	attachments *sync.Map
+	posts       *sync.Map
+	bot         common.Bot
+	params      common.ExecuteParams
+	message     common.Message
+	template    *toolsRender.TextTemplate
 }
 
 type DefaultRunbookTemplateExecutor = DefaultExecutor
@@ -344,55 +338,6 @@ func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) (string, e
 	return "", nil
 }
 
-func (de *DefaultExecutor) fSendThreadedMessage(message, channels string) (string, error) {
-	if utils.IsEmpty(message) {
-		return "", fmt.Errorf("SendThreadedMessage err => %s", "empty message")
-	}
-
-	if utils.IsEmpty(channels) {
-		return "", fmt.Errorf("SendThreadedMessage err => %s", "no channels")
-	}
-
-	chnls := strings.Split(channels, ",")
-	chnls = common.RemoveEmptyStrings(chnls)
-
-	if len(chnls) == 0 {
-		return "", fmt.Errorf("SendThreadedMessage err => %s", "no channels")
-	}
-
-	atts := []*common.Attachment{}
-	var user common.User
-	if !utils.IsEmpty(de.message) {
-		user = de.message.User()
-	}
-
-	var firstTS string
-	var err error
-
-	for _, ch := range chnls {
-		messageID, currentErr := de.bot.PostMessage(ch, message, atts, user, nil, de.Response())
-		if currentErr != nil {
-			de.command.logger.Error("Failed to send message to channel %s: %v", ch, currentErr)
-			if err == nil {
-				err = currentErr
-			}
-			continue
-		}
-
-		if utils.IsEmpty(firstTS) {
-			firstTS = messageID
-
-			de.threadParent = &ThreadInfo{
-				MessageID: messageID,
-				ChannelID: ch,
-				User:      user,
-			}
-		}
-	}
-
-	return firstTS, err
-}
-
 func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[string]interface{}) (string, error) {
 
 	if utils.IsEmpty(message) {
@@ -434,7 +379,7 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 
 	var err error
 	for _, ch := range chnls {
-		_, e := de.bot.PostMessage(ch, message, atts, user, nil, de.Response())
+		e := de.bot.PostMessage(ch, message, atts, user, nil, de.Response())
 		if e != nil {
 			de.command.logger.Error(e)
 			err = e
@@ -641,74 +586,20 @@ func (de *DefaultExecutor) defaultAfter(post *DefaultPost, parent common.Message
 		return nil
 	}
 
-	if !utils.IsEmpty(text) {
-		m := parent
-		if skipParent {
-			m = nil
-		} else if de.threadParent != nil {
-			m = createThreadMessage(de.threadParent)
-		}
-
-		_, err = de.bot.PostMessage(channel.ID(), text, atts, user, m, de.Response())
-		if err != nil {
-			return err
-		}
+	if utils.IsEmpty(text) {
+		return nil
 	}
 
-	gid := utils.GoRoutineID()
-	newPosts, ok := executor.posts.LoadAndDelete(gid)
-	if ok {
-		err = de.after(newPosts.([]*DefaultPost), parent, skipParent, false)
-		if err != nil {
-			return err
-		}
+	m := parent
+	if skipParent {
+		m = nil
 	}
 
+	err = de.bot.PostMessage(channel.ID(), text, atts, user, m, de.Response())
+	if err != nil {
+		return err
+	}
 	return nil
-}
-
-func createThreadMessage(info *ThreadInfo) common.Message {
-	return &simpleMessage{
-		messageID: info.MessageID,
-		threadTS:  info.MessageID,
-		channelID: info.ChannelID,
-		userValue: info.User,
-	}
-}
-
-type simpleMessage struct {
-	messageID string
-	threadTS  string
-	channelID string
-	userValue common.User
-}
-
-func (sm *simpleMessage) ID() string {
-	return sm.messageID
-}
-
-func (sm *simpleMessage) Visible() bool {
-	return true
-}
-
-func (sm *simpleMessage) User() common.User {
-	return sm.userValue
-}
-
-func (sm *simpleMessage) Channel() common.Channel {
-	return &simpleChannel{id: sm.channelID}
-}
-
-func (sm *simpleMessage) ParentID() string {
-	return sm.threadTS
-}
-
-type simpleChannel struct {
-	id string
-}
-
-func (sc *simpleChannel) ID() string {
-	return sc.id
 }
 
 func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, parent common.Message) error {
@@ -738,7 +629,7 @@ func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, p
 
 	m := parent
 
-	_, err := de.bot.PostMessage(channel.ID(), ret.Text, ret.Attachements, user, m, de.Response())
+	err := de.bot.PostMessage(channel.ID(), ret.Text, ret.Attachements, user, m, de.Response())
 	if err != nil {
 		return err
 	}
@@ -802,26 +693,13 @@ func (de *DefaultExecutor) After(message common.Message) error {
 		posts = r.([]*DefaultPost)
 	}
 
-	if len(posts) > 0 {
-		parentPost := posts[0]
-		nestedPosts := posts[1:]
-
-		err := de.defaultAfter(parentPost, message, false)
-		if err != nil {
-			return err
-		}
-
-		err = de.after(nestedPosts, message, false, false)
-		if err != nil {
-			return err
-		}
-	}
+	err := de.after(posts, message, false, false)
 
 	de.posts.Range(func(key, value any) bool {
 		de.posts.Delete(key)
 		return true
 	})
-	return nil
+	return err
 }
 
 func NewExecutorTemplate(name string, content string, executor *DefaultExecutor, observability *common.Observability) (*toolsRender.TextTemplate, error) {
@@ -840,7 +718,6 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["postTemplate"] = executor.fPostTemplate
 	funcs["postBook"] = executor.fPostBook
 	funcs["sendMessage"] = executor.fSendMessage
-	funcs["sendMessageThreaded"] = executor.fSendThreadedMessage
 	funcs["sendMessageEx"] = executor.fSendMessageEx
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
