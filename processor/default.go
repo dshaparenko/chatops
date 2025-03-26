@@ -402,7 +402,7 @@ func (de *DefaultExecutor) fSendMessage(message, channels string) (string, error
 	return de.fSendMessageEx(message, channels, nil, "")
 }
 
-func (de *DefaultExecutor) fSendMessageParent(message, channels, parentID string) (string, error) {
+func (de *DefaultExecutor) fSendMessageByParent(message, channels, parentID string) (string, error) {
 	return de.fSendMessageEx(message, channels, nil, parentID)
 }
 
@@ -731,7 +731,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["postTemplate"] = executor.fPostTemplate
 	funcs["postBook"] = executor.fPostBook
 	funcs["sendMessage"] = executor.fSendMessage
-	funcs["sendMessageParent"] = executor.fSendMessageParent
+	funcs["sendMessageByParent"] = executor.fSendMessageByParent
 	funcs["sendMessageEx"] = executor.fSendMessageEx
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
