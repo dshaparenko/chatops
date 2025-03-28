@@ -13,7 +13,7 @@ type Bot interface {
 	AddReaction(channel, ID, name string) error
 	RemoveReaction(channel, ID, name string) error
 
-	PostMessage(channel string, text string, attachments []*Attachment, user User, parent Message, response Response) error
+	PostMessage(channel string, text string, attachments []*Attachment, actions []*Action, user User, parent Message, response Response) error
 	DeleteMessage(channel, ID string) error
 	ReadMessage(channel, ID string) (string, error)
 	UpdateMessage(channel, ID, text string) error

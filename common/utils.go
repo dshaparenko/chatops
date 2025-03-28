@@ -9,6 +9,7 @@ import (
 
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v2"
 )
 
@@ -140,4 +141,10 @@ func Render(def string, obj interface{}, observability *Observability) string {
 		return def
 	}
 	return s
+}
+
+func UUID() string {
+
+	uuid := uuid.New()
+	return uuid.String()
 }

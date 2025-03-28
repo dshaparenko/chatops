@@ -19,6 +19,7 @@ type Message interface {
 	User() User
 	Channel() Channel
 	ParentID() string
+	RemoveAction(name string) error
 }
 
 type AttachmentType string
@@ -62,6 +63,13 @@ type Approval interface {
 	Visible() bool
 }
 
+type Action struct {
+	Name     string
+	Label    string
+	Template string
+	Style    string
+}
+
 type Executor interface {
 	Response() Response
 	After(message Message) error
@@ -78,10 +86,11 @@ type Command interface {
 	Schedule() string
 	Channel() string
 	Response() Response
-	Execute(bot Bot, message Message, params ExecuteParams) (Executor, string, []*Attachment, error)
-	Fields(bot Bot, message Message, params ExecuteParams, eval []string) []Field
+	Actions() []Action
 	Approval() Approval
 	Permissions() bool
+	Execute(bot Bot, message Message, params ExecuteParams, action *Action) (Executor, string, []*Attachment, []*Action, error)
+	Fields(bot Bot, message Message, params ExecuteParams, eval []string) []Field
 }
 
 type Processor interface {
