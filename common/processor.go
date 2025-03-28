@@ -20,6 +20,7 @@ type Message interface {
 	Channel() Channel
 	ParentID() string
 	RemoveAction(name string) error
+	SetParentID(threadTS string)
 }
 
 type AttachmentType string

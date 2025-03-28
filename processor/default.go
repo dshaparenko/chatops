@@ -379,7 +379,7 @@ func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) (string, e
 	return "", nil
 }
 
-func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[string]interface{}) (string, error) {
+func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[string]interface{}, parent string) (string, error) {
 
 	if utils.IsEmpty(message) {
 		return "", fmt.Errorf("SendMessageEx err => %s", "empty message")
@@ -435,20 +435,33 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 		user = de.message.User()
 	}
 
+	var msg common.Message
+	if !utils.IsEmpty(parent) {
+		msg = de.message
+	}
+
+	if !utils.IsEmpty(msg) {
+		msg.SetParentID(parent)
+	}
+
 	var err error
+	var timeStamp string
 	for _, ch := range chnls {
-		e := de.bot.PostMessage(ch, message, atts, acts, user, nil, de.Response())
-		if e != nil {
-			de.command.logger.Error(e)
-			err = e
+		timeStamp, err = de.bot.PostMessage(ch, message, atts, acts, user, msg, de.Response())
+		if err != nil {
+			de.command.logger.Error(err)
 		}
 	}
 
-	return "", err
+	return timeStamp, err
 }
 
 func (de *DefaultExecutor) fSendMessage(message, channels string) (string, error) {
-	return de.fSendMessageEx(message, channels, nil)
+	return de.fSendMessageEx(message, channels, nil, "")
+}
+
+func (de *DefaultExecutor) fSendMessageByParent(message, channels, parentID string) (string, error) {
+	return de.fSendMessageEx(message, channels, nil, parentID)
 }
 
 func (de *DefaultExecutor) fSetInvisible() string {
@@ -660,7 +673,7 @@ func (de *DefaultExecutor) defaultAfter(post *DefaultPost, parent common.Message
 		m = nil
 	}
 
-	err = de.bot.PostMessage(channel.ID(), text, atts, acts, user, m, de.Response())
+	_, err = de.bot.PostMessage(channel.ID(), text, atts, acts, user, m, de.Response())
 	if err != nil {
 		return err
 	}
@@ -694,7 +707,7 @@ func (de *DefaultExecutor) runbookAfterCallback(ret *DefaultRunbookStepResult, p
 
 	m := parent
 
-	err := de.bot.PostMessage(channel.ID(), ret.Text, ret.Attachements, ret.Actions, user, m, de.Response())
+	_, err := de.bot.PostMessage(channel.ID(), ret.Text, ret.Attachements, ret.Actions, user, m, de.Response())
 	if err != nil {
 		return err
 	}
@@ -785,6 +798,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["postTemplate"] = executor.fPostTemplate
 	funcs["postBook"] = executor.fPostBook
 	funcs["sendMessage"] = executor.fSendMessage
+	funcs["sendMessageByParent"] = executor.fSendMessageByParent
 	funcs["sendMessageEx"] = executor.fSendMessageEx
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
