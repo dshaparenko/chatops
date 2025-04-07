@@ -23,7 +23,7 @@ type DefaultRunbookStepResult struct {
 	ID           string
 	Text         string
 	Attachements []*common.Attachment
-	Actions      []*common.Action
+	Actions      []common.Action
 	Error        error
 }
 
@@ -71,6 +71,7 @@ type DefaultExecutor struct {
 	command     *DefaultCommand
 	visible     *bool
 	error       *bool
+	reaction    *bool
 	attachments *sync.Map
 	actions     *sync.Map
 	posts       *sync.Map
@@ -78,7 +79,7 @@ type DefaultExecutor struct {
 	params      common.ExecuteParams
 	message     common.Message
 	template    *toolsRender.TextTemplate
-	action      *common.Action
+	action      common.Action
 }
 
 type DefaultRunbookTemplateExecutor = DefaultExecutor
@@ -123,13 +124,20 @@ type DefaultApproval struct {
 	Visible     bool
 }
 
+type DefaultAction struct {
+	Name     string
+	Label    string
+	Template string
+	Style    string
+}
+
 type DefaultCommandConfig struct {
 	Description  string
 	Params       []string
 	Aliases      []string
 	Response     DefaultReposne
 	Fields       []common.Field
-	Actions      []common.Action
+	Actions      []DefaultAction
 	Priority     int
 	Wrapper      bool
 	Schedule     string
@@ -145,6 +153,14 @@ type DefaultCommandResponse struct {
 
 type DefaultCommandApproval struct {
 	command *DefaultCommand
+}
+
+type DefaultCommandAction struct {
+	command  *DefaultCommand
+	name     string
+	label    string
+	template string
+	style    string
 }
 
 type DefaultCommand struct {
@@ -167,6 +183,16 @@ type Default struct {
 // Default executor
 // common.Response
 
+func (de *DefaultExecutor) Visible() bool {
+	if de.visible != nil {
+		return *de.visible
+	}
+	if de.command.config != nil {
+		return de.command.config.Response.Visible
+	}
+	return false
+}
+
 func (de *DefaultExecutor) Error() bool {
 	if de.error != nil {
 		return *de.error
@@ -174,12 +200,9 @@ func (de *DefaultExecutor) Error() bool {
 	return false
 }
 
-func (de *DefaultExecutor) Visible() bool {
-	if de.visible != nil {
-		return *de.visible
-	}
-	if de.command.config != nil {
-		return de.command.config.Response.Visible
+func (de *DefaultExecutor) Reaction() bool {
+	if de.reaction != nil {
+		return *de.reaction
 	}
 	return false
 }
@@ -296,35 +319,29 @@ func (de *DefaultExecutor) fAddAttachment(title, text string, data interface{}, 
 func (de *DefaultExecutor) fAddAction(name, label, template, style string) string {
 
 	gid := utils.GoRoutineID()
-	var acts []*common.Action
+	var acts []*DefaultCommandAction
 
 	r, ok := de.actions.Load(gid)
 	if ok {
-		acts = r.([]*common.Action)
+		acts = r.([]*DefaultCommandAction)
 	}
 
-	act := &common.Action{
-		Name:     name,
-		Label:    label,
-		Template: template,
-		Style:    style,
+	act := &DefaultCommandAction{
+		command:  de.command,
+		name:     name,
+		label:    label,
+		template: template,
+		style:    style,
 	}
 	acts = append(acts, act)
 	de.actions.Store(gid, acts)
 	return ""
 }
 
-func (de *DefaultExecutor) fRemoveAction(message common.Message, name string) string {
+func (de *DefaultExecutor) fRemoveAction(channelID, messageID, name string) string {
 
-	if utils.IsEmpty(message) {
-		return ""
-	}
-
-	err := message.RemoveAction(name)
-
+	err := de.bot.RemoveAction(channelID, messageID, name)
 	if err != nil {
-		e := true
-		de.error = &e
 		return err.Error()
 	}
 	return ""
@@ -413,16 +430,16 @@ func (de *DefaultExecutor) fSendMessageEx(message, channels string, params map[s
 		}
 	}
 
-	acts := []*common.Action{}
+	acts := []common.Action{}
 	if len(params) > 0 {
-		action, ok := params["action"].(*common.Action)
+		action, ok := params["action"].(common.Action)
 		if ok {
 			acts = append(acts, action)
 		}
 		actions, ok := params["actions"].([]interface{})
 		if ok {
 			for _, a := range actions {
-				action, ok := a.(*common.Action)
+				action, ok := a.(common.Action)
 				if ok {
 					acts = append(acts, action)
 				}
@@ -508,13 +525,25 @@ func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) str
 
 func (de *DefaultExecutor) fAddReaction(channelID, messageID, name string) string {
 
-	de.bot.AddReaction(channelID, messageID, name)
+	err := de.bot.AddReaction(channelID, messageID, name)
+	if err != nil {
+		return ""
+	}
 	return ""
 }
 
 func (de *DefaultExecutor) fRemoveReaction(channelID, messageID, name string) string {
 
-	de.bot.RemoveReaction(channelID, messageID, name)
+	err := de.bot.RemoveReaction(channelID, messageID, name)
+	if err != nil {
+		return ""
+	}
+	return ""
+}
+
+func (de *DefaultExecutor) fDisableReaction() string {
+	v := false
+	de.reaction = &v
 	return ""
 }
 
@@ -550,12 +579,12 @@ func (de *DefaultExecutor) fGetChannel() interface{} {
 	return de.message.Channel()
 }
 
-func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, []*common.Action, error) {
+func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, []common.Action, error) {
 
 	gid := utils.GoRoutineID()
 
 	var atts []*common.Attachment
-	var acts []*common.Action
+	var acts []common.Action
 
 	b, err := de.template.RenderObject(obj)
 	if err != nil {
@@ -572,13 +601,16 @@ func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment
 
 	ac, ok := de.actions.LoadAndDelete(gid)
 	if ok {
-		acts = ac.([]*common.Action)
+		dcas := ac.([]*DefaultCommandAction)
+		for _, ca := range dcas {
+			acts = append(acts, ca)
+		}
 	}
 
 	return strings.TrimSpace(string(b)), atts, acts, nil
 }
 
-func (de *DefaultExecutor) execute(id string, obj interface{}) (string, []*common.Attachment, []*common.Action, error) {
+func (de *DefaultExecutor) execute(id string, obj interface{}) (string, []*common.Attachment, []common.Action, error) {
 
 	t1 := time.Now()
 
@@ -807,6 +839,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["addReaction"] = executor.fAddReaction
 	funcs["removeReaction"] = executor.fRemoveReaction
+	//funcs["disableReaction"] = executor.fDisableReaction
 
 	funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
@@ -827,7 +860,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 }
 
 func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message,
-	params common.ExecuteParams, action *common.Action) (*DefaultExecutor, error) {
+	params common.ExecuteParams, action common.Action) (*DefaultExecutor, error) {
 
 	if !utils.FileExists(path) {
 		return nil, fmt.Errorf("Default couldn't find template %s", path)
@@ -1115,6 +1148,10 @@ func (dcr *DefaultCommandResponse) Error() bool {
 	return false
 }
 
+func (dcr *DefaultCommandResponse) Reaction() bool {
+	return true
+}
+
 // DefaultCommandApproval
 
 func (dca *DefaultCommandApproval) approval() *DefaultApproval {
@@ -1273,10 +1310,35 @@ func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Messag
 	return string(b)
 }
 
+// DefaultCommandAction
+
+func (dca *DefaultCommandAction) Name() string {
+	return dca.name
+}
+
+func (dca *DefaultCommandAction) Label() string {
+	return dca.label
+}
+
+func (dca *DefaultCommandAction) Template() string {
+	return dca.template
+}
+
+func (dca *DefaultCommandAction) Style() string {
+	return dca.style
+}
+
 // Default command
 
 func (dc *DefaultCommand) Name() string {
 	return dc.name
+}
+
+func (dc *DefaultCommand) Group() string {
+	if dc.processor == nil {
+		return dc.processor.name
+	}
+	return ""
 }
 
 func (dc *DefaultCommand) getNameWithGroup(delim string) string {
@@ -1326,10 +1388,21 @@ func (dc *DefaultCommand) Aliases() []string {
 }
 
 func (dc *DefaultCommand) Actions() []common.Action {
+
+	r := []common.Action{}
 	if dc.config == nil {
-		return []common.Action{}
+		return r
 	}
-	return dc.config.Actions
+	for _, a := range dc.config.Actions {
+		r = append(r, &DefaultCommandAction{
+			command:  dc,
+			name:     a.Name,
+			label:    a.Label,
+			template: a.Template,
+			style:    a.Style,
+		})
+	}
+	return r
 }
 
 func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params common.ExecuteParams, eval []string) []common.Field {
@@ -1414,6 +1487,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 			}
 			funcs["setError"] = func() string { return "" }
 			funcs["setInvisible"] = func() string { return "" }
+			funcs["disableReaction"] = func() string { return "" }
 
 			tOpts := toolsRender.TemplateOptions{
 				Name:    fmt.Sprintf("default-internal-%s", name),
@@ -1594,13 +1668,13 @@ func (dc *DefaultCommand) Response() common.Response {
 	}
 }
 
-func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params common.ExecuteParams, action *common.Action) (common.Executor, string, []*common.Attachment, []*common.Action, error) {
+func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params common.ExecuteParams, action common.Action) (common.Executor, string, []*common.Attachment, []common.Action, error) {
 
 	name := dc.getNameWithGroup("-")
 
 	path := dc.path
-	if action != nil && !utils.IsEmpty(action.Template) {
-		path = fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), action.Template)
+	if action != nil && !utils.IsEmpty(action.Template()) {
+		path = fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), action.Template())
 	}
 
 	executor, err := NewExecutor(name, path, dc, bot, message, params, action)
@@ -1616,8 +1690,8 @@ func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params
 	m["channel"] = message.Channel()
 	m["name"] = dc.getNameWithGroup("/")
 
-	if action != nil && !utils.IsEmpty(action.Name) {
-		m["action"] = action.Name
+	if action != nil {
+		m["action"] = action
 	}
 
 	msg, atts, acts, err := executor.execute("", m)

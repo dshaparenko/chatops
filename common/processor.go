@@ -19,7 +19,6 @@ type Message interface {
 	User() User
 	Channel() Channel
 	ParentID() string
-	RemoveAction(name string) error
 	SetParentID(threadTS string)
 }
 
@@ -39,6 +38,7 @@ type Response interface {
 	Duration() bool // show duration in replay
 	Original() bool // show orignal as quote
 	Error() bool    // show as error
+	Reaction() bool // reaction needed
 }
 
 type FieldType string
@@ -64,11 +64,11 @@ type Approval interface {
 	Visible() bool
 }
 
-type Action struct {
-	Name     string
-	Label    string
-	Template string
-	Style    string
+type Action interface {
+	Name() string
+	Label() string
+	Template() string
+	Style() string
 }
 
 type Executor interface {
@@ -78,6 +78,7 @@ type Executor interface {
 
 type Command interface {
 	Name() string
+	Group() string
 	Description() string
 	Params() []string
 	Aliases() []string
@@ -90,7 +91,7 @@ type Command interface {
 	Actions() []Action
 	Approval() Approval
 	Permissions() bool
-	Execute(bot Bot, message Message, params ExecuteParams, action *Action) (Executor, string, []*Attachment, []*Action, error)
+	Execute(bot Bot, message Message, params ExecuteParams, action Action) (Executor, string, []*Attachment, []Action, error)
 	Fields(bot Bot, message Message, params ExecuteParams, eval []string) []Field
 }
 
