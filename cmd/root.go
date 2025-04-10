@@ -87,7 +87,8 @@ var slackOptions = bot.SlackOptions{
 	ReactionDoing:    envGet("SLACK_REACTION_DOING", "spinner").(string),
 	ReactionDone:     envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
 	ReactionFailed:   envGet("SLACK_REACTION_FAILED", "x").(string),
-	ReactionDialog:   envGet("SLACK_REACTION_DIALOG", "question").(string),
+	ReactionForm:     envGet("SLACK_REACTION_FORM", "question").(string),
+	ReactionApproval: envGet("SLACK_REACTION_APPROVAL", "eyes").(string),
 	ReactionApproved: envGet("SLACK_REACTION_APPROVED", "white_check_mark").(string),
 	ReactionRejected: envGet("SLACK_REACTION_REJECTED", "x").(string),
 
@@ -102,6 +103,8 @@ var slackOptions = bot.SlackOptions{
 	CacheTTL:        envGet("SLACK_CACHE_TTL", "1h").(string),
 	MaxQueryOptions: envGet("SLACK_MAX_QUERY_OPTIONS", 15).(int),
 	MinQueryLength:  envGet("SLACK_MIN_QUERY_LENGTH", 2).(int),
+
+	UserGroupsInterval: envGet("SLACK_USER_GROUPS_INTERVAL", 5).(int),
 }
 
 var defaultOptions = processor.DefaultOptions{

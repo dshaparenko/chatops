@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"text/template"
+	"time"
 
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
@@ -147,4 +148,21 @@ func UUID() string {
 
 	uuid := uuid.New()
 	return uuid.String()
+}
+
+func Schedule(what func(), delay time.Duration) chan bool {
+	stop := make(chan bool)
+
+	go func() {
+		for {
+			what()
+			select {
+			case <-time.After(delay):
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	return stop
 }
