@@ -122,6 +122,7 @@ type DefaultApproval struct {
 	Reasons     []string
 	Description bool
 	Visible     bool
+	Disabled    bool
 }
 
 type DefaultAction struct {
@@ -1156,6 +1157,10 @@ func (dcr *DefaultCommandResponse) Reaction() bool {
 
 func (dca *DefaultCommandApproval) approval() *DefaultApproval {
 	if dca.command.config == nil {
+		return nil
+	}
+	approval := dca.command.config.Approval
+	if approval == nil || approval.Disabled {
 		return nil
 	}
 	return dca.command.config.Approval

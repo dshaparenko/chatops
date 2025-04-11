@@ -14,10 +14,10 @@ type Bot interface {
 	RemoveReaction(channel, ID, name string) error
 	RemoveAction(channel, ID, name string) error
 
-	PostMessage(channel string, text string, attachments []*Attachment, actions []Action, user User, parent Message, response Response) (string, error)
+	PostMessage(channel string, message string, attachments []*Attachment, actions []Action, user User, parent Message, response Response) (string, error)
 	DeleteMessage(channel, ID string) error
 	ReadMessage(channel, ID string) (string, error)
-	UpdateMessage(channel, ID, text string) error
+	UpdateMessage(channel, ID, message string) error
 }
 
 type Bots struct {
