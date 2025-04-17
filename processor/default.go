@@ -339,9 +339,89 @@ func (de *DefaultExecutor) fAddAction(name, label, template, style string) strin
 	return ""
 }
 
-func (de *DefaultExecutor) fRemoveAction(channelID, messageID, name string) string {
+func (de *DefaultExecutor) fAddActionToMessage(channelID, messageID, name, label, template, style string) string {
+
+	action := &DefaultCommandAction{
+		command:  de.command,
+		name:     name,
+		label:    label,
+		template: template,
+		style:    style,
+	}
+	err := de.bot.AddAction(channelID, messageID, action)
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (de *DefaultExecutor) fAddActionsToMessage(channelID, messageID string, list []interface{}) string {
+
+	actions := []common.Action{}
+
+	for _, item := range list {
+
+		mi, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		name := ""
+		n := mi["name"]
+		if n != nil {
+			name, _ = n.(string)
+		}
+		if utils.IsEmpty(name) {
+			continue
+		}
+
+		template := ""
+		t := mi["template"]
+		if n != nil {
+			template, _ = t.(string)
+		}
+
+		label := ""
+		l := mi["label"]
+		if l != nil {
+			label, _ = l.(string)
+		}
+
+		style := ""
+		s := mi["style"]
+		if s != nil {
+			style, _ = s.(string)
+		}
+
+		action := &DefaultCommandAction{
+			command:  de.command,
+			name:     name,
+			label:    label,
+			template: template,
+			style:    style,
+		}
+		actions = append(actions, action)
+	}
+
+	err := de.bot.AddActions(channelID, messageID, actions)
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (de *DefaultExecutor) fRemoveActionFromMessage(channelID, messageID, name string) string {
 
 	err := de.bot.RemoveAction(channelID, messageID, name)
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (de *DefaultExecutor) fClearActionsFromMessage(channelID, messageID string) string {
+
+	err := de.bot.ClearActions(channelID, messageID)
 	if err != nil {
 		return err.Error()
 	}
@@ -524,27 +604,34 @@ func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) str
 	return ""
 }
 
-func (de *DefaultExecutor) fAddReaction(channelID, messageID, name string) string {
+func (de *DefaultExecutor) fAddReactionToMessage(channelID, messageID, name string) string {
 
 	err := de.bot.AddReaction(channelID, messageID, name)
 	if err != nil {
-		return ""
+		return err.Error()
 	}
 	return ""
 }
 
-func (de *DefaultExecutor) fRemoveReaction(channelID, messageID, name string) string {
+func (de *DefaultExecutor) fRemoveReactionFromMessage(channelID, messageID, name string) string {
 
 	err := de.bot.RemoveReaction(channelID, messageID, name)
 	if err != nil {
-		return ""
+		return err.Error()
 	}
 	return ""
 }
 
-func (de *DefaultExecutor) fDisableReaction() string {
-	v := false
-	de.reaction = &v
+func (de *DefaultExecutor) fAddRemoveReactionOnMessage(channelID, messageID, first, second string) string {
+
+	err := de.bot.AddReaction(channelID, messageID, first)
+	if err != nil {
+		return err.Error()
+	}
+	err = de.bot.RemoveReaction(channelID, messageID, second)
+	if err != nil {
+		return err.Error()
+	}
 	return ""
 }
 
@@ -554,11 +641,18 @@ func (de *DefaultExecutor) fSetError() string {
 	return ""
 }
 
-func (de *DefaultExecutor) fGetBot() interface{} {
+/*func (de *DefaultExecutor) fGetBot() interface{} {
 	return de.bot
 }
 
 func (de *DefaultExecutor) fGetUser() interface{} {
+	if utils.IsEmpty(de.message) {
+		return nil
+	}
+	return de.message.User()
+}
+
+func (de *DefaultExecutor) fGetCaller() interface{} {
 	if utils.IsEmpty(de.message) {
 		return nil
 	}
@@ -578,7 +672,7 @@ func (de *DefaultExecutor) fGetChannel() interface{} {
 		return nil
 	}
 	return de.message.Channel()
-}
+}*/
 
 func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, []common.Action, error) {
 
@@ -611,7 +705,7 @@ func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment
 	return strings.TrimSpace(string(b)), atts, acts, nil
 }
 
-func (de *DefaultExecutor) execute(id string, obj interface{}) (string, []*common.Attachment, []common.Action, error) {
+func (de *DefaultExecutor) execute(id string, obj interface{}, message common.Message) (string, []*common.Attachment, []common.Action, error) {
 
 	t1 := time.Now()
 
@@ -652,6 +746,14 @@ func (de *DefaultExecutor) execute(id string, obj interface{}) (string, []*commo
 			if !utils.IsEmpty(ids) {
 				ids = fmt.Sprintf("id=%s ", ids)
 			}
+
+			// set real message which appears after first execution
+			m["message"] = message
+			if message != nil {
+				m["channel"] = message.Channel()
+				m["user"] = message.User()
+				m["caller"] = message.Caller()
+			}
 		}
 	}
 
@@ -681,7 +783,7 @@ func (de *DefaultExecutor) defaultAfter(post *DefaultPost, parent common.Message
 		return err
 	}
 
-	text, atts, acts, err := executor.execute("", post.Obj)
+	text, atts, acts, err := executor.execute("", post.Obj, parent)
 	if err != nil {
 		return err
 	}
@@ -820,8 +922,18 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["addFile"] = executor.fAddFile
 	funcs["addAttachment"] = executor.fAddAttachment
 	funcs["createAttachment"] = executor.fCreateAttachment
+
 	funcs["addAction"] = executor.fAddAction
-	funcs["removeAction"] = executor.fRemoveAction
+	funcs["addActionToMessage"] = executor.fAddActionToMessage
+	funcs["addActionsToMessage"] = executor.fAddActionsToMessage
+	funcs["removeActionFromMessage"] = executor.fRemoveActionFromMessage
+	funcs["clearActionsFromMessage"] = executor.fClearActionsFromMessage
+
+	funcs["addReaction"] = executor.fAddReactionToMessage
+	funcs["addReactionToMessage"] = executor.fAddReactionToMessage
+	funcs["addRemoveReactionOnMessage"] = executor.fAddRemoveReactionOnMessage
+	funcs["removeReactionFromMessage"] = executor.fRemoveReactionFromMessage
+
 	funcs["runFile"] = executor.fRunFile
 	funcs["runCommand"] = executor.fRunCommand
 	funcs["runTemplate"] = executor.fRunTemplate
@@ -838,15 +950,15 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["updateMessage"] = executor.fUpdateMessage
-	funcs["addReaction"] = executor.fAddReaction
-	funcs["removeReaction"] = executor.fRemoveReaction
 	//funcs["disableReaction"] = executor.fDisableReaction
 
-	funcs["getBot"] = executor.fGetBot
+	// we should remove these
+	/*funcs["getBot"] = executor.fGetBot
 	funcs["getUser"] = executor.fGetUser
+	funcs["getCaller"] = executor.fGetCaller
 	funcs["getParams"] = executor.fGetParams
 	funcs["getMessage"] = executor.fGetMessage
-	funcs["getChannel"] = executor.fGetChannel
+	funcs["getChannel"] = executor.fGetChannel*/
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -918,13 +1030,13 @@ func (dre *DefaultRunbookCommandExecutor) execute() error {
 
 // Default Runbook Executor
 
-func (dre *DefaultRunbookExecutor) execute(id string, params map[string]interface{}) *DefaultRunbookStepResult {
+func (dre *DefaultRunbookExecutor) execute(id string, params map[string]interface{}, message common.Message) *DefaultRunbookStepResult {
 
 	if dre.templateExecutor != nil {
 		r := &DefaultRunbookStepResult{
 			ID: fmt.Sprintf("%s.template", id),
 		}
-		r.Text, r.Attachements, r.Actions, r.Error = dre.templateExecutor.execute(id, params)
+		r.Text, r.Attachements, r.Actions, r.Error = dre.templateExecutor.execute(id, params, message)
 		return r
 	} else if dre.commandExecutor != nil {
 		r := &DefaultRunbookStepResult{
@@ -1044,7 +1156,7 @@ func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot c
 				return nil
 			}
 
-			r1 := executor.execute(id1, params)
+			r1 := executor.execute(id1, params, parent)
 			if r1 != nil && r1.Error != nil {
 				return r1.Error
 			}
@@ -1242,6 +1354,7 @@ func (dca *DefaultCommandApproval) Channel(bot common.Bot, message common.Messag
 	m["message"] = message
 	m["channel"] = message.Channel()
 	m["user"] = message.User()
+	m["caller"] = message.Caller()
 	m["params"] = params
 
 	b, err := t.RenderObject(m)
@@ -1305,6 +1418,7 @@ func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Messag
 	m["message"] = message
 	m["channel"] = message.Channel()
 	m["user"] = message.User()
+	m["caller"] = message.Caller()
 	m["params"] = params
 
 	b, err := t.RenderObject(m)
@@ -1511,6 +1625,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 			m["message"] = message
 			m["channel"] = message.Channel()
 			m["user"] = message.User()
+			m["caller"] = message.Caller()
 			m["params"] = params
 			m["field"] = f
 
@@ -1692,6 +1807,7 @@ func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params
 	m["bot"] = bot
 	m["message"] = message
 	m["user"] = message.User()
+	m["caller"] = message.Caller()
 	m["channel"] = message.Channel()
 	m["name"] = dc.getNameWithGroup("/")
 
@@ -1699,7 +1815,7 @@ func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params
 		m["action"] = action
 	}
 
-	msg, atts, acts, err := executor.execute("", m)
+	msg, atts, acts, err := executor.execute("", m, message)
 	if err != nil {
 		dc.logger.Error(err)
 		err = fmt.Errorf("%s", dc.processor.options.Error)

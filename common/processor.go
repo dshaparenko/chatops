@@ -17,6 +17,7 @@ type Message interface {
 	ID() string
 	Visible() bool
 	User() User
+	Caller() User
 	Channel() Channel
 	ParentID() string
 	SetParentID(threadTS string)

@@ -31,7 +31,7 @@ type SlackOptions struct {
 	Timeout          int
 	PublicChannel    string
 
-	ApprovalAllowed     bool
+	ApprovalAny         bool
 	ApprovalReply       string
 	ApprovalReasons     string
 	ApprovalDescription string
@@ -92,6 +92,7 @@ type SlackMessage struct {
 	originKey   *SlackMessageKey
 	key         *SlackMessageKey
 	user        *SlackUser
+	caller      *SlackUser
 	channel     *SlackChannel
 	botID       string
 	visible     bool
@@ -303,6 +304,10 @@ func (sm *SlackMessage) User() common.User {
 	return sm.user
 }
 
+func (sm *SlackMessage) Caller() common.User {
+	return sm.caller
+}
+
 func (sm *SlackMessage) userID() string {
 	u := sm.user
 	if u == nil {
@@ -326,7 +331,7 @@ func (sm *SlackMessage) SetParentID(threadTS string) {
 // SlackCacheMessageKey
 
 func (smk *SlackMessageKey) String() string {
-	return fmt.Sprintf("%s/%s/%s", smk.channelID, smk.timestamp, smk.threadTS)
+	return fmt.Sprintf("%s/%s", smk.channelID, smk.timestamp)
 }
 
 // Slack
@@ -539,7 +544,7 @@ func (s *Slack) limitText(text string, max int) string {
 	return r
 }
 
-func (s *Slack) buildActionBlocks(actions []common.Action) []slack.Block {
+func (s *Slack) buildActionBlocks(actions []common.Action, divider bool) []slack.Block {
 
 	rb := []slack.Block{}
 
@@ -547,8 +552,11 @@ func (s *Slack) buildActionBlocks(actions []common.Action) []slack.Block {
 		return rb
 	}
 
-	divider := slack.NewDividerBlock()
-	rb = append(rb, divider)
+	if divider {
+		d := slack.NewDividerBlock()
+		rb = append(rb, d)
+	}
+
 	elements := []slack.BlockElement{}
 	blockID := common.UUID()
 
@@ -668,7 +676,197 @@ func (s *Slack) RemoveReaction(channelID, timestamp, name string) error {
 	return nil
 }
 
+func (s *Slack) AddAction(channelID, timestamp string, action common.Action) error {
+
+	key := &SlackMessageKey{
+		channelID: channelID,
+		timestamp: timestamp,
+		threadTS:  "",
+	}
+
+	m := s.findMessageInCache(key)
+	if m == nil {
+		err := fmt.Errorf("Slack message not found in %s with %s", channelID, timestamp)
+		s.logger.Error(err)
+		return err
+	}
+
+	aBlocks := s.buildActionBlocks([]common.Action{action}, true)
+	if len(aBlocks) == 0 {
+		return nil
+	}
+
+	blocks := []slack.Block{}
+	for _, block := range m.blocks {
+
+		arr := []slack.MessageBlockType{slack.MBTAction, slack.MBTDivider}
+		flag := true
+		if utils.Contains(arr, block.BlockType()) {
+
+			_, ok := block.(*slack.DividerBlock)
+			if !ok {
+				flag = false
+				continue
+			}
+
+			ab, ok := block.(*slack.ActionBlock)
+			if !ok {
+				continue
+			}
+
+			if ab.Elements == nil {
+				continue
+			}
+
+			flag = len(ab.Elements.ElementSet) > 0
+		}
+		if flag {
+			blocks = append(blocks, block)
+		}
+	}
+	blocks = append(blocks, aBlocks...)
+
+	m.actions = append(m.actions, action)
+	m.blocks = blocks
+	s.putMessageToCache(m)
+
+	_, _, _, err := s.client.SlackClient().UpdateMessage(channelID, timestamp, slack.MsgOptionBlocks(blocks...))
+
+	return err
+}
+
+func (s *Slack) AddActions(channelID, timestamp string, actions []common.Action) error {
+
+	key := &SlackMessageKey{
+		channelID: channelID,
+		timestamp: timestamp,
+		threadTS:  "",
+	}
+
+	m := s.findMessageInCache(key)
+	if m == nil {
+		err := fmt.Errorf("Slack message not found in %s with %s", channelID, timestamp)
+		s.logger.Error(err)
+		return err
+	}
+
+	aBlocks := s.buildActionBlocks(actions, true)
+	if len(aBlocks) == 0 {
+		return nil
+	}
+
+	blocks := []slack.Block{}
+	for _, block := range m.blocks {
+
+		arr := []slack.MessageBlockType{slack.MBTAction, slack.MBTDivider}
+		flag := true
+		if utils.Contains(arr, block.BlockType()) {
+
+			_, ok := block.(*slack.DividerBlock)
+			if !ok {
+				flag = false
+				continue
+			}
+
+			ab, ok := block.(*slack.ActionBlock)
+			if !ok {
+				continue
+			}
+
+			if ab.Elements == nil {
+				continue
+			}
+
+			flag = len(ab.Elements.ElementSet) > 0
+		}
+		if flag {
+			blocks = append(blocks, block)
+		}
+	}
+	blocks = append(blocks, aBlocks...)
+
+	m.actions = append(m.actions, actions...)
+	m.blocks = blocks
+	s.putMessageToCache(m)
+
+	_, _, _, err := s.client.SlackClient().UpdateMessage(channelID, timestamp, slack.MsgOptionBlocks(blocks...))
+
+	return err
+}
+
 func (s *Slack) RemoveAction(channelID, timestamp, name string) error {
+
+	key := &SlackMessageKey{
+		channelID: channelID,
+		timestamp: timestamp,
+		threadTS:  "",
+	}
+
+	m := s.findMessageInCache(key)
+	if m == nil {
+		err := fmt.Errorf("Slack message not found in %s with %s", channelID, timestamp)
+		s.logger.Error(err)
+		return err
+	}
+
+	// remove action from the list
+	actions := []common.Action{}
+	for _, a := range m.actions {
+		if a.Name() == name {
+			continue
+		}
+		actions = append(actions, a)
+	}
+
+	blocks := []slack.Block{}
+	for _, block := range m.blocks {
+
+		arr := []slack.MessageBlockType{slack.MBTAction}
+		flag := true
+		if utils.Contains(arr, block.BlockType()) {
+
+			ab, ok := block.(*slack.ActionBlock)
+			if !ok {
+				continue
+			}
+
+			if ab.Elements == nil {
+				continue
+			}
+
+			elements := []slack.BlockElement{}
+			for _, el := range ab.Elements.ElementSet {
+
+				bt, ok := el.(*slack.ButtonBlockElement)
+				if !ok {
+					continue
+				}
+
+				_, _, aName := s.decodeActionID(bt.ActionID)
+				if aName != name {
+					elements = append(elements, bt)
+				}
+			}
+
+			flag = len(elements) > 0
+			if flag {
+				ab.Elements.ElementSet = elements
+			}
+		}
+		if flag {
+			blocks = append(blocks, block)
+		}
+	}
+	m.actions = actions
+	m.blocks = blocks
+	s.putMessageToCache(m)
+
+	_, _, _, err := s.client.SlackClient().UpdateMessage(channelID, timestamp, slack.MsgOptionBlocks(blocks...))
+
+	return err
+}
+
+func (s *Slack) ClearActions(channelID, timestamp string) error {
 
 	key := &SlackMessageKey{
 		channelID: channelID,
@@ -690,43 +888,28 @@ func (s *Slack) RemoveAction(channelID, timestamp, name string) error {
 		flag := true
 		if utils.Contains(arr, block.BlockType()) {
 
-			abs, ok := block.(*slack.ActionBlock)
+			ab, ok := block.(*slack.ActionBlock)
 			if !ok {
 				continue
 			}
 
-			if abs.Elements == nil {
+			if ab.Elements == nil {
 				continue
 			}
 
-			elements := []slack.BlockElement{}
-			for _, el := range abs.Elements.ElementSet {
-
-				bt, ok := el.(*slack.ButtonBlockElement)
-				if !ok {
-					continue
-				}
-
-				_, _, aName := s.decodeActionID(bt.ActionID)
-				if aName != name {
-					elements = append(elements, bt)
-				}
-			}
-
-			flag = len(elements) > 0
-			if flag {
-				abs.Elements.ElementSet = elements
-			}
+			flag = false
 		}
 		if flag {
 			blocks = append(blocks, block)
 		}
 	}
 
-	_, err := s.client.SlackClient().PostEphemeral(channelID, m.userID(),
-		slack.MsgOptionBlocks(blocks...),
-		slack.MsgOptionReplaceOriginal(m.responseURL),
-	)
+	m.actions = nil
+	m.blocks = blocks
+	s.putMessageToCache(m)
+
+	_, _, _, err := s.client.SlackClient().UpdateMessage(channelID, timestamp, slack.MsgOptionBlocks(blocks...))
+
 	return err
 }
 
@@ -1175,6 +1358,10 @@ func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 	s.updateCounters("", "", text, cc.Event().UserID)
 }
 
+func (s *Slack) buildReply(message, channel string) {
+	//
+}
+
 func (s *Slack) reply(m *SlackMessage, message, channel string,
 	replier interface{}, attachments []*common.Attachment, actions []common.Action,
 	response *SlackResponse, start *time.Time, error bool) (*SlackMessageKey, []slack.Block, error) {
@@ -1274,7 +1461,7 @@ func (s *Slack) reply(m *SlackMessage, message, channel string,
 		))
 
 		// build action blocks
-		actBlocks := s.buildActionBlocks(actions)
+		actBlocks := s.buildActionBlocks(actions, true)
 		if len(actBlocks) > 0 {
 			blocks = append(blocks, actBlocks...)
 		}
@@ -1936,14 +2123,80 @@ func (s *Slack) mergeActions(one []common.Action, two []common.Action) []common.
 	return actions
 }
 
+func (s *Slack) buildResponse(list ...common.Response) *SlackResponse {
+
+	r := &SlackResponse{}
+
+	for _, response := range list {
+		if response == nil {
+			continue
+		}
+		if !r.visible {
+			r.visible = response.Visible()
+		}
+		if !r.error {
+			r.error = response.Error()
+		}
+		if !r.duration {
+			r.duration = response.Duration()
+		}
+		if !r.original {
+			r.original = response.Original()
+		}
+	}
+	return r
+}
+
+func (s *Slack) messageResponses(m *SlackMessage, skip bool) []common.Response {
+
+	r := []common.Response{}
+	if m == nil {
+		return r
+	}
+	if m.cmd != nil {
+		cr := m.cmd.Response()
+		if cr != nil {
+			r1 := &SlackResponse{
+				visible: cr.Visible(),
+			}
+			if !skip {
+				r1.error = cr.Error()
+				r1.duration = cr.Duration()
+				r1.original = cr.Original()
+			}
+			r = append(r, r1)
+		}
+	}
+	if m.wrapper != nil {
+		cr := m.wrapper.Response()
+		if cr != nil {
+			r1 := &SlackResponse{
+				visible: cr.Visible(),
+			}
+			if !skip {
+				r1.error = cr.Error()
+				r1.duration = cr.Duration()
+				r1.original = cr.Original()
+			}
+			r = append(r, r1)
+		}
+	}
+	return r
+}
+
 func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.InteractionCallback, replier interface{},
 	params common.ExecuteParams, action common.Action, response common.Response) error {
 
 	responseURL := ""
 	blocks := []slack.Block{}
 	if callback != nil {
+
 		responseURL = callback.ResponseURL
 		blocks = callback.Message.Blocks.BlockSet
+
+		m.responseURL = responseURL
+		m.blocks = blocks
+		s.putMessageToCache(m)
 	}
 
 	start := time.Now()
@@ -1956,23 +2209,7 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 		actions = s.mergeActions(actions, m.cmd.Actions())
 	}
 
-	r := &SlackResponse{}
-
-	eResponse := executor.Response()
-	if !utils.IsEmpty(eResponse) {
-
-		r.visible = eResponse.Visible()
-		r.error = eResponse.Error()
-		r.duration = eResponse.Duration()
-		r.original = eResponse.Original()
-
-	} else if !utils.IsEmpty(response) {
-
-		r.visible = response.Visible()
-		r.error = response.Error()
-		r.duration = response.Duration()
-		r.original = response.Original()
-	}
+	r := s.buildResponse(response, executor.Response())
 
 	var key *SlackMessageKey
 
@@ -1990,6 +2227,10 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 	mNew := s.cloneMessage(m)
 	mNew.originKey = m.key
 	mNew.key = key
+	// set it to have next messages in the thread
+	if mNew.key != nil && utils.IsEmpty(mNew.key.threadTS) {
+		mNew.key.threadTS = mNew.key.timestamp
+	}
 	mNew.visible = r.visible
 	mNew.responseURL = responseURL
 	mNew.blocks = blocks
@@ -2072,7 +2313,7 @@ func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
 	return r
 }
 
-func (s *Slack) getSlackUser(userID, botID string) *slack.User {
+func (s *Slack) findSlackUser(userID, botID string) *slack.User {
 
 	var user *slack.User
 
@@ -2102,6 +2343,24 @@ func (s *Slack) getSlackUser(userID, botID string) *slack.User {
 		}
 	}
 	return user
+}
+
+func (s *Slack) buildSlackUser(user *slack.User) *SlackUser {
+
+	var u *SlackUser
+	if user != nil {
+		u = &SlackUser{
+			id:       user.ID,
+			name:     user.Name,
+			timezone: user.TZ,
+		}
+		u.commands = s.listUserCommands(user.ID, s.userGroups.items)
+	}
+	return u
+}
+
+func (s *Slack) newSlackUser(userID, botID string) *SlackUser {
+	return s.buildSlackUser(s.findSlackUser(userID, botID))
 }
 
 func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
@@ -2135,18 +2394,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 		s.addReaction(event.Type, key, s.options.ReactionDoing)
 
-		var u *SlackUser
-
-		user := s.getSlackUser(event.UserID, event.BotID)
-		if user != nil {
-			u = &SlackUser{
-				id:       user.ID,
-				name:     user.Name,
-				timezone: user.TZ,
-			}
-			u.commands = s.listUserCommands(user.ID, s.userGroups.items)
-		}
-
+		u := s.newSlackUser(event.UserID, event.BotID)
 		if u == nil {
 			s.logger.Error("Slack couldn't process command from unknown user")
 			return
@@ -2166,6 +2414,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			originKey:   nil,
 			key:         key,
 			user:        u,
+			caller:      u,
 			channel:     &SlackChannel{id: event.ChannelID},
 			botID:       event.BotID,
 			visible:     false,
@@ -2284,10 +2533,9 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		m.fields = rFields
 		m.params = rParams
-		m.wrapper = wrappedCmd
 		s.putMessageToCache(m)
 
-		if s.formNeeded(rFields, rParams) && user != nil {
+		if s.formNeeded(rFields, rParams) && u != nil {
 			err := s.cacheReplyForm(m, rFields, rParams, replier)
 			if err != nil {
 				s.replyError(m, replier, err, "", nil, nil)
@@ -2326,7 +2574,8 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
-		err := s.cachePostUserCommand(m, nil, replier, rParams, nil, nil)
+		r := s.buildResponse(s.messageResponses(m, false)...)
+		err := s.cachePostUserCommand(m, nil, replier, rParams, nil, r)
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			s.addRemoveReactions(m.typ, m.key, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -2385,16 +2634,18 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	threadTS := ""
 	userID := "unknown"
 
+	r := s.buildResponse(response)
+
 	var mOrigin *SlackMessage
 	if !utils.IsEmpty(parent) {
 		m, ok := parent.(*SlackMessage)
 		if ok {
 			// if key is not set, it means that message is not posted yet
 			// so we need to find it in cache
-			if m.key != nil {
+			if m.key == nil {
 				mOrigin = m
 			} else {
-				mOrigin = s.findMessageInCache(m.originKey)
+				mOrigin = s.findMessageInCache(m.key)
 			}
 			if mOrigin != nil && mOrigin.key != nil {
 				if utils.IsEmpty(channelID) {
@@ -2402,6 +2653,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 				}
 				threadTS = mOrigin.key.threadTS
 			}
+			r = s.buildResponse(append(s.messageResponses(m, true), response)...)
 		}
 	}
 
@@ -2464,6 +2716,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 			originKey:   nil,
 			key:         key,
 			user:        mUser,
+			caller:      mUser,
 			channel:     &SlackChannel{id: channelID},
 			botID:       "",
 			visible:     false,
@@ -2475,7 +2728,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		}
 	}
 
-	err := s.cachePostUserCommand(m, nil, nil, params, nil, nil)
+	err := s.cachePostUserCommand(m, nil, nil, params, nil, r)
 	if err != nil {
 		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, userID, err)
 		return err
@@ -2490,8 +2743,9 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 
 	channelID := channel
 	threadTS := ""
-	visible := true
 	userID := ""
+
+	r := s.buildResponse(response)
 
 	var mOrigin *SlackMessage
 	if !utils.IsEmpty(parent) {
@@ -2499,10 +2753,10 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 		if ok {
 			// if key is not set, it means that message is not posted yet
 			// so we need to find it in cache
-			if m.key != nil {
+			if m.key == nil {
 				mOrigin = m
 			} else {
-				mOrigin = s.findMessageInCache(m.originKey)
+				mOrigin = s.findMessageInCache(m.key)
 			}
 			if mOrigin != nil && mOrigin.key != nil {
 				if utils.IsEmpty(channelID) {
@@ -2510,6 +2764,7 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 				}
 				threadTS = mOrigin.key.threadTS
 			}
+			r = s.buildResponse(append(s.messageResponses(mOrigin, true), response)...)
 		}
 	}
 
@@ -2520,10 +2775,6 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 			mUser = u
 		}
 		userID = user.ID()
-	}
-
-	if !utils.IsEmpty(response) {
-		visible = response.Visible()
 	}
 
 	atts, err := s.buildAttachmentBlocks(attachments)
@@ -2537,7 +2788,7 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 		[]*slack.TextBlockObject{}, nil,
 	))
 
-	actBlocks := s.buildActionBlocks(actions)
+	actBlocks := s.buildActionBlocks(actions, true)
 	if len(actBlocks) > 0 {
 		blocks = append(blocks, actBlocks...)
 	}
@@ -2550,7 +2801,7 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 		options = append(options, slack.MsgOptionTS(threadTS))
 	}
 
-	if !visible && !utils.IsEmpty(userID) {
+	if !r.visible && !utils.IsEmpty(userID) {
 		options = append(options, slack.MsgOptionPostEphemeral(userID))
 	}
 
@@ -2559,6 +2810,13 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 	if err != nil {
 		return "", err
 	}
+
+	/*key, blocks, err := s.reply(mOrigin, message, channelID, replier, attachments, actions, r, &start, r.error)
+	if err != nil {
+		return "", err
+	}
+
+	var m *SlackMessage*/
 
 	var m *SlackMessage
 	key := &SlackMessageKey{
@@ -2584,9 +2842,10 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 			originKey:   nil,
 			key:         key,
 			user:        mUser,
+			caller:      mUser,
 			channel:     &SlackChannel{id: channelID},
 			botID:       "",
-			visible:     visible,
+			visible:     r.visible,
 			responseURL: "",
 			blocks:      blocks,
 			actions:     actions,
@@ -2724,6 +2983,7 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		cParams[k] = v
 	}
 	m.params = cParams
+	m.responseURL = callback.ResponseURL
 	s.putMessageToCache(m)
 
 	if len(deps) == 0 {
@@ -2824,27 +3084,9 @@ func (s *Slack) executeCommandAfterApprovalReaction(ctx *slacker.InteractionCont
 		return false
 	}
 
-	response := &SlackResponse{}
+	r := s.buildResponse(s.messageResponses(m, false)...)
 
-	responseCmd := m.cmd.Response()
-	if !utils.IsEmpty(responseCmd) {
-		response.visible = responseCmd.Visible()
-		response.duration = responseCmd.Duration()
-		response.original = responseCmd.Original()
-		response.error = responseCmd.Error()
-	}
-
-	if !utils.IsEmpty(m.wrapper) {
-		responseCmd := m.wrapper.Response()
-		if !utils.IsEmpty(responseCmd) {
-			response.visible = responseCmd.Visible()
-			response.duration = responseCmd.Duration()
-			response.original = responseCmd.Original()
-			response.error = responseCmd.Error()
-		}
-	}
-
-	err := s.cachePostUserCommand(m, callback, ctx.Response(), params, nil, response)
+	err := s.cachePostUserCommand(m, callback, ctx.Response(), params, nil, r)
 	if err != nil {
 		s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 		s.addRemoveReactions(m.typ, reactionKey, s.options.ReactionFailed, reaction)
@@ -2871,9 +3113,9 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 		return false
 	}
 
-	if !s.options.ApprovalAllowed {
+	if !s.options.ApprovalAny {
 		if callback.User.ID == m.userID() {
-			s.logger.Error("Slack same user cannot approve its action.")
+			s.logger.Error("Slack same user cannot approve its action")
 			return false
 		}
 	}
@@ -2985,10 +3227,14 @@ func (s *Slack) cacheHandleActionButton(ctx *slacker.InteractionContext, m *Slac
 		return false
 	}
 
-	/*m.key.threadTS = callback.Container.ThreadTs
-	if utils.IsEmpty(m.threadTS) {
-		m.threadTS = m.timestamp
-	}*/
+	// set thread timestamp to reply in thread
+	if utils.IsEmpty(m.key.threadTS) {
+		m.key.threadTS = callback.Container.ThreadTs
+	}
+
+	if utils.IsEmpty(m.key.threadTS) {
+		m.key.threadTS = m.key.timestamp
+	}
 
 	var action common.Action
 	for _, a := range m.actions {
@@ -3003,7 +3249,9 @@ func (s *Slack) cacheHandleActionButton(ctx *slacker.InteractionContext, m *Slac
 		return false
 	}
 
-	err := s.cachePostUserCommand(m, callback, ctx.Response(), m.params, action, nil)
+	r := s.buildResponse(s.messageResponses(m, false)...)
+
+	err := s.cachePostUserCommand(m, callback, ctx.Response(), m.params, action, r)
 	if err != nil {
 		s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 		return false
@@ -3043,6 +3291,8 @@ func (s *Slack) handleBlockActions(ctx *slacker.InteractionContext) {
 		s.removeReaction(callback.Container.Type, key, reaction)
 		return
 	}
+	mCache.caller = s.buildSlackUser(&callback.User)
+	s.putMessageToCache(mCache)
 
 	_, typ, name := s.decodeActionID(action.ActionID)
 	if utils.IsEmpty(name) {

@@ -10,9 +10,14 @@ type Bot interface {
 	Start(wg *sync.WaitGroup)
 	Name() string
 	Command(channel, text string, user User, parent Message, response Response) error
+
 	AddReaction(channel, ID, name string) error
 	RemoveReaction(channel, ID, name string) error
+
+	AddAction(channel, ID string, action Action) error
+	AddActions(channel, ID string, actions []Action) error
 	RemoveAction(channel, ID, name string) error
+	ClearActions(channel, ID string) error
 
 	PostMessage(channel string, message string, attachments []*Attachment, actions []Action, user User, parent Message, response Response) (string, error)
 	DeleteMessage(channel, ID string) error
