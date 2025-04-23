@@ -93,7 +93,6 @@ type SlackMessage struct {
 	key         *SlackMessageKey
 	user        *SlackUser
 	caller      *SlackUser
-	channel     *SlackChannel
 	botID       string
 	visible     bool
 	responseURL string
@@ -317,7 +316,7 @@ func (sm *SlackMessage) userID() string {
 }
 
 func (sm *SlackMessage) Channel() common.Channel {
-	return sm.channel
+	return &SlackChannel{id: sm.key.channelID}
 }
 
 func (sm *SlackMessage) ParentID() string {
@@ -2184,6 +2183,24 @@ func (s *Slack) messageResponses(m *SlackMessage, skip bool) []common.Response {
 	return r
 }
 
+func (s *Slack) getMessageChannel(m *SlackMessage) string {
+
+	// to think about it
+	r := ""
+	if m == nil || m.key == nil {
+		return r
+	}
+
+	r = m.key.channelID
+	if m.cmd != nil {
+		rCmd := m.cmd.Channel()
+		if !utils.IsEmpty(rCmd) {
+			r = rCmd
+		}
+	}
+	return r
+}
+
 func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.InteractionCallback, replier interface{},
 	params common.ExecuteParams, action common.Action, response common.Response) error {
 
@@ -2215,7 +2232,7 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 
 	if !utils.IsEmpty(message) {
 
-		k, blks, err := s.reply(m, message, m.key.channelID, replier, attachments, actions, r, &start, r.error)
+		k, blks, err := s.reply(m, message, s.getMessageChannel(m), replier, attachments, actions, r, &start, r.error)
 		if err != nil {
 			s.replyError(m, replier, err, "", attachments, nil)
 			return err
@@ -2415,7 +2432,6 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			key:         key,
 			user:        u,
 			caller:      u,
-			channel:     &SlackChannel{id: event.ChannelID},
 			botID:       event.BotID,
 			visible:     false,
 			responseURL: "",
@@ -2717,7 +2733,6 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 			key:         key,
 			user:        mUser,
 			caller:      mUser,
-			channel:     &SlackChannel{id: channelID},
 			botID:       "",
 			visible:     false,
 			responseURL: "",
@@ -2843,7 +2858,6 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 			key:         key,
 			user:        mUser,
 			caller:      mUser,
-			channel:     &SlackChannel{id: channelID},
 			botID:       "",
 			visible:     r.visible,
 			responseURL: "",
@@ -3490,8 +3504,8 @@ func (s *Slack) newJob(cmd common.Command) *slacker.JobDefinition {
 		m := &SlackMessage{
 			slack: s,
 			cmd:   cmd,
-			channel: &SlackChannel{
-				id: channelID,
+			key: &SlackMessageKey{
+				channelID: channelID,
 			},
 		}
 
