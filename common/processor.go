@@ -39,7 +39,7 @@ type Response interface {
 	Duration() bool // show duration in replay
 	Original() bool // show orignal as quote
 	Error() bool    // show as error
-	Reaction() bool // reaction needed
+	//Reaction() bool // reaction needed
 }
 
 type FieldType string

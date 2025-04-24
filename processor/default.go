@@ -71,7 +71,6 @@ type DefaultExecutor struct {
 	command     *DefaultCommand
 	visible     *bool
 	error       *bool
-	reaction    *bool
 	attachments *sync.Map
 	actions     *sync.Map
 	posts       *sync.Map
@@ -111,9 +110,9 @@ type DefaultOptions struct {
 }
 
 type DefaultReposne struct {
-	Visible  bool
-	Original bool
-	Duration bool
+	Visible  *bool
+	Original *bool
+	Duration *bool
 }
 
 type DefaultApproval struct {
@@ -185,11 +184,12 @@ type Default struct {
 // common.Response
 
 func (de *DefaultExecutor) Visible() bool {
+
 	if de.visible != nil {
 		return *de.visible
 	}
-	if de.command.config != nil {
-		return de.command.config.Response.Visible
+	if de.message != nil {
+		return de.message.Visible()
 	}
 	return false
 }
@@ -201,23 +201,29 @@ func (de *DefaultExecutor) Error() bool {
 	return false
 }
 
-func (de *DefaultExecutor) Reaction() bool {
+/*func (de *DefaultExecutor) Reaction() bool {
 	if de.reaction != nil {
 		return *de.reaction
 	}
 	return false
-}
+}*/
 
 func (de *DefaultExecutor) Duration() bool {
 	if de.command.config != nil {
-		return de.command.config.Response.Duration
+		d := de.command.config.Response.Duration
+		if d != nil {
+			return *d
+		}
 	}
 	return false
 }
 
 func (de *DefaultExecutor) Original() bool {
 	if de.command.config != nil {
-		return de.command.config.Response.Original
+		o := de.command.config.Response.Original
+		if o != nil {
+			return *o
+		}
 	}
 	return false
 }
@@ -641,39 +647,6 @@ func (de *DefaultExecutor) fSetError() string {
 	return ""
 }
 
-/*func (de *DefaultExecutor) fGetBot() interface{} {
-	return de.bot
-}
-
-func (de *DefaultExecutor) fGetUser() interface{} {
-	if utils.IsEmpty(de.message) {
-		return nil
-	}
-	return de.message.User()
-}
-
-func (de *DefaultExecutor) fGetCaller() interface{} {
-	if utils.IsEmpty(de.message) {
-		return nil
-	}
-	return de.message.User()
-}
-
-func (de *DefaultExecutor) fGetParams() interface{} {
-	return de.params
-}
-
-func (de *DefaultExecutor) fGetMessage() interface{} {
-	return de.message
-}
-
-func (de *DefaultExecutor) fGetChannel() interface{} {
-	if utils.IsEmpty(de.message) {
-		return nil
-	}
-	return de.message.Channel()
-}*/
-
 func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, []common.Action, error) {
 
 	gid := utils.GoRoutineID()
@@ -951,14 +924,6 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["updateMessage"] = executor.fUpdateMessage
 	//funcs["disableReaction"] = executor.fDisableReaction
-
-	// we should remove these
-	/*funcs["getBot"] = executor.fGetBot
-	funcs["getUser"] = executor.fGetUser
-	funcs["getCaller"] = executor.fGetCaller
-	funcs["getParams"] = executor.fGetParams
-	funcs["getMessage"] = executor.fGetMessage
-	funcs["getChannel"] = executor.fGetChannel*/
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -1238,21 +1203,30 @@ func NewRunbook(name, path string, command *DefaultCommand, parentExecutor *Defa
 
 func (dcr *DefaultCommandResponse) Visible() bool {
 	if dcr.command.config != nil {
-		return dcr.command.config.Response.Visible
+		v := dcr.command.config.Response.Visible
+		if v != nil {
+			return *v
+		}
 	}
 	return false
 }
 
 func (dcr *DefaultCommandResponse) Duration() bool {
 	if dcr.command.config != nil {
-		return dcr.command.config.Response.Duration
+		d := dcr.command.config.Response.Duration
+		if d != nil {
+			return *d
+		}
 	}
 	return false
 }
 
 func (dcr *DefaultCommandResponse) Original() bool {
 	if dcr.command.config != nil {
-		return dcr.command.config.Response.Original
+		o := dcr.command.config.Response.Original
+		if o != nil {
+			return *o
+		}
 	}
 	return false
 }
@@ -1261,9 +1235,9 @@ func (dcr *DefaultCommandResponse) Error() bool {
 	return false
 }
 
-func (dcr *DefaultCommandResponse) Reaction() bool {
+/*func (dcr *DefaultCommandResponse) Reaction() bool {
 	return true
-}
+}*/
 
 // DefaultCommandApproval
 
