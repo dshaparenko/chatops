@@ -1264,7 +1264,7 @@ func (s *Slack) updateCounters(group, command, text, userID string) {
 	}
 	labels["user_id"] = userID
 
-	s.meter.Counter("requests", "Count of all requests", labels, "slack", "bot").Inc()
+	s.meter.Counter("processor", "requests", "Count of all requests", labels, "slack", "bot").Inc()
 }
 
 func (s *Slack) DeleteMessage(channel, ID string) error {

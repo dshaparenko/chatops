@@ -700,11 +700,11 @@ func (de *DefaultExecutor) execute(id string, obj interface{}, message common.Me
 
 	prefixes := []string{"default", "processor"}
 
-	requests := processor.meter.Counter("requests", "Count of all executions", labels, prefixes...)
+	requests := processor.meter.Counter("processor", "requests", "Count of all executions", labels, prefixes...)
 	requests.Inc()
 
-	errors := processor.meter.Counter("errors", "Count of all errors during executions", labels, prefixes...)
-	timeCounter := processor.meter.Counter("time", "Sum of all time executions", labels, prefixes...)
+	errors := processor.meter.Counter("processor", "errors", "Count of all errors during executions", labels, prefixes...)
+	timeCounter := processor.meter.Counter("processor", "time", "Sum of all time executions", labels, prefixes...)
 
 	name := command.getNameWithGroup("/")
 
