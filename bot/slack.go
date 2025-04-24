@@ -1583,6 +1583,41 @@ func (s *Slack) findUserGroupNameByID(groups []slack.UserGroup, ID string) strin
 	return ID
 }
 
+func (s *Slack) fieldValueToString(field common.Field, value interface{}) string {
+
+	r := ""
+	if utils.IsEmpty(value) {
+		return r
+	}
+
+	switch field.Type {
+	case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
+		switch v := value.(type) {
+		case []string:
+			r = strings.Join(v, ",")
+		case string:
+			r = v
+		}
+	default:
+		r = fmt.Sprintf("%v", value)
+	}
+	return r
+}
+
+func (s *Slack) fieldValueTransform(field common.Field, value interface{}) interface{} {
+
+	var r interface{}
+
+	switch field.Type {
+	case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
+		v := fmt.Sprintf("%v", value)
+		r = common.RemoveEmptyStrings(strings.Split(v, ","))
+	default:
+		r = value
+	}
+	return r
+}
+
 func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params common.ExecuteParams, u *SlackUser) ([]slack.Block, error) {
 
 	blocks := []slack.Block{}
@@ -1608,19 +1643,9 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 		}
 
 		def := ""
-		fn := field.Name
-		if !utils.IsEmpty(params[fn]) {
-			switch field.Type {
-			case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
-				switch v := params[fn].(type) {
-				case []string:
-					def = strings.Join(v, ",")
-				case string:
-					def = v
-				}
-			default:
-				def = fmt.Sprintf("%v", params[fn])
-			}
+		pv := params[field.Name]
+		if !utils.IsEmpty(pv) {
+			def = s.fieldValueToString(field, pv)
 		}
 		if utils.IsEmpty(def) {
 			def = field.Default
@@ -1933,8 +1958,8 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 		return blocks, nil
 	}
 
-	divider := slack.NewDividerBlock()
-	blocks = append(blocks, divider)
+	/*divider := slack.NewDividerBlock()
+	blocks = append(blocks, divider)*/
 
 	submitActionID := s.encodeActionID(blockID, slackFormButtonType, slackSubmitAction)
 	submit := slack.NewButtonBlockElement(submitActionID, "", slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonSubmitCaption, false, false))
@@ -2561,16 +2586,11 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			// fix string to appropriate value
 			for _, f := range rFields {
 
-				p := rParams[f.Name]
-				if p == nil {
+				v := rParams[f.Name]
+				if v == nil {
 					continue
 				}
-
-				switch f.Type {
-				case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
-					v := fmt.Sprintf("%v", p)
-					rParams[f.Name] = common.RemoveEmptyStrings(strings.Split(v, ","))
-				}
+				rParams[f.Name] = s.fieldValueTransform(f, v)
 			}
 		}
 
@@ -2958,13 +2978,14 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 	params := make(common.ExecuteParams)
 	params[name] = action.Value
 
+	cmdFields := m.cmd.Fields(s, nil, nil, nil)
 	for _, v1 := range callback.BlockActionState.Values {
 		for k2, v2 := range v1 {
 			_, _, n2 := s.decodeActionID(k2)
 			if utils.IsEmpty(n2) {
 				continue
 			}
-			field := s.findField(m.cmd.Fields(s, nil, nil, nil), n2)
+			field := s.findField(cmdFields, n2)
 			params[n2] = s.getActionValue(field, v2)
 		}
 	}
@@ -2980,20 +3001,18 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 			params[field.Name+"_values"] = field.Values
 		}
 		if !utils.IsEmpty(field.Default) {
-			params[field.Name] = field.Default
+			params[field.Name] = s.fieldValueTransform(field, field.Default)
 		}
 	}
 
 	// keep old values if they exist (which not in params)
-	cParams := params
-	cache := m.params
-	for k, v := range cache {
-		if _, ok := cParams[k]; ok {
+	for k, v := range m.params {
+		if _, ok := params[k]; ok {
 			continue
 		}
-		cParams[k] = v
+		params[k] = v
 	}
-	m.params = cParams
+	m.params = params
 	m.responseURL = callback.ResponseURL
 	s.putMessageToCache(m)
 
@@ -3001,7 +3020,7 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		return false
 	}
 
-	blocks, err := s.formBlocks(m.cmd, allFields, params, m.user)
+	blocks, err := s.formBlocks(m.cmd, m.fields, params, m.user)
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return false
@@ -3035,28 +3054,26 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 		states := callback.BlockActionState
 		if states != nil && len(states.Values) > 0 {
 
+			cmdFields := m.cmd.Fields(s, nil, nil, nil)
 			for _, v1 := range states.Values {
 				for k2, v2 := range v1 {
 					_, _, n2 := s.decodeActionID(k2)
 					if utils.IsEmpty(n2) {
 						continue
 					}
-					field := s.findField(m.cmd.Fields(s, nil, nil, nil), n2)
+					field := s.findField(cmdFields, n2)
 					params[n2] = s.getActionValue(field, v2)
 				}
 			}
 		}
 
 		// check cache params
-		cParams := params
-		cache := m.params
-		for k, v := range cache {
-			if _, ok := cParams[k]; ok {
+		for k, v := range m.params {
+			if _, ok := params[k]; ok {
 				continue
 			}
-			cParams[k] = v
+			params[k] = v
 		}
-		params = cParams
 		m.params = params
 		s.putMessageToCache(m)
 
