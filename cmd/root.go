@@ -82,8 +82,8 @@ var slackOptions = bot.SlackOptions{
 	ErrorColor:        envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
 	TitleConfirmation: envGet("SLACK_TITLE_CONFIRMATION", "Confirmation").(string),
 
-	ApprovedMessage: envGet("SLACK_APPROVED_MESSAGE", "").(string),
-	RejectedMessage: envGet("SLACK_REJECTED_MESSAGE", "").(string),
+	ApprovedMessage: envGet("SLACK_APPROVED_MESSAGE", "approved").(string),
+	RejectedMessage: envGet("SLACK_REJECTED_MESSAGE", "rejected").(string),
 
 	ReactionDoing:    envGet("SLACK_REACTION_DOING", "spinner").(string),
 	ReactionDone:     envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
