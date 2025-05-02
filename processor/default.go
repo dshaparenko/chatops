@@ -109,7 +109,7 @@ type DefaultOptions struct {
 	Error        string
 }
 
-type DefaultReponse struct {
+type DefaultResponse struct {
 	Visible  *bool
 	Original *bool
 	Duration *bool
@@ -135,7 +135,7 @@ type DefaultCommandConfig struct {
 	Description  string
 	Params       []string
 	Aliases      []string
-	Response     DefaultReponse
+	Response     DefaultResponse
 	Fields       []common.Field
 	Actions      []DefaultAction
 	Priority     int
