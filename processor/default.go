@@ -109,7 +109,7 @@ type DefaultOptions struct {
 	Error        string
 }
 
-type DefaultReposne struct {
+type DefaultReponse struct {
 	Visible  *bool
 	Original *bool
 	Duration *bool
@@ -135,7 +135,7 @@ type DefaultCommandConfig struct {
 	Description  string
 	Params       []string
 	Aliases      []string
-	Response     DefaultReposne
+	Response     DefaultReponse
 	Fields       []common.Field
 	Actions      []DefaultAction
 	Priority     int
@@ -958,6 +958,8 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 		message:     message,
 		params:      params,
 		action:      action,
+		visible:     command.config.Response.Visible,
+		error:       nil,
 	}
 
 	template, err := NewExecutorTemplate(name, string(content), executor, command.processor.observability)

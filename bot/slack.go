@@ -292,11 +292,12 @@ func (sc *SlackChannel) ID() string {
 // SlackMessage
 
 func (sm *SlackMessage) ID() string {
-	if sm.key == nil {
+	key := sm.getKey()
+	if key == nil {
 		return ""
 	}
 
-	return sm.key.timestamp
+	return key.timestamp
 }
 
 func (sm *SlackMessage) Visible() bool {
@@ -321,24 +322,41 @@ func (sm *SlackMessage) userID() string {
 }
 
 func (sm *SlackMessage) Channel() common.Channel {
-	if sm.key == nil {
+
+	key := sm.getKey()
+	if key == nil {
 		return nil
 	}
-	return &SlackChannel{id: sm.key.channelID}
+	return &SlackChannel{id: key.channelID}
+
 }
 
 func (sm *SlackMessage) ParentID() string {
-	if sm.key == nil {
+	key := sm.getKey()
+	if key == nil {
 		return ""
 	}
-	return sm.key.threadTS
+	return key.threadTS
 }
 
 func (sm *SlackMessage) SetParentID(threadTS string) {
-	if sm.key == nil {
+	key := sm.getKey()
+	if key == nil {
 		return
 	}
-	sm.key.threadTS = threadTS
+	key.threadTS = threadTS
+}
+
+func (sm *SlackMessage) getKey() *SlackMessageKey {
+
+	if sm.key != nil {
+		return sm.key
+	}
+	if sm.originKey != nil {
+		return sm.originKey
+	}
+
+	return nil
 }
 
 // SlackCacheMessageKey
@@ -2786,7 +2804,6 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 func (s *Slack) PostMessage(channel string, message string, attachments []*common.Attachment, actions []common.Action,
 	user common.User, parent common.Message, response common.Response) (string, error) {
 
-	/* if we don;t have parrent message, post message should process it properly and take origin properties, not it doesn't know where to send postmessages */
 	channelID := channel
 	threadTS := ""
 	userID := ""
