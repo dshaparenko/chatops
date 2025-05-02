@@ -291,8 +291,24 @@ func (sc *SlackChannel) ID() string {
 
 // SlackMessage
 
+func (sm *SlackMessage) getKey() *SlackMessageKey {
+
+	if sm.key != nil {
+		return sm.key
+	}
+	if sm.originKey != nil {
+		return sm.originKey
+	}
+	return nil
+}
+
 func (sm *SlackMessage) ID() string {
-	return sm.key.timestamp
+
+	key := sm.getKey()
+	if key == nil {
+		return ""
+	}
+	return key.timestamp
 }
 
 func (sm *SlackMessage) Visible() bool {
@@ -317,15 +333,30 @@ func (sm *SlackMessage) userID() string {
 }
 
 func (sm *SlackMessage) Channel() common.Channel {
-	return &SlackChannel{id: sm.key.channelID}
+
+	key := sm.getKey()
+	if key == nil {
+		return nil
+	}
+	return &SlackChannel{id: key.channelID}
 }
 
 func (sm *SlackMessage) ParentID() string {
-	return sm.key.threadTS
+
+	key := sm.getKey()
+	if key == nil {
+		return ""
+	}
+	return key.threadTS
 }
 
 func (sm *SlackMessage) SetParentID(threadTS string) {
-	sm.key.threadTS = threadTS
+
+	key := sm.getKey()
+	if key == nil {
+		return
+	}
+	key.threadTS = threadTS
 }
 
 // SlackCacheMessageKey
@@ -3726,6 +3757,10 @@ func (s *Slack) start() {
 	if s.options.UserGroupsInterval > 0 {
 		common.Schedule(s.userGroups.refresh, time.Duration(s.options.UserGroupsInterval)*time.Second)
 	}
+
+	//s.client.SlackClient().WorkflowStepCompleted()
+	//s.client.SlackClient().WorkflowStepFailed()
+	//s.client.SlackClient().SaveWorkflowStepConfiguration()
 
 	err = client.Listen(ctx)
 	if err != nil {
