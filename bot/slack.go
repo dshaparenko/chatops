@@ -1695,9 +1695,6 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 				currentValues = strings.Split(v, ",")
 			}
 		}
-		if utils.IsEmpty(currentValues) {
-			currentValues = []string{" "}
-		}
 
 		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
 		var h *slack.TextBlockObject
@@ -1817,15 +1814,18 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			} else if !utils.IsEmpty(def) {
 				dBlock = slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h)
 			}
-			e := slack.NewOptionsSelectBlockElement(optType, h, actionID, options...)
-			if dBlock != nil {
-				e.InitialOption = dBlock
+			addToBlocks = len(options) > 0 || field.Type == common.FieldTypeDynamicSelect
+			if addToBlocks {
+				e := slack.NewOptionsSelectBlockElement(optType, h, actionID, options...)
+				if dBlock != nil {
+					e.InitialOption = dBlock
+				}
+				if field.Type == common.FieldTypeDynamicSelect {
+					min := s.options.MinQueryLength
+					e.MinQueryLength = &min
+				}
+				el = e
 			}
-			if field.Type == common.FieldTypeDynamicSelect {
-				min := s.options.MinQueryLength
-				e.MinQueryLength = &min
-			}
-			el = e
 		case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
 			options := []*slack.OptionBlockObject{}
 			dBlocks := []*slack.OptionBlockObject{}
@@ -1850,19 +1850,22 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 					dBlocks = append(dBlocks, block)
 				}
 			}
-			e := slack.NewOptionsMultiSelectBlockElement(optType, h, actionID, options...)
-			if len(dBlocks) > 0 {
-				e.InitialOptions = dBlocks
+			addToBlocks = len(options) > 0 || field.Type == common.FieldTypeDynamicMultiSelect
+			if addToBlocks {
+				e := slack.NewOptionsMultiSelectBlockElement(optType, h, actionID, options...)
+				if len(dBlocks) > 0 {
+					e.InitialOptions = dBlocks
+				}
+				if field.Type == common.FieldTypeDynamicMultiSelect {
+					min := s.options.MinQueryLength
+					e.MinQueryLength = &min
+				}
+				el = e
 			}
-			if field.Type == common.FieldTypeDynamicMultiSelect {
-				min := s.options.MinQueryLength
-				e.MinQueryLength = &min
-			}
-			el = e
 		case common.FieldTypeRadionButtons:
 			options := []*slack.OptionBlockObject{}
 			var dBlock *slack.OptionBlockObject
-			for _, v := range field.Values {
+			for _, v := range currentValues {
 				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
 				if v == def {
 					dBlock = block
@@ -1872,16 +1875,19 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			if len(options) == 0 && !utils.IsEmpty(def) {
 				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
 			}
-			e := slack.NewRadioButtonsBlockElement(actionID, options...)
-			if dBlock != nil {
-				e.InitialOption = dBlock
+			addToBlocks = len(options) > 0
+			if addToBlocks {
+				e := slack.NewRadioButtonsBlockElement(actionID, options...)
+				if dBlock != nil {
+					e.InitialOption = dBlock
+				}
+				el = e
 			}
-			el = e
 		case common.FieldTypeCheckboxes:
 			options := []*slack.OptionBlockObject{}
 			dBlocks := []*slack.OptionBlockObject{}
 			arr := s.parseArrayValues(def)
-			for _, v := range field.Values {
+			for _, v := range currentValues {
 				block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
 				if utils.Contains(arr, v) {
 					dBlocks = append(dBlocks, block)
@@ -1891,11 +1897,14 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			if len(options) == 0 && !utils.IsEmpty(def) {
 				options = append(options, slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h))
 			}
-			e := slack.NewCheckboxGroupsBlockElement(actionID, options...)
-			if len(dBlocks) > 0 {
-				e.InitialOptions = dBlocks
+			addToBlocks = len(options) > 0
+			if addToBlocks {
+				e := slack.NewCheckboxGroupsBlockElement(actionID, options...)
+				if len(dBlocks) > 0 {
+					e.InitialOptions = dBlocks
+				}
+				el = e
 			}
-			el = e
 		case common.FieldTypeBool:
 			options := []*slack.OptionBlockObject{}
 			dBlocks := []*slack.OptionBlockObject{}
