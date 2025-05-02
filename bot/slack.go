@@ -292,11 +292,12 @@ func (sc *SlackChannel) ID() string {
 // SlackMessage
 
 func (sm *SlackMessage) ID() string {
-	if sm.key == nil {
+	key := sm.getKey()
+	if key == nil {
 		return ""
 	}
 
-	return sm.key.timestamp
+	return key.timestamp
 }
 
 func (sm *SlackMessage) Visible() bool {
@@ -330,30 +331,32 @@ func (sm *SlackMessage) Channel() common.Channel {
 
 }
 
-func (sm *SlackMessage) getKey() *SlackMessageKey {
-	if sm.key == nil {
-		if sm.originKey == nil {
-			return nil
-		}
-		return &SlackMessageKey{
-			channelID: sm.originKey.channelID,
-		}
-	}
-	return sm.key
-}
-
 func (sm *SlackMessage) ParentID() string {
-	if sm.key == nil {
+	key := sm.getKey()
+	if key == nil {
 		return ""
 	}
-	return sm.key.threadTS
+	return key.threadTS
 }
 
 func (sm *SlackMessage) SetParentID(threadTS string) {
-	if sm.key == nil {
+	key := sm.getKey()
+	if key == nil {
 		return
 	}
-	sm.key.threadTS = threadTS
+	key.threadTS = threadTS
+}
+
+func (sm *SlackMessage) getKey() *SlackMessageKey {
+
+	if sm.key != nil {
+		return sm.key
+	}
+	if sm.originKey != nil {
+		return sm.originKey
+	}
+
+	return nil
 }
 
 // SlackCacheMessageKey
