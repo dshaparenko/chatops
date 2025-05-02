@@ -109,7 +109,7 @@ type DefaultOptions struct {
 	Error        string
 }
 
-type DefaultReposne struct {
+type DefaultResponse struct {
 	Visible  *bool
 	Original *bool
 	Duration *bool
@@ -135,7 +135,7 @@ type DefaultCommandConfig struct {
 	Description  string
 	Params       []string
 	Aliases      []string
-	Response     DefaultReposne
+	Response     DefaultResponse
 	Fields       []common.Field
 	Actions      []DefaultAction
 	Priority     int
@@ -188,7 +188,7 @@ func (de *DefaultExecutor) Visible() bool {
 	if de.visible != nil {
 		return *de.visible
 	}
-	if de.message != nil {
+	if !utils.IsEmpty(de.message) {
 		return de.message.Visible()
 	}
 	return false
@@ -722,7 +722,7 @@ func (de *DefaultExecutor) execute(id string, obj interface{}, message common.Me
 
 			// set real message which appears after first execution
 			m["message"] = message
-			if message != nil {
+			if !utils.IsEmpty(message) {
 				m["channel"] = message.Channel()
 				m["user"] = message.User()
 				m["caller"] = message.Caller()
@@ -958,6 +958,8 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 		message:     message,
 		params:      params,
 		action:      action,
+		visible:     command.config.Response.Visible,
+		error:       nil,
 	}
 
 	template, err := NewExecutorTemplate(name, string(content), executor, command.processor.observability)
