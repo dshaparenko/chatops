@@ -12,7 +12,7 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-3
 
 require (
 	github.com/devopsext/sre v0.6.3
-	github.com/devopsext/tools v0.16.10
+	github.com/devopsext/tools v0.17.1
 	github.com/devopsext/utils v0.4.7
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/google/uuid v1.6.0
@@ -44,7 +44,9 @@ require (
 	github.com/huandu/xstrings v1.3.1 // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
+	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mitchellh/copystructure v1.0.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.0 // indirect
 	github.com/newrelic/newrelic-telemetry-sdk-go v0.8.1 // indirect
