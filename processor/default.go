@@ -81,6 +81,17 @@ type DefaultExecutor struct {
 	action      common.Action
 }
 
+type DefaultFieldExecutor struct {
+	command  *DefaultCommand
+	fields   *sync.Map
+	bot      common.Bot
+	params   common.ExecuteParams
+	message  common.Message
+	template *toolsRender.TextTemplate
+	field    *common.Field
+	funcs    map[string]any
+}
+
 type DefaultRunbookTemplateExecutor = DefaultExecutor
 
 type DefaultRunbookCommandExecutor struct {
@@ -923,7 +934,6 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["updateMessage"] = executor.fUpdateMessage
-	//funcs["disableReaction"] = executor.fDisableReaction
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -949,6 +959,11 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 		return nil, fmt.Errorf("Default couldn't read template %s, error: %s", path, err)
 	}
 
+	var visible *bool
+	if command.config != nil {
+		visible = command.config.Response.Visible
+	}
+
 	executor := &DefaultExecutor{
 		command:     command,
 		attachments: &sync.Map{},
@@ -958,7 +973,7 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 		message:     message,
 		params:      params,
 		action:      action,
-		visible:     command.config.Response.Visible,
+		visible:     visible,
 		error:       nil,
 	}
 
@@ -967,6 +982,263 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 		return nil, err
 	}
 	executor.template = template
+	return executor, nil
+}
+
+// DefaultFieldExecutor
+
+func (de *DefaultFieldExecutor) fReadMessage(channelID, messageID string) string {
+
+	text, err := de.bot.ReadMessage(channelID, messageID)
+	if err != nil {
+		return err.Error()
+	}
+	return text
+}
+
+func (de *DefaultFieldExecutor) fRunTemplate(fileName string, obj interface{}) (string, error) {
+
+	s := fmt.Sprintf("%s%s%s", de.command.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
+	if !utils.FileExists(s) {
+		return "", fmt.Errorf("Default couldn't find template file %s", s)
+	}
+
+	content, err := utils.Content(s)
+	if err != nil {
+		return "", fmt.Errorf("Default couldn't read template file %s, error: %s", s, err)
+	}
+
+	tOpts := toolsRender.TemplateOptions{
+		Name:    fmt.Sprintf("default-internal-field-%s", de.field.Name),
+		Content: string(content),
+		Funcs:   de.funcs,
+	}
+	t, err := toolsRender.NewTextTemplate(tOpts, de.command.processor.observability)
+	if err != nil {
+		return "", err
+	}
+	return t.TemplateRenderFile(s, obj)
+}
+
+func (de *DefaultFieldExecutor) fFieldList(items ...*common.Field) []*common.Field {
+	return items
+}
+
+func (de *DefaultFieldExecutor) fSetFieldDefault(value string) (string, error) {
+
+	if de.field == nil {
+		return "", fmt.Errorf("Default couldn't set field default value, field is nil")
+	}
+	de.field.Default = value
+	return "", nil
+}
+
+func (de *DefaultFieldExecutor) fSetFieldValues(values []string) (string, error) {
+
+	if de.field == nil {
+		return "", fmt.Errorf("Default couldn't set field values, field is nil")
+	}
+	de.field.Values = values
+	return "", nil
+}
+
+func (de *DefaultFieldExecutor) fAddField(name, typ, label string) *common.Field {
+
+	gid := utils.GoRoutineID()
+	var fields []*common.Field
+
+	r, ok := de.fields.Load(gid)
+	if ok {
+		fields = r.([]*common.Field)
+	}
+
+	field := &common.Field{
+		Name:  name,
+		Type:  common.FieldType(typ),
+		Label: label,
+	}
+	fields = append(fields, field)
+	de.fields.Store(gid, fields)
+	return field
+}
+
+func (de *DefaultFieldExecutor) fSetField(field *common.Field, params map[string]interface{}) string {
+
+	if field == nil || params == nil {
+		return ""
+	}
+
+	name, ok := params["name"].(string)
+	if ok {
+		field.Name = name
+	}
+
+	typ, ok := params["type"].(string)
+	if ok {
+		field.Type = common.FieldType(typ)
+	}
+
+	label, ok := params["label"].(string)
+	if ok {
+		field.Label = label
+	}
+
+	values, ok := params["values"].([]string)
+	if ok {
+		field.Values = values
+	}
+
+	def, ok := params["default"].(string)
+	if ok {
+		field.Default = def
+	}
+
+	required, ok := params["required"].(bool)
+	if ok {
+		field.Required = required
+	}
+
+	template, ok := params["template"].(string)
+	if ok {
+		field.Template = template
+	}
+
+	deps, ok := params["dependencies"].([]string)
+	if ok {
+		field.Dependencies = deps
+	}
+
+	hint, ok := params["hint"].(string)
+	if ok {
+		field.Hint = hint
+	}
+
+	filter, ok := params["filter"].(string)
+	if ok {
+		field.Filter = filter
+	}
+	return ""
+}
+
+func (de *DefaultFieldExecutor) Execute() ([]*common.Field, error) {
+
+	m := make(map[string]interface{})
+	m["bot"] = de.bot
+	m["message"] = de.message
+	m["channel"] = de.message.Channel()
+	m["user"] = de.message.User()
+	m["caller"] = de.message.Caller()
+	m["params"] = de.params
+	m["field"] = de.field
+
+	b, err := de.template.RenderObject(m)
+	if err != nil {
+		return nil, err
+	}
+
+	var fnew *common.Field
+	fields := []*common.Field{}
+	if !utils.IsEmpty(string(b)) {
+
+		// possible it's a field
+		fnew = &common.Field{}
+		err = json.Unmarshal(b, fnew)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !utils.IsEmpty(de.field) {
+		de.field.Merge(fnew)
+		fnew = de.field
+	}
+
+	gid := utils.GoRoutineID()
+
+	var flds []*common.Field
+	r, ok := de.fields.Load(gid)
+	if ok {
+		flds = r.([]*common.Field)
+	}
+
+	if fnew != nil {
+		fields = append(fields, fnew)
+	}
+
+	for _, f := range flds {
+		if f == nil {
+			continue
+		}
+		if utils.IsEmpty(f.Name) {
+			continue
+		}
+		if fnew != nil && f.Name == fnew.Name {
+			continue
+		}
+		fields = append(fields, f)
+	}
+
+	de.fields.Range(func(key, value any) bool {
+		de.fields.Delete(key)
+		return true
+	})
+
+	return fields, nil
+}
+
+func NewFieldExecutorTemplate(name string, content string, executor *DefaultFieldExecutor, observability *common.Observability) (*toolsRender.TextTemplate, map[string]any, error) {
+
+	funcs := make(map[string]any)
+	funcs["runTemplate"] = executor.fRunTemplate
+	funcs["readMessage"] = executor.fReadMessage
+
+	funcs["fieldList"] = executor.fFieldList
+	funcs["setFieldDefault"] = executor.fSetFieldDefault
+	funcs["setFieldValues"] = executor.fSetFieldValues
+	funcs["setField"] = executor.fSetField
+	funcs["addField"] = executor.fAddField
+
+	funcs["setError"] = func() string { return "" }
+	funcs["setInvisible"] = func() string { return "" }
+
+	templateOpts := toolsRender.TemplateOptions{
+		Name:    fmt.Sprintf("default-internal-%s", name),
+		Content: string(content),
+		Funcs:   funcs,
+	}
+	template, err := toolsRender.NewTextTemplate(templateOpts, observability)
+	if err != nil {
+		return nil, nil, err
+	}
+	return template, funcs, nil
+}
+
+func NewFieldExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams, field *common.Field) (*DefaultFieldExecutor, error) {
+
+	if !utils.FileExists(path) {
+		return nil, fmt.Errorf("Default couldn't find template %s", path)
+	}
+
+	content, err := utils.Content(path)
+	if err != nil {
+		return nil, fmt.Errorf("Default couldn't read template %s, error: %s", path, err)
+	}
+
+	executor := &DefaultFieldExecutor{
+		command: command,
+		fields:  &sync.Map{},
+		bot:     bot,
+		message: message,
+		params:  params,
+		field:   field,
+	}
+
+	template, funcs, err := NewFieldExecutorTemplate(name, string(content), executor, command.processor.observability)
+	if err != nil {
+		return nil, err
+	}
+	executor.template = template
+	executor.funcs = funcs
 	return executor, nil
 }
 
@@ -1237,10 +1509,6 @@ func (dcr *DefaultCommandResponse) Error() bool {
 	return false
 }
 
-/*func (dcr *DefaultCommandResponse) Reaction() bool {
-	return true
-}*/
-
 // DefaultCommandApproval
 
 func (dca *DefaultCommandApproval) approval() *DefaultApproval {
@@ -1500,6 +1768,24 @@ func (dc *DefaultCommand) Actions() []common.Action {
 	return r
 }
 
+func (dc *DefaultCommand) findField(fields []common.Field, name string) *common.Field {
+
+	for _, field := range fields {
+		if field.Name == name {
+			return &field
+		}
+	}
+	return nil
+}
+
+func (dc *DefaultCommand) findConfigField(name string) *common.Field {
+
+	if dc.config == nil {
+		return nil
+	}
+	return dc.findField(dc.config.Fields, name)
+}
+
 func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params common.ExecuteParams, eval []string) []common.Field {
 
 	if dc.config == nil {
@@ -1528,103 +1814,70 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 			continue
 		}
 
-		content := ""
-		name := fmt.Sprintf("%s-%s", dc.name, field.Name)
-
-		path := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), field.Template)
-		if utils.FileExists(path) {
-			data, err := utils.Content(path)
-			if err != nil {
-				dc.logger.Error("Default template %s command %s field %s error: %s", path, dc.name, field.Name, err)
-				continue
-			}
-			content = string(data)
-		} else {
-			content = field.Template
-		}
-
 		wGroup.Add(1)
-		go func(wg *sync.WaitGroup, name, content string, f common.Field, fs *sync.Map) {
+		go func(wg *sync.WaitGroup, f common.Field, fs *sync.Map) {
+
 			defer wGroup.Done()
 
-			// define field template functions, need to make FieldExecutor
-			funcs := make(map[string]any)
-			funcs["readMessage"] = func(channelID, messageID string) string {
+			name := fmt.Sprintf("%s-%s", dc.name, field.Name)
+			path := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), field.Template)
 
-				text, err := bot.ReadMessage(channelID, messageID)
-				if err != nil {
-					return err.Error()
-				}
-				return text
-			}
-			funcs["runTemplate"] = func(fileName string, obj interface{}) (string, error) {
-
-				s := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
-				if !utils.FileExists(s) {
-					return "", fmt.Errorf("Default couldn't find template file %s", s)
-				}
-
-				content, err := utils.Content(s)
-				if err != nil {
-					return "", fmt.Errorf("Default couldn't read template file %s, error: %s", s, err)
-				}
-
-				tOpts := toolsRender.TemplateOptions{
-					Name:    fmt.Sprintf("default-internal-field-%s", dc.name),
-					Content: string(content),
-					Funcs:   funcs,
-				}
-				t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
-				if err != nil {
-					return "", err
-				}
-				return t.TemplateRenderFile(s, obj)
-			}
-			funcs["setError"] = func() string { return "" }
-			funcs["setInvisible"] = func() string { return "" }
-			funcs["disableReaction"] = func() string { return "" }
-
-			tOpts := toolsRender.TemplateOptions{
-				Name:    fmt.Sprintf("default-internal-%s", name),
-				Content: string(content),
-				Funcs:   funcs,
-			}
-
-			t, err := toolsRender.NewTextTemplate(tOpts, dc.processor.observability)
+			executor, err := NewFieldExecutor(name, path, dc, bot, message, params, &field)
 			if err != nil {
-				dc.logger.Error("Default template %s command %s field %s create error: %s", path, dc.name, f.Name, err)
+				dc.logger.Error("Default field template %s command %s field %s executor error: %s", path, dc.name, f.Name, err)
 				return
 			}
 
-			m := make(map[string]interface{})
-			m["bot"] = bot
-			m["message"] = message
-			m["channel"] = message.Channel()
-			m["user"] = message.User()
-			m["caller"] = message.Caller()
-			m["params"] = params
-			m["field"] = f
-
-			b, err := t.RenderObject(m)
+			flds, err := executor.Execute()
 			if err != nil {
-				dc.logger.Error("Default template %s command %s field %s render error: %s", path, dc.name, f.Name, err)
+				dc.logger.Error("Default field template %s command %s field %s create error: %s", path, dc.name, f.Name, err)
 				return
 			}
 
-			var fnew = common.Field{}
-			err = json.Unmarshal(b, &fnew)
-			if err != nil {
-				dc.logger.Error("Default template %s command %s unmarshall field %s error: %s", path, dc.name, f.Name, err)
-				return
+			for _, fl := range flds {
+				if utils.IsEmpty(fl) {
+					continue
+				}
+				fields.Store(fl.Name, fl)
 			}
-			fields.Store(f.Name, fnew)
-
-		}(wGroup, name, content, field, fields)
+		}(wGroup, field, fields)
 	}
 	wGroup.Wait()
 
 	newFields := []common.Field{}
+	// add or merge new fields
+	fields.Range(func(key, value any) bool {
+
+		if value == nil {
+			return true
+		}
+
+		new, ok := value.(*common.Field)
+		if !ok || new == nil {
+			return true
+		}
+
+		old := dc.findConfigField(new.Name)
+		if old != nil {
+			old.Merge(new)
+			newFields = append(newFields, *old)
+			return true
+		}
+		newFields = append(newFields, *new)
+		return true
+	})
+
+	// add the rest of the fields
 	for _, field := range dc.config.Fields {
+
+		old := dc.findField(newFields, field.Name)
+		if old != nil {
+			continue
+		}
+		newFields = append(newFields, field)
+	}
+
+	/*for _, field := range dc.config.Fields {
 
 		newField := common.Field{
 			Name:         field.Name,
@@ -1645,7 +1898,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 			continue
 		}
 
-		f, ok := r.(common.Field)
+		f, ok := r.(*common.Field)
 		if !ok {
 			newFields = append(newFields, newField)
 			continue
@@ -1677,7 +1930,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 		}
 
 		newFields = append(newFields, newField)
-	}
+	}*/
 
 	return newFields
 }

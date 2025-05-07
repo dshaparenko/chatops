@@ -86,6 +86,17 @@ func RemoveEmptyStrings(items []string) []string {
 	return r
 }
 
+func InterfaceListAsStrings(items []interface{}) []string {
+
+	r := []string{}
+
+	for _, v := range items {
+		r = append(r, fmt.Sprintf("%v", v))
+	}
+
+	return r
+}
+
 func GetStringKeys(arr map[string]interface{}) []string {
 	var keys []string
 	for k := range arr {

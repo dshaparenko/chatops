@@ -1,6 +1,8 @@
 package common
 
-import "github.com/devopsext/utils"
+import (
+	"github.com/devopsext/utils"
+)
 
 type User interface {
 	ID() string
@@ -48,12 +50,12 @@ type Field struct {
 	Name         string
 	Type         FieldType
 	Label        string
-	Default      string
-	Hint         string
-	Required     bool
 	Values       []string
+	Default      string
+	Required     bool
 	Template     string
 	Dependencies []string
+	Hint         string
 	Filter       string
 }
 
@@ -142,6 +144,45 @@ const (
 	FieldTypeGroup              = "group"
 	FieldTypeMultiGroup         = "multigroup"
 )
+
+// Field
+
+func (f *Field) Merge(new *Field) {
+
+	if new == nil {
+		return
+	}
+
+	if new.Type != "" {
+		f.Type = new.Type
+	}
+	if !utils.IsEmpty(new.Label) {
+		f.Label = new.Label
+	}
+	if !utils.IsEmpty(new.Default) {
+		f.Default = new.Default
+	}
+	if !utils.IsEmpty(new.Hint) {
+		f.Hint = new.Hint
+	}
+	if new.Required && !f.Required {
+		f.Required = new.Required
+	}
+	if len(new.Values) != 0 {
+		f.Values = new.Values
+	}
+	if len(new.Dependencies) != 0 {
+		f.Dependencies = new.Dependencies
+	}
+	if !utils.IsEmpty(new.Filter) {
+		f.Filter = new.Filter
+	}
+	if !utils.IsEmpty(new.Template) {
+		f.Template = new.Template
+	}
+}
+
+// Processors
 
 func (ps *Processors) Add(p Processor) {
 	if !utils.IsEmpty(p) {
