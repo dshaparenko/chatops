@@ -41,22 +41,22 @@ type Response interface {
 	Duration() bool // show duration in replay
 	Original() bool // show orignal as quote
 	Error() bool    // show as error
-	//Reaction() bool // reaction needed
 }
 
 type FieldType string
 
-type Field struct {
-	Name         string
-	Type         FieldType
-	Label        string
-	Values       []string
-	Default      string
-	Required     bool
-	Template     string
-	Dependencies []string
-	Hint         string
-	Filter       string
+type Field interface {
+	Name() string
+	Type() FieldType
+	Label() string
+	Values() []string
+	Default() string
+	Required() bool
+	Template() string
+	Dependencies() []string
+	Hint() string
+	Filter() string
+	Children() []Field
 }
 
 type Approval interface {
@@ -95,7 +95,7 @@ type Command interface {
 	Approval() Approval
 	Permissions() bool
 	Execute(bot Bot, message Message, params ExecuteParams, action Action) (Executor, string, []*Attachment, []Action, error)
-	Fields(bot Bot, message Message, params ExecuteParams, eval []string) []Field
+	Fields(bot Bot, message Message, params ExecuteParams, eval []string, parent Field) []Field
 }
 
 type Processor interface {
@@ -144,43 +144,6 @@ const (
 	FieldTypeGroup              = "group"
 	FieldTypeMultiGroup         = "multigroup"
 )
-
-// Field
-
-func (f *Field) Merge(new *Field) {
-
-	if new == nil {
-		return
-	}
-
-	if new.Type != "" {
-		f.Type = new.Type
-	}
-	if !utils.IsEmpty(new.Label) {
-		f.Label = new.Label
-	}
-	if !utils.IsEmpty(new.Default) {
-		f.Default = new.Default
-	}
-	if !utils.IsEmpty(new.Hint) {
-		f.Hint = new.Hint
-	}
-	if new.Required && !f.Required {
-		f.Required = new.Required
-	}
-	if len(new.Values) != 0 {
-		f.Values = new.Values
-	}
-	if len(new.Dependencies) != 0 {
-		f.Dependencies = new.Dependencies
-	}
-	if !utils.IsEmpty(new.Filter) {
-		f.Filter = new.Filter
-	}
-	if !utils.IsEmpty(new.Template) {
-		f.Template = new.Template
-	}
-}
 
 // Processors
 

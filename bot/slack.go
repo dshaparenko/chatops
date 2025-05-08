@@ -1568,7 +1568,7 @@ func (s *Slack) fieldDependencies(name string, fields []common.Field) []common.F
 
 	r := []common.Field{}
 	for _, field := range fields {
-		if utils.Contains(field.Dependencies, name) {
+		if utils.Contains(field.Dependencies(), name) {
 			r = append(r, field)
 		}
 	}
@@ -1616,11 +1616,11 @@ func (s *Slack) findUserGroupNameByID(groups []slack.UserGroup, ID string) strin
 func (s *Slack) fieldValueToString(field common.Field, value interface{}) string {
 
 	r := ""
-	if utils.IsEmpty(value) {
+	if utils.IsEmpty(value) || utils.IsEmpty(field) {
 		return r
 	}
 
-	switch field.Type {
+	switch field.Type() {
 	case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
 		switch v := value.(type) {
 		case []string:
@@ -1636,9 +1636,12 @@ func (s *Slack) fieldValueToString(field common.Field, value interface{}) string
 
 func (s *Slack) fieldValueTransform(field common.Field, value interface{}) interface{} {
 
-	var r interface{}
+	if utils.IsEmpty(field) {
+		return value
+	}
 
-	switch field.Type {
+	var r interface{}
+	switch field.Type() {
 	case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
 		v := fmt.Sprintf("%v", value)
 		r = common.RemoveEmptyStrings(strings.Split(v, ","))
@@ -1661,11 +1664,13 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 
 	for _, field := range fields {
 
-		actionID := s.encodeActionID(blockID, slackFormFieldType, field.Name)
+		fName := field.Name()
+		actionID := s.encodeActionID(blockID, slackFormFieldType, fName)
+		fType := field.Type()
 
 		var dac *slack.DispatchActionConfig
 
-		deps := s.fieldDependencies(field.Name, fields)
+		deps := s.fieldDependencies(fName, fields)
 		if len(deps) > 0 {
 			dac = &slack.DispatchActionConfig{
 				TriggerActionsOn: []string{slackTriggerOnEnterPressed},
@@ -1673,21 +1678,21 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 		}
 
 		def := ""
-		pv := params[field.Name]
+		pv := params[fName]
 		if !utils.IsEmpty(pv) {
 			def = s.fieldValueToString(field, pv)
 		}
 		if utils.IsEmpty(def) {
-			def = field.Default
+			def = field.Default()
 		}
 
-		if utils.IsEmpty(confirmationParams[field.Name]) {
-			confirmationParams[field.Name] = def
+		if utils.IsEmpty(confirmationParams[fName]) {
+			confirmationParams[fName] = def
 		}
 
 		// updating values from params if exists
-		currentValues := field.Values
-		if paramValues, exists := params[field.Name+"_values"]; exists {
+		currentValues := field.Values()
+		if paramValues, exists := params[fName+"_values"]; exists {
 			switch v := paramValues.(type) {
 			case []string:
 				currentValues = v
@@ -1696,17 +1701,18 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			}
 		}
 
-		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label, false, false)
+		fHint := field.Hint()
+		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label(), false, false)
 		var h *slack.TextBlockObject
-		if !utils.IsEmpty(field.Hint) {
-			h = slack.NewTextBlockObject(slack.PlainTextType, field.Hint, false, false)
+		if !utils.IsEmpty(fHint) {
+			h = slack.NewTextBlockObject(slack.PlainTextType, fHint, false, false)
 		}
 
 		addToBlocks := true
 		var b *slack.InputBlock
 		var el slack.BlockElement
 
-		switch field.Type {
+		switch fType {
 		case common.FieldTypeMultiEdit:
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
 			e.Multiline = true
@@ -1799,7 +1805,7 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			options := []*slack.OptionBlockObject{}
 			var dBlock *slack.OptionBlockObject
 			optType := slack.OptTypeExternal
-			if field.Type == common.FieldTypeSelect {
+			if fType == common.FieldTypeSelect {
 				for _, v := range currentValues {
 					block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
 					if v == def {
@@ -1814,13 +1820,13 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			} else if !utils.IsEmpty(def) {
 				dBlock = slack.NewOptionBlockObject(def, slack.NewTextBlockObject(slack.PlainTextType, def, false, false), h)
 			}
-			addToBlocks = len(options) > 0 || field.Type == common.FieldTypeDynamicSelect
+			addToBlocks = len(options) > 0 || fType == common.FieldTypeDynamicSelect
 			if addToBlocks {
 				e := slack.NewOptionsSelectBlockElement(optType, h, actionID, options...)
 				if dBlock != nil {
 					e.InitialOption = dBlock
 				}
-				if field.Type == common.FieldTypeDynamicSelect {
+				if fType == common.FieldTypeDynamicSelect {
 					min := s.options.MinQueryLength
 					e.MinQueryLength = &min
 				}
@@ -1830,7 +1836,7 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			options := []*slack.OptionBlockObject{}
 			dBlocks := []*slack.OptionBlockObject{}
 			optType := slack.MultiOptTypeExternal
-			if field.Type == common.FieldTypeMultiSelect {
+			if fType == common.FieldTypeMultiSelect {
 				arr := s.parseArrayValues(def)
 				for _, v := range currentValues {
 					block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
@@ -1850,13 +1856,13 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 					dBlocks = append(dBlocks, block)
 				}
 			}
-			addToBlocks = len(options) > 0 || field.Type == common.FieldTypeDynamicMultiSelect
+			addToBlocks = len(options) > 0 || fType == common.FieldTypeDynamicMultiSelect
 			if addToBlocks {
 				e := slack.NewOptionsMultiSelectBlockElement(optType, h, actionID, options...)
 				if len(dBlocks) > 0 {
 					e.InitialOptions = dBlocks
 				}
-				if field.Type == common.FieldTypeDynamicMultiSelect {
+				if fType == common.FieldTypeDynamicMultiSelect {
 					min := s.options.MinQueryLength
 					e.MinQueryLength = &min
 				}
@@ -1987,7 +1993,7 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 			b = slack.NewInputBlock("", l, nil, el)
 			if b != nil {
 				b.DispatchAction = dac != nil
-				b.Optional = !field.Required
+				b.Optional = !field.Required()
 				blocks = append(blocks, b)
 			}
 		}
@@ -2052,8 +2058,8 @@ func (s *Slack) cacheReplyForm(m *SlackMessage, fields []common.Field, params co
 	}
 
 	nParams := make(common.ExecuteParams)
-	for _, v := range fields {
-		nParams[v.Name] = v.Default
+	for _, f := range fields {
+		nParams[f.Name()] = f.Default()
 	}
 
 	mNew := s.cloneMessage(m)
@@ -2331,15 +2337,16 @@ func (s *Slack) formNeeded(fields []common.Field, params map[string]interface{})
 
 	required := []common.Field{}
 	for _, f := range fields {
-		if f.Required {
+		if f.Required() {
 			required = append(required, f)
 		}
 	}
 
 	for _, f := range required {
 
-		if utils.Contains(keys, f.Name) {
-			v := params[f.Name]
+		name := f.Name()
+		if utils.Contains(keys, name) {
+			v := params[name]
 			if !utils.IsEmpty(v) {
 				arr = append(arr, fmt.Sprintf("%s", v))
 			}
@@ -2377,15 +2384,15 @@ func (s *Slack) getFieldsByType(cmd common.Command, types []string) []string {
 
 	r := []string{}
 
-	fields := cmd.Fields(s, nil, nil, nil)
+	fields := cmd.Fields(s, nil, nil, nil, nil)
 	if len(fields) == 0 {
 		return r
 	}
 
 	for _, field := range fields {
 
-		if utils.Contains(types, string(field.Type)) {
-			r = append(r, field.Name)
+		if utils.Contains(types, string(field.Type())) {
+			r = append(r, field.Name())
 		}
 	}
 	return r
@@ -2560,7 +2567,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit}
 		only := s.getFieldsByType(cmd, list)
 
-		rFields := cmd.Fields(s, m, eParams, only)
+		rFields := cmd.Fields(s, m, eParams, only, nil)
 		rParams := eParams
 
 		approvalCmd := cmd
@@ -2600,7 +2607,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit}
 			only := s.getFieldsByType(wrappedCmd, list)
 
-			rFields = wrappedCmd.Fields(s, m, rParams, only)
+			rFields = wrappedCmd.Fields(s, m, rParams, only, nil)
 
 			rParams = wrappedParams
 
@@ -2625,11 +2632,12 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			// fix string to appropriate value
 			for _, f := range rFields {
 
-				v := rParams[f.Name]
+				name := f.Name()
+				v := rParams[name]
 				if v == nil {
 					continue
 				}
-				rParams[f.Name] = s.fieldValueTransform(f, v)
+				rParams[name] = s.fieldValueTransform(f, v)
 			}
 		}
 
@@ -2758,7 +2766,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		}
 	}
 
-	fields := cmd.Fields(s, parent, params, nil)
+	fields := cmd.Fields(s, parent, params, nil, nil)
 	if s.formNeeded(fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
 		return nil
@@ -2927,10 +2935,15 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 	return ts, nil
 }
 
-func (s *Slack) getActionValue(field *common.Field, state slack.BlockAction) interface{} {
+func (s *Slack) getActionValue(field common.Field, state slack.BlockAction) interface{} {
 
 	var v interface{}
 	v = state.Value
+	if utils.IsEmpty(field) {
+		return v
+	}
+
+	fType := field.Type()
 	st := string(state.Type)
 	switch st {
 	case "number_input":
@@ -2942,7 +2955,7 @@ func (s *Slack) getActionValue(field *common.Field, state slack.BlockAction) int
 	case "static_select", "external_select", "radio_buttons":
 		v2 := state.SelectedOption.Value
 		if field != nil && !utils.IsEmpty(v2) {
-			switch field.Type {
+			switch fType {
 			case common.FieldTypeGroup:
 				v2 = s.findUserGroupIDByName(s.userGroups.items, v2)
 			}
@@ -2953,7 +2966,7 @@ func (s *Slack) getActionValue(field *common.Field, state slack.BlockAction) int
 		for _, v2 := range state.SelectedOptions {
 			v3 := v2.Value
 			if field != nil && !utils.IsEmpty(v3) {
-				switch field.Type {
+				switch fType {
 				case common.FieldTypeMultiGroup:
 					v3 = s.findUserGroupIDByName(s.userGroups.items, v3)
 				}
@@ -2986,11 +2999,11 @@ func (s *Slack) getActionValue(field *common.Field, state slack.BlockAction) int
 	return v
 }
 
-func (s *Slack) findField(fields []common.Field, name string) *common.Field {
+func (s *Slack) findField(fields []common.Field, name string) common.Field {
 
 	for _, f := range fields {
-		if f.Name == name {
-			return &f
+		if f.Name() == name {
+			return f
 		}
 	}
 	return nil
@@ -3007,40 +3020,47 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 	deps := []string{}
 	skip := []common.FieldType{common.FieldTypeDynamicSelect, common.FieldTypeDynamicMultiSelect}
 
-	allFields := m.cmd.Fields(s, m, nil, nil)
+	allFields := m.cmd.Fields(s, nil, nil, nil, nil)
 	for _, field := range allFields {
-		if utils.Contains(field.Dependencies, name) && !utils.Contains(skip, field.Type) {
-			deps = append(deps, field.Name)
+		fDeps := field.Dependencies()
+		fType := field.Type()
+		if utils.Contains(fDeps, name) && !utils.Contains(skip, fType) {
+			deps = append(deps, field.Name())
 		}
 	}
 
 	params := make(common.ExecuteParams)
 	params[name] = action.Value
 
-	cmdFields := m.cmd.Fields(s, nil, nil, nil)
 	for _, v1 := range callback.BlockActionState.Values {
 		for k2, v2 := range v1 {
 			_, _, n2 := s.decodeActionID(k2)
 			if utils.IsEmpty(n2) {
 				continue
 			}
-			field := s.findField(cmdFields, n2)
+			field := s.findField(allFields, n2)
 			params[n2] = s.getActionValue(field, v2)
 		}
 	}
 
 	// get dependent fields
-	depFields := m.cmd.Fields(s, m, params, deps)
+	depFields := m.cmd.Fields(s, m, params, deps, nil)
 	for _, field := range depFields {
-		if !utils.Contains(deps, field.Name) {
+
+		name := field.Name()
+		if !utils.Contains(deps, name) {
 			continue
 		}
 		// check if fields have values to update
-		if len(field.Values) > 0 {
-			params[field.Name+"_values"] = field.Values
+		values := field.Values()
+
+		if len(values) > 0 {
+			params[name+"_values"] = values
 		}
-		if !utils.IsEmpty(field.Default) {
-			params[field.Name] = s.fieldValueTransform(field, field.Default)
+
+		def := field.Default()
+		if !utils.IsEmpty(def) {
+			params[name] = s.fieldValueTransform(field, def)
 		}
 	}
 
@@ -3059,7 +3079,7 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		return false
 	}
 
-	blocks, err := s.formBlocks(m.cmd, m.fields, params, m.user)
+	blocks, err := s.formBlocks(m.cmd /*m.fields*/, depFields, params, m.user)
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return false
@@ -3093,7 +3113,7 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 		states := callback.BlockActionState
 		if states != nil && len(states.Values) > 0 {
 
-			cmdFields := m.cmd.Fields(s, nil, nil, nil)
+			cmdFields := m.cmd.Fields(s, nil, nil, nil, nil)
 			for _, v1 := range states.Values {
 				for k2, v2 := range v1 {
 					_, _, n2 := s.decodeActionID(k2)
@@ -3426,12 +3446,12 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 	}
 	params[name] = value
 
-	fields := m.cmd.Fields(s, m, params, []string{name})
-	var field *common.Field
+	fields := m.cmd.Fields(s, m, params, []string{name}, nil)
+	var field common.Field
 
 	for _, f := range fields {
-		if f.Name == name {
-			field = &f
+		if f.Name() == name {
+			field = f
 			break
 		}
 	}
@@ -3440,9 +3460,10 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 		return
 	}
 
-	values := field.Values
+	values := field.Values()
 
-	switch field.Type {
+	fType := field.Type()
+	switch fType {
 	case common.FieldTypeGroup, common.FieldTypeMultiGroup:
 		values = []string{}
 		groups, _ := s.client.SlackClient().GetUserGroups()
@@ -3451,9 +3472,10 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 		}
 	}
 
-	if !utils.IsEmpty(field.Filter) {
+	fFilter := field.Filter()
+	if !utils.IsEmpty(fFilter) {
 		revls := []string{}
-		re := regexp.MustCompile(field.Filter)
+		re := regexp.MustCompile(fFilter)
 		if re != nil {
 			for _, v := range values {
 				if !re.MatchString(v) {
@@ -3479,8 +3501,9 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 		if re.MatchString(v) {
 
 			var h *slack.TextBlockObject
-			if !utils.IsEmpty(field.Hint) {
-				h = slack.NewTextBlockObject(slack.PlainTextType, field.Hint, false, false)
+			fHint := field.Hint()
+			if !utils.IsEmpty(fHint) {
+				h = slack.NewTextBlockObject(slack.PlainTextType, fHint, false, false)
 			}
 
 			options = append(options,
@@ -3656,7 +3679,7 @@ func (s *Slack) start() {
 
 			def := s.commandDefinition(c, "")
 			client.AddCommand(def)
-			if len(c.Fields(s, nil, nil, nil)) > 0 {
+			if len(c.Fields(s, nil, nil, nil, nil)) > 0 {
 				client.AddInteraction(s.newInteraction(c.Name(), ""))
 			}
 		}
@@ -3685,7 +3708,7 @@ func (s *Slack) start() {
 			}
 
 			group.AddCommand(s.commandDefinition(c, pName))
-			if len(c.Fields(s, nil, nil, nil)) > 0 {
+			if len(c.Fields(s, nil, nil, nil, nil)) > 0 {
 				client.AddInteraction(s.newInteraction(c.Name(), pName))
 			}
 		}
@@ -3723,7 +3746,7 @@ func (s *Slack) start() {
 					client.Help(def)
 				}
 				groupRoot.AddCommand(def)
-				if len(c.Fields(s, nil, nil, nil)) > 0 {
+				if len(c.Fields(s, nil, nil, nil, nil)) > 0 {
 					client.AddInteraction(s.newInteraction(c.Name(), ""))
 				}
 			}
