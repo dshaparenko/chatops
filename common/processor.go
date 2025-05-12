@@ -1,6 +1,8 @@
 package common
 
-import "github.com/devopsext/utils"
+import (
+	"github.com/devopsext/utils"
+)
 
 type User interface {
 	ID() string
@@ -39,22 +41,22 @@ type Response interface {
 	Duration() bool // show duration in replay
 	Original() bool // show orignal as quote
 	Error() bool    // show as error
-	//Reaction() bool // reaction needed
 }
 
 type FieldType string
 
-type Field struct {
-	Name         string
-	Type         FieldType
-	Label        string
-	Default      string
-	Hint         string
-	Required     bool
-	Values       []string
-	Template     string
-	Dependencies []string
-	Filter       string
+type Field interface {
+	Name() string
+	Type() FieldType
+	Label() string
+	Values() []string
+	Default() string
+	Required() bool
+	Template() string
+	Dependencies() []string
+	Hint() string
+	Filter() string
+	Children() []Field
 }
 
 type Approval interface {
@@ -93,7 +95,7 @@ type Command interface {
 	Approval() Approval
 	Permissions() bool
 	Execute(bot Bot, message Message, params ExecuteParams, action Action) (Executor, string, []*Attachment, []Action, error)
-	Fields(bot Bot, message Message, params ExecuteParams, eval []string) []Field
+	Fields(bot Bot, message Message, params ExecuteParams, eval []string, parent Field) []Field
 }
 
 type Processor interface {
@@ -142,6 +144,8 @@ const (
 	FieldTypeGroup              = "group"
 	FieldTypeMultiGroup         = "multigroup"
 )
+
+// Processors
 
 func (ps *Processors) Add(p Processor) {
 	if !utils.IsEmpty(p) {
