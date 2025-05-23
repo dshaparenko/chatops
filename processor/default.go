@@ -1738,13 +1738,7 @@ func (dca *DefaultCommandApproval) Channel(bot common.Bot, message common.Messag
 	}
 
 	funcs := make(map[string]any)
-	funcs["getBot"] = func() interface{} { return bot }
-	funcs["getUser"] = func() interface{} { return message.User() }
-	funcs["getParams"] = func() interface{} { return params }
-	funcs["getMessage"] = func() interface{} { return message }
-	funcs["getChannel"] = func() interface{} { return message.Channel() }
-
-	
+	dca.addTemplateFunctions(funcs, bot, message, params)
 
 	tOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -1800,15 +1794,7 @@ func (dca *DefaultCommandApproval) Message(bot common.Bot, message common.Messag
 	}
 
 	funcs := make(map[string]any)
-	funcs["getBot"] = func() interface{} { return bot }
-	funcs["getUser"] = func() interface{} { return message.User() }
-	funcs["getParams"] = func() interface{} { return params }
-	funcs["getMessage"] = func() interface{} {
-		return message
-	}
-	funcs["getChannel"] = func() interface{} {
-		return message.Channel()
-	}
+	dca.addTemplateFunctions(funcs, bot, message, params)
 
 	tOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -2260,4 +2246,46 @@ func NewDefault(name string, options DefaultOptions, observability *common.Obser
 		meter:         observability.Metrics(),
 		observability: observability,
 	}
+}
+
+func (dca *DefaultCommandApproval) addTemplateFunctions(funcs map[string]any, bot common.Bot, message common.Message, params common.ExecuteParams) {
+	funcs["getBot"] = func() interface{} { return bot }
+	funcs["getUser"] = func() interface{} { return message.User() }
+	funcs["getParams"] = func() interface{} { return params }
+	funcs["getMessage"] = func() interface{} { return message }
+	funcs["getChannel"] = func() interface{} { return message.Channel() }
+
+	funcs["runTemplate"] = func(fileName string, obj interface{}) (string, error) {
+		path := fmt.Sprintf("%s%s%s", dca.command.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
+		if !utils.FileExists(path) {
+			return "", fmt.Errorf("couldn't find template file %s", path)
+		}
+
+		content, err := utils.Content(path)
+		if err != nil {
+			return "", fmt.Errorf("error reading template %s: %v", path, err)
+		}
+
+		templateName := fmt.Sprintf("approval-runtemplate-%s", fileName)
+		templateOpts := toolsRender.TemplateOptions{
+			Name:    templateName,
+			Content: string(content),
+		}
+
+		t, err := toolsRender.NewTextTemplate(templateOpts, dca.command.processor.observability)
+		if err != nil {
+			return "", fmt.Errorf("error creating template %s: %v", fileName, err)
+		}
+
+		result, err := t.RenderObject(obj)
+		if err != nil {
+			return "", fmt.Errorf("error rendering template %s: %v", fileName, err)
+		}
+
+		return string(result), nil
+	}
+
+	// postTemplate cannot be used in the approval template (as it implements after)
+
+	funcs["isEmpty"] = utils.IsEmpty
 }
