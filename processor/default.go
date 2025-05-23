@@ -3,6 +3,7 @@ package processor
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/devopsext/chatops/common"
+	"github.com/devopsext/chatops/vendors"
 	sreCommon "github.com/devopsext/sre/common"
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
@@ -670,6 +672,62 @@ func (de *DefaultExecutor) fAddRemoveReactionOnMessage(channelID, messageID, fir
 	return ""
 }
 
+func (de *DefaultExecutor) fAskOpenAI(params map[string]interface{}) string {
+	apiKey, _ := params["apiKey"].(string)
+	model, _ := params["model"].(string)
+	timeout, _ := params["timeout"].(int)
+	if timeout == 0 {
+		timeout = 30
+	}
+
+	var messages []map[string]string
+	if rawMessages, ok := params["messages"].([]interface{}); ok {
+		for _, rawMsg := range rawMessages {
+			if msg, ok := rawMsg.(map[string]interface{}); ok {
+				role, roleOk := msg["role"].(string)
+				content, contentOk := msg["content"].(string)
+				if roleOk && contentOk {
+					messages = append(messages, map[string]string{
+						"role":    role,
+						"content": content,
+					})
+				}
+			}
+		}
+	}
+
+	if len(messages) == 0 {
+		messages = append(messages, map[string]string{
+			"role":    "user",
+			"content": "Hello",
+		})
+	}
+
+	if apiKey == "" {
+		e := true
+		de.error = &e
+		return "OpenAI API key is required"
+	}
+
+	options := vendors.OpenAIOptions{
+		APIKey:   apiKey,
+		Model:    model,
+		Timeout:  timeout,
+		Messages: messages,
+	}
+
+	openAI := vendors.NewOpenAI(options)
+	response, err := openAI.CreateChatCompletion(options)
+	log.Printf("OpenAI response: %s", string(response))
+	if err != nil {
+		e := true
+		de.error = &e
+		return fmt.Sprintf("OpenAI error: %s", err.Error())
+	}
+
+	return string(response)
+}
+
 func (de *DefaultExecutor) fSetError() string {
 	e := true
 	de.error = &e
@@ -952,6 +1010,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["updateMessage"] = executor.fUpdateMessage
+	funcs["askOpenAI"] = executor.fAskOpenAI
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -1684,6 +1743,8 @@ func (dca *DefaultCommandApproval) Channel(bot common.Bot, message common.Messag
 	funcs["getParams"] = func() interface{} { return params }
 	funcs["getMessage"] = func() interface{} { return message }
 	funcs["getChannel"] = func() interface{} { return message.Channel() }
+
+	
 
 	tOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),

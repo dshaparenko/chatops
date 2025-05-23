@@ -58,6 +58,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
 	github.com/rs/xid v1.3.0 // indirect
+	github.com/sashabaranov/go-openai v1.39.1 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/slack-io/commander v0.0.0-20231120025847-9fd78b4b2d54 // indirect
