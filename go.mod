@@ -14,12 +14,13 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-3
 
 require (
 	github.com/devopsext/sre v0.6.3
-	github.com/devopsext/tools v0.17.2
-	github.com/devopsext/utils v0.4.7
+	github.com/devopsext/tools v0.17.9
+	github.com/devopsext/utils v0.4.8
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/jellydator/ttlcache/v3 v3.3.0
 	github.com/jinzhu/copier v0.4.0
+	github.com/sashabaranov/go-openai v1.39.1
 	github.com/slack-go/slack v0.13.0
 	github.com/slack-io/slacker v0.1.1-3
 	github.com/spf13/cobra v1.8.0
@@ -58,7 +59,6 @@ require (
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
 	github.com/rs/xid v1.3.0 // indirect
-	github.com/sashabaranov/go-openai v1.39.1 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/slack-io/commander v0.0.0-20231120025847-9fd78b4b2d54 // indirect
@@ -76,7 +76,7 @@ require (
 	github.com/valyala/fastrand v1.1.0 // indirect
 	github.com/valyala/histogram v1.2.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.35.0 // indirect
 	golang.org/x/oauth2 v0.24.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/time v0.0.0-20210608053304-ed9ce3a009e4 // indirect
@@ -84,4 +84,5 @@ require (
 	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.31.1 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
