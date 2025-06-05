@@ -14,7 +14,7 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-3
 
 require (
 	github.com/devopsext/sre v0.6.3
-	github.com/devopsext/tools v0.17.2
+	github.com/devopsext/tools v0.17.7
 	github.com/devopsext/utils v0.4.7
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/google/uuid v1.6.0
@@ -83,4 +83,5 @@ require (
 	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.31.1 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

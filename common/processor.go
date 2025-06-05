@@ -56,7 +56,7 @@ type Field interface {
 	Dependencies() []string
 	Hint() string
 	Filter() string
-	Children() []Field
+	Value() string
 }
 
 type Approval interface {
