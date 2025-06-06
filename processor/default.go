@@ -1890,16 +1890,6 @@ func (dc *DefaultCommand) Actions() []common.Action {
 	return r
 }
 
-func (dc *DefaultCommand) findField(fields []*DefaultField, name string) *DefaultField {
-
-	for _, field := range fields {
-		if field.Name == name {
-			return field
-		}
-	}
-	return nil
-}
-
 func (dc *DefaultCommand) configFieldsAsCommonFields(fields []*DefaultField) []*DefaultFieldWrapper {
 
 	r := []*DefaultFieldWrapper{}
