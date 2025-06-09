@@ -2963,7 +2963,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
 		r := s.buildResponse(false, s.messageResponses(m, false)...)
-		err := s.cachePostUserCommand(m, nil, replier, rParams, nil, r, false)
+		err := s.cachePostUserCommand(m, nil, replier, rParams, nil, r, true) // why we ever need overwrite false here?
 		if err != nil {
 			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
 			s.addRemoveReactions(m.typ, m.key, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -3149,6 +3149,9 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 					channelID = mOrigin.key.channelID
 				}
 				threadTS = mOrigin.key.threadTS
+			}
+			if utils.IsEmpty(threadTS) && !utils.IsEmpty(mOrigin.ParentID()) {
+				threadTS = mOrigin.ParentID()
 			}
 			r = s.buildResponse(false, append(s.messageResponses(mOrigin, true), response)...)
 		}

@@ -19,3 +19,7 @@ chatops
 .old
 public.key
 .certs/
+.run/
+docs/
+.junie/
+.idea/
