@@ -576,7 +576,11 @@ func (sm *SlackMessage) fieldValueToString(field *SlackMessageField, value inter
 	return r
 }
 
-func (sm *SlackMessage) mergeParams(params common.ExecuteParams) {
+func (sm *SlackMessage) mergeParams(params common.ExecuteParams, olds []string) {
+
+	for _, k := range olds {
+		delete(sm.params, k)
+	}
 
 	for k, v := range params {
 		if utils.IsEmpty(k) || utils.IsEmpty(v) {
@@ -588,10 +592,14 @@ func (sm *SlackMessage) mergeParams(params common.ExecuteParams) {
 		sm.params[k] = v
 	}
 
+	if sm.params == nil {
+		sm.params = make(common.ExecuteParams)
+	}
+
 	for _, f := range sm.fields.items {
 
 		name := f.Name()
-		if _, ok := sm.params[name]; ok {
+		if _, ok := sm.params[name]; !ok {
 			sm.params[name] = f.Value()
 		}
 	}
@@ -606,6 +614,7 @@ func (sm *SlackMessage) mergeFields(fields []common.Field, params common.Execute
 	for _, f := range sm.fields.items {
 		fnew := sm.findFieldByName(fields, f.Name())
 		if utils.IsEmpty(fnew) {
+			newFields = append(newFields, f)
 			continue
 		}
 		if f.copyFrom(fnew, false) {
@@ -2915,7 +2924,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		m.fields.copyFrom(rFields, true)
-		m.mergeParams(rParams)
+		m.mergeParams(rParams, nil)
 		s.putMessageToCache(m)
 
 		if s.formNeeded(rFields, rParams) && u != nil {
@@ -3358,12 +3367,13 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 
 	// calculate fields based on dependencies
 
-	// parent is not always working, it is needed to pass a field wiich should be calculated
+	// ??? parent is not always working, it is needed to pass a field wiich should be calculated
 	// its also important to pass fields that already calculated
+
 	calcs := m.cmd.Fields(s, m, params, deps, parent)
 	flds, update := m.mergeFields(calcs, params)
 
-	m.mergeParams(params)
+	m.mergeParams(params, deps)
 	m.fields.merge(flds)
 	m.responseURL = callback.ResponseURL
 	s.putMessageToCache(m)
@@ -3425,7 +3435,7 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 			}
 		}
 
-		m.mergeParams(params)
+		m.mergeParams(params, nil)
 		s.putMessageToCache(m)
 
 		// check approval
@@ -3722,29 +3732,23 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 		return
 	}
 
-	params := make(common.ExecuteParams)
-	/*cache := m.params
-	for k, v := range cache {
-		if _, ok := params[k]; ok {
-			continue
-		}
-		params[k] = v
-	}*/
-
 	options := []*slack.OptionBlockObject{}
 	value := callback.Value
 	if utils.IsEmpty(value) {
 		return
 	}
+	params := make(common.ExecuteParams)
 	params[name] = value
 
-	/*var parent common.Field
+	var parent common.Field
 	f := m.fields.findField(name)
 	if !utils.IsEmpty(f) {
-		parent = f.field
-	}*/
+		parent = f.field.Parent()
+	}
 
-	fields := m.cmd.Fields(s, m, params, []string{name}, nil)
+	deps := []string{name}
+
+	fields := m.cmd.Fields(s, m, params, deps, parent)
 
 	var field common.Field
 
@@ -3758,6 +3762,12 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 	if field == nil {
 		return
 	}
+
+	flds, _ := m.mergeFields(fields, params)
+
+	m.mergeParams(params, deps)
+	m.fields.merge(flds)
+	s.putMessageToCache(m)
 
 	values := field.Values()
 

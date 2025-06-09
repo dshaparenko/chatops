@@ -86,6 +86,7 @@ type DefaultExecutor struct {
 type DefaultFieldWrapper struct {
 	*DefaultField
 	children []*DefaultFieldWrapper
+	parent   *DefaultFieldWrapper
 }
 
 type DefaultFieldExecutor struct {
@@ -95,7 +96,7 @@ type DefaultFieldExecutor struct {
 	params   common.ExecuteParams
 	message  common.Message
 	template *toolsRender.TextTemplate
-	field    *DefaultField
+	field    *DefaultFieldWrapper
 	funcs    map[string]any
 }
 
@@ -1052,6 +1053,10 @@ func (df *DefaultFieldWrapper) Value() string {
 	return df.DefaultField.Value
 }
 
+func (df *DefaultFieldWrapper) Parent() common.Field {
+	return df.parent
+}
+
 func (df *DefaultFieldWrapper) Merge(f common.Field, empty bool) bool {
 	if f == nil || df.DefaultField == nil {
 		return false
@@ -1146,19 +1151,19 @@ func (de *DefaultFieldExecutor) fFieldList(items ...*DefaultField) []*DefaultFie
 
 func (de *DefaultFieldExecutor) fSetFieldValue(value string) (string, error) {
 
-	if utils.IsEmpty(de.field) {
+	if de.field == nil || de.field.DefaultField == nil {
 		return "", fmt.Errorf("Default couldn't set field value, field is nil")
 	}
-	de.field.Value = value
+	de.field.DefaultField.Value = value
 	return "", nil
 }
 
 func (de *DefaultFieldExecutor) fSetFieldValues(values []string) (string, error) {
 
-	if de.field == nil {
+	if de.field == nil || de.field.DefaultField == nil {
 		return "", fmt.Errorf("Default couldn't set field values, field is nil")
 	}
-	de.field.Values = values
+	de.field.DefaultField.Values = values
 	return "", nil
 }
 
@@ -1297,7 +1302,10 @@ func (de *DefaultFieldExecutor) Execute() ([]*DefaultFieldWrapper, error) {
 		if fnew != nil && f.Name == fnew.Name {
 			continue
 		}
-		fields = append(fields, &DefaultFieldWrapper{DefaultField: f})
+		fields = append(fields, &DefaultFieldWrapper{
+			DefaultField: f,
+			parent:       de.field,
+		})
 	}
 
 	de.fields.Range(func(key, value any) bool {
@@ -1335,7 +1343,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	return template, funcs, nil
 }
 
-func NewFieldExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams, field *DefaultField) (*DefaultFieldExecutor, error) {
+func NewFieldExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams, field *DefaultFieldWrapper) (*DefaultFieldExecutor, error) {
 
 	if !utils.FileExists(path) {
 		return nil, fmt.Errorf("Default couldn't find template %s", path)
@@ -1957,10 +1965,10 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 		if !utils.Contains(list, pName) {
 			list = append(list, pName)
 		}
-		/*p := parent.(*DefaultFieldWrapper)
+		p := parent.(*DefaultFieldWrapper)
 		if p != nil && p.children != nil {
 			items = append(items, p.children...)
-		}*/
+		}
 	}
 
 	fields := &sync.Map{}
@@ -1996,7 +2004,7 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 			name := fmt.Sprintf("%s-%s", dc.name, fw.DefaultField.Name)
 			path := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), fw.DefaultField.Template)
 
-			executor, err := NewFieldExecutor(name, path, dc, bot, message, params, fw.DefaultField)
+			executor, err := NewFieldExecutor(name, path, dc, bot, message, params, fw)
 			if err != nil {
 				dc.logger.Error("Default field template %s command %s field %s executor error: %s", path, dc.name, fw.DefaultField.Name, err)
 				return

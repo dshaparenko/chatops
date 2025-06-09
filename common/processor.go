@@ -57,6 +57,7 @@ type Field interface {
 	Hint() string
 	Filter() string
 	Value() string
+	Parent() Field
 }
 
 type Approval interface {
