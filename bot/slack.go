@@ -39,9 +39,10 @@ type SlackOptions struct {
 	AttachmentColor string
 	ErrorColor      string
 
-	TitleConfirmation string
-	ApprovedMessage   string
-	RejectedMessage   string
+	TitleConfirmation      string
+	ApprovedMessage        string
+	RejectedMessage        string
+	WaitingApprovalMessage string
 
 	ReactionDoing    string
 	ReactionDone     string
@@ -297,6 +298,14 @@ func (sm *SlackMessage) ID() string {
 		return ""
 	}
 	return key.timestamp
+}
+
+func (sm *SlackMessage) OriginalID() string {
+	if sm.originKey != nil && !utils.IsEmpty(sm.originKey.timestamp) {
+		return sm.originKey.timestamp
+	}
+
+	return sm.ID()
 }
 
 func (sm *SlackMessage) Visible() bool {
@@ -3142,6 +3151,15 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 
 			replier := ctx.Response()
 			s.addRemoveReactions(m.typ, m.originKey, s.options.ReactionApproval, reaction)
+
+			if !utils.IsEmpty(s.options.WaitingApprovalMessage) {
+				waitingMessage := s.options.WaitingApprovalMessage
+				waitingResponse := &SlackResponse{visible: false} // ephemeral message
+				_, _, err := s.reply(m, waitingMessage, "", replier, nil, nil, waitingResponse, nil, false)
+				if err != nil {
+					s.logger.Error("Slack couldn't send waiting approval message: %s", err)
+				}
+			}
 
 			err := s.cacheAskApproval(m, message, channel, m.cmd, params, replier)
 			if err != nil {

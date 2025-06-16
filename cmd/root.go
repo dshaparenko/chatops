@@ -82,8 +82,9 @@ var slackOptions = bot.SlackOptions{
 	ErrorColor:        envGet("SLACK_ERROR_COLOR", "#ff0000").(string),
 	TitleConfirmation: envGet("SLACK_TITLE_CONFIRMATION", "Confirmation").(string),
 
-	ApprovedMessage: envGet("SLACK_APPROVED_MESSAGE", "approved").(string),
-	RejectedMessage: envGet("SLACK_REJECTED_MESSAGE", "rejected").(string),
+	ApprovedMessage:        envGet("SLACK_APPROVED_MESSAGE", "approved").(string),
+	RejectedMessage:        envGet("SLACK_REJECTED_MESSAGE", "rejected").(string),
+	WaitingApprovalMessage: envGet("SLACK_WAITING_APPROVAL_MESSAGE", "waiting for approval").(string),
 
 	ReactionDoing:    envGet("SLACK_REACTION_DOING", "spinner").(string),
 	ReactionDone:     envGet("SLACK_REACTION_DONE", "white_check_mark").(string),
@@ -311,6 +312,7 @@ func Execute() {
 	flags.StringVar(&slackOptions.PublicChannel, "slack-public-channel", slackOptions.PublicChannel, "Slack public channel")
 	flags.StringVar(&slackOptions.AttachmentColor, "slack-attachment-color", slackOptions.AttachmentColor, "Slack attachment color")
 	flags.StringVar(&slackOptions.ErrorColor, "slack-error-color", slackOptions.ErrorColor, "Slack error color")
+	flags.StringVar(&slackOptions.WaitingApprovalMessage, "slack-waiting-approval-message", slackOptions.WaitingApprovalMessage, "Slack waiting approval message")
 
 	flags.StringVar(&defaultOptions.CommandsDir, "default-commands-dir", defaultOptions.CommandsDir, "Default commands directory")
 	flags.StringVar(&defaultOptions.TemplatesDir, "default-templates-dir", defaultOptions.TemplatesDir, "Default templates directory")
