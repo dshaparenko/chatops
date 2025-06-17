@@ -39,10 +39,10 @@ type SlackOptions struct {
 	AttachmentColor string
 	ErrorColor      string
 
-	TitleConfirmation      string
-	ApprovedMessage        string
-	RejectedMessage        string
-	WaitingApprovalMessage string
+	TitleConfirmation string
+	ApprovedMessage   string
+	RejectedMessage   string
+	WaitingMessage    string
 
 	ReactionDoing    string
 	ReactionDone     string
@@ -3457,8 +3457,8 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 			replier := ctx.Response()
 			s.addRemoveReactions(m.typ, m.originKey, s.options.ReactionApproval, reaction)
 
-			if !utils.IsEmpty(s.options.WaitingApprovalMessage) {
-				waitingMessage := s.options.WaitingApprovalMessage
+			if !utils.IsEmpty(s.options.WaitingMessage) {
+				waitingMessage := s.options.WaitingMessage
 				waitingResponse := &SlackResponse{visible: false} // ephemeral message
 				_, _, err := s.reply(m, waitingMessage, "", replier, nil, nil, waitingResponse, nil, false)
 				if err != nil {
