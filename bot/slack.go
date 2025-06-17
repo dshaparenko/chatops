@@ -586,6 +586,36 @@ func (sm *SlackMessage) fieldValueToString(field *SlackMessageField, value inter
 	return r
 }
 
+func (sm *SlackMessage) prepareParams(params common.ExecuteParams) common.ExecuteParams {
+
+	r := make(common.ExecuteParams)
+
+	for k, v := range params {
+		if utils.IsEmpty(k) || utils.IsEmpty(v) {
+			continue
+		}
+		r[k] = v
+	}
+
+	for k, v := range sm.params {
+		if utils.IsEmpty(k) || utils.IsEmpty(v) {
+			continue
+		}
+		if _, ok := r[k]; !ok {
+			r[k] = v
+		}
+	}
+
+	for _, f := range sm.fields.items {
+
+		name := f.Name()
+		if _, ok := sm.params[name]; !ok {
+			r[name] = f.Value()
+		}
+	}
+	return r
+}
+
 func (sm *SlackMessage) mergeParams(params common.ExecuteParams, olds []string) {
 
 	for _, k := range olds {
@@ -627,7 +657,7 @@ func (sm *SlackMessage) mergeFields(fields []common.Field, params common.Execute
 			newFields = append(newFields, f)
 			continue
 		}
-		if f.copyFrom(fnew, false) {
+		if f.copyFrom(fnew, true) { // ???
 			newFields = append(newFields, f)
 			updateIsNeeded = true
 		}
@@ -3383,7 +3413,9 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 	// ??? parent is not always working, it is needed to pass a field wiich should be calculated
 	// its also important to pass fields that already calculated
 
-	calcs := m.cmd.Fields(s, m, params, deps, parent)
+	reqParams := m.prepareParams(params)
+
+	calcs := m.cmd.Fields(s, m, reqParams, deps, parent)
 	flds, update := m.mergeFields(calcs, params)
 
 	m.mergeParams(params, deps)
@@ -3759,6 +3791,7 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 	if utils.IsEmpty(value) {
 		return
 	}
+
 	params := make(common.ExecuteParams)
 	params[name] = value
 
@@ -3769,8 +3802,9 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 	}
 
 	deps := []string{name}
+	reqParams := m.prepareParams(params)
 
-	fields := m.cmd.Fields(s, m, params, deps, parent)
+	fields := m.cmd.Fields(s, m, reqParams, deps, parent)
 
 	var field common.Field
 
