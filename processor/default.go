@@ -16,8 +16,10 @@ import (
 	sreCommon "github.com/devopsext/sre/common"
 	toolsRender "github.com/devopsext/tools/render"
 	"github.com/devopsext/utils"
+
 	"golang.org/x/sync/errgroup"
 
+	"github.com/jinzhu/copier"
 	"gopkg.in/yaml.v2"
 )
 
@@ -85,6 +87,8 @@ type DefaultExecutor struct {
 
 type DefaultFieldWrapper struct {
 	*DefaultField
+	children []*DefaultFieldWrapper
+	parent   *DefaultFieldWrapper
 }
 
 type DefaultFieldExecutor struct {
@@ -94,7 +98,7 @@ type DefaultFieldExecutor struct {
 	params   common.ExecuteParams
 	message  common.Message
 	template *toolsRender.TextTemplate
-	field    *DefaultField
+	field    *DefaultFieldWrapper
 	funcs    map[string]any
 }
 
@@ -152,7 +156,7 @@ type DefaultField struct {
 	Dependencies []string
 	Hint         string
 	Filter       string
-	Children     []*DefaultField
+	Value        string
 }
 
 type DefaultAction struct {
@@ -1104,53 +1108,65 @@ func (df *DefaultFieldWrapper) Filter() string {
 	return df.DefaultField.Filter
 }
 
-func (df *DefaultFieldWrapper) Children() []common.Field {
+func (df *DefaultFieldWrapper) Value() string {
+	return df.DefaultField.Value
+}
 
-	r := []common.Field{}
-	for _, child := range df.DefaultField.Children {
-		r = append(r, &DefaultFieldWrapper{child})
+func (df *DefaultFieldWrapper) Parent() common.Field {
+	return df.parent
+}
+
+func (df *DefaultFieldWrapper) Merge(f common.Field, empty bool) bool {
+	if f == nil || df.DefaultField == nil {
+		return false
 	}
-	return r
+	field, ok := f.(*DefaultFieldWrapper)
+	if !ok {
+		return false
+	}
+	return df.DefaultField.merge(field.DefaultField, empty)
 }
 
 // DefaultField
 
-func (df *DefaultField) merge(field *DefaultField) {
+func (df *DefaultField) merge(field *DefaultField, empty bool) bool {
 
 	if field == nil {
-		return
+		return false
 	}
 
-	if field.Type != "" {
+	ft := fmt.Sprintf("%s", field.Type)
+	if !utils.IsEmpty(ft) || (utils.IsEmpty(ft) && empty) {
 		df.Type = field.Type
 	}
-	if !utils.IsEmpty(field.Label) {
+	if !utils.IsEmpty(field.Label) || (utils.IsEmpty(field.Label) && empty) {
 		df.Label = field.Label
 	}
-	if !utils.IsEmpty(field.Default) {
+	if !utils.IsEmpty(field.Default) || (utils.IsEmpty(field.Default) && empty) {
 		df.Default = field.Default
 	}
-	if !utils.IsEmpty(field.Hint) {
+	if !utils.IsEmpty(field.Hint) || (utils.IsEmpty(field.Hint) && empty) {
 		df.Hint = field.Hint
 	}
 	if field.Required && !df.Required {
 		df.Required = field.Required
 	}
-	if len(field.Values) != 0 {
+	if len(field.Values) != 0 || (len(field.Values) == 0 && empty) {
 		df.Values = field.Values
 	}
-	if len(field.Dependencies) != 0 {
+	if len(field.Dependencies) != 0 || (len(field.Dependencies) == 0 && empty) {
 		df.Dependencies = field.Dependencies
 	}
-	if !utils.IsEmpty(field.Filter) {
+	if !utils.IsEmpty(field.Filter) || (utils.IsEmpty(field.Filter) && empty) {
 		df.Filter = field.Filter
 	}
-	if !utils.IsEmpty(field.Template) {
+	if !utils.IsEmpty(field.Template) || (utils.IsEmpty(field.Template) && empty) {
 		df.Template = field.Template
 	}
-	if len(field.Children) != 0 {
-		df.Children = field.Children
+	if !utils.IsEmpty(field.Value) || (utils.IsEmpty(field.Value) && empty) {
+		df.Value = field.Value
 	}
+	return true
 }
 
 // DefaultFieldExecutor
@@ -1192,21 +1208,21 @@ func (de *DefaultFieldExecutor) fFieldList(items ...*DefaultField) []*DefaultFie
 	return items
 }
 
-func (de *DefaultFieldExecutor) fSetFieldDefault(value string) (string, error) {
+func (de *DefaultFieldExecutor) fSetFieldValue(value string) (string, error) {
 
-	if utils.IsEmpty(de.field) {
-		return "", fmt.Errorf("Default couldn't set field default value, field is nil")
+	if de.field == nil || de.field.DefaultField == nil {
+		return "", fmt.Errorf("Default couldn't set field value, field is nil")
 	}
-	de.field.Default = value
+	de.field.DefaultField.Value = value
 	return "", nil
 }
 
 func (de *DefaultFieldExecutor) fSetFieldValues(values []string) (string, error) {
 
-	if de.field == nil {
+	if de.field == nil || de.field.DefaultField == nil {
 		return "", fmt.Errorf("Default couldn't set field values, field is nil")
 	}
-	de.field.Values = values
+	de.field.DefaultField.Values = values
 	return "", nil
 }
 
@@ -1285,10 +1301,16 @@ func (de *DefaultFieldExecutor) fSetField(field *DefaultField, params map[string
 	if ok {
 		field.Filter = filter
 	}
+
+	value, ok := params["value"].(string)
+	if ok {
+		field.Value = value
+	}
+
 	return ""
 }
 
-func (de *DefaultFieldExecutor) Execute() ([]*DefaultField, error) {
+func (de *DefaultFieldExecutor) Execute() ([]*DefaultFieldWrapper, error) {
 
 	m := make(map[string]interface{})
 	m["bot"] = de.bot
@@ -1305,7 +1327,8 @@ func (de *DefaultFieldExecutor) Execute() ([]*DefaultField, error) {
 	}
 
 	var fnew *DefaultField
-	fields := []*DefaultField{}
+	fields := []*DefaultFieldWrapper{}
+
 	if !utils.IsEmpty(string(b)) {
 
 		// possible it's a field
@@ -1317,7 +1340,7 @@ func (de *DefaultFieldExecutor) Execute() ([]*DefaultField, error) {
 	}
 
 	if !utils.IsEmpty(de.field) {
-		de.field.merge(fnew)
+		de.field.merge(fnew, false)
 	}
 
 	gid := utils.GoRoutineID()
@@ -1338,7 +1361,10 @@ func (de *DefaultFieldExecutor) Execute() ([]*DefaultField, error) {
 		if fnew != nil && f.Name == fnew.Name {
 			continue
 		}
-		fields = append(fields, f)
+		fields = append(fields, &DefaultFieldWrapper{
+			DefaultField: f,
+			parent:       de.field,
+		})
 	}
 
 	de.fields.Range(func(key, value any) bool {
@@ -1356,7 +1382,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	funcs["readMessage"] = executor.fReadMessage
 
 	funcs["fieldList"] = executor.fFieldList
-	funcs["setFieldDefault"] = executor.fSetFieldDefault
+	funcs["setFieldValue"] = executor.fSetFieldValue
 	funcs["setFieldValues"] = executor.fSetFieldValues
 	funcs["setField"] = executor.fSetField
 	funcs["addField"] = executor.fAddField
@@ -1376,7 +1402,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	return template, funcs, nil
 }
 
-func NewFieldExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams, field *DefaultField) (*DefaultFieldExecutor, error) {
+func NewFieldExecutor(name, path string, command *DefaultCommand, bot common.Bot, message common.Message, params common.ExecuteParams, field *DefaultFieldWrapper) (*DefaultFieldExecutor, error) {
 
 	if !utils.FileExists(path) {
 		return nil, fmt.Errorf("Default couldn't find template %s", path)
@@ -1919,37 +1945,27 @@ func (dc *DefaultCommand) Actions() []common.Action {
 	return r
 }
 
-func (dc *DefaultCommand) findField(fields []*DefaultField, name string) *DefaultField {
+func (dc *DefaultCommand) configFieldsAsCommonFields(fields []*DefaultField) []*DefaultFieldWrapper {
 
-	for _, field := range fields {
-		if field.Name == name {
-			return field
-		}
-	}
-	return nil
-}
-
-/*func (dc *DefaultCommand) findConfigField(name string) *DefaultField {
-
-	if dc.config == nil {
-		return nil
-	}
-	return dc.findField(dc.config.Fields, name)
-}*/
-
-func (dc *DefaultCommand) configFieldsAsCommonFields(fields []*DefaultField) []common.Field {
-
-	r := []common.Field{}
+	r := []*DefaultFieldWrapper{}
 	for _, field := range fields {
 		if field == nil {
 			continue
 		}
-		r = append(r, &DefaultFieldWrapper{field})
+		var nf DefaultField
+		err := copier.CopyWithOption(&nf, field, copier.Option{IgnoreEmpty: true, DeepCopy: true})
+		if err != nil {
+			dc.logger.Error("Default command %s field %s copy error: %s", dc.name, field.Name, err)
+			continue
+		}
+		r = append(r, &DefaultFieldWrapper{
+			DefaultField: &nf,
+		})
 	}
 	return r
 }
 
-func (dc *DefaultCommand) flatFields(items []common.Field, fields *sync.Map) []common.Field {
+func (dc *DefaultCommand) flatFields(items []*DefaultFieldWrapper, fields *sync.Map) []common.Field {
 
 	r := []common.Field{}
 	for _, item := range items {
@@ -1959,15 +1975,20 @@ func (dc *DefaultCommand) flatFields(items []common.Field, fields *sync.Map) []c
 		}
 
 		new := item
+
 		name := item.Name()
 		fl, ok := fields.Load(name)
 		if ok {
 			new = fl.(*DefaultFieldWrapper)
 		}
 
+		if utils.IsEmpty(new) {
+			continue
+		}
+
 		r = append(r, new)
 
-		children := new.Children()
+		children := new.children
 		if len(children) > 0 {
 			rc := dc.flatFields(children, fields)
 			r = append(r, rc...)
@@ -1982,22 +2003,33 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 		return []common.Field{}
 	}
 
-	items := dc.configFieldsAsCommonFields(dc.config.Fields)
-	if !utils.IsEmpty(parent) {
-		items = parent.Children()
-	}
+	list := eval
 
-	if utils.IsEmpty(message) {
-		return items
+	items := dc.configFieldsAsCommonFields(dc.config.Fields)
+
+	if !utils.IsEmpty(parent) {
+		pName := parent.Name()
+		if !utils.Contains(list, pName) {
+			list = append(list, pName)
+		}
+		p := parent.(*DefaultFieldWrapper)
+		if p != nil && p.children != nil {
+			items = append(items, p.children...)
+		}
 	}
 
 	fields := &sync.Map{}
+
+	if utils.IsEmpty(message) {
+		return dc.flatFields(items, fields)
+	}
+
 	wGroup := &sync.WaitGroup{}
 
 	for _, field := range items {
 
 		fName := field.Name()
-		if !utils.Contains(eval, fName) {
+		if !utils.Contains(list, fName) {
 			continue
 		}
 
@@ -2012,37 +2044,34 @@ func (dc *DefaultCommand) Fields(bot common.Bot, message common.Message, params 
 		}
 
 		wGroup.Add(1)
-		go func() {
+		go func(fw *DefaultFieldWrapper) {
 
 			defer wGroup.Done()
 
-			df, ok := field.(*DefaultFieldWrapper)
-			if !ok {
-				return
-			}
+			name := fmt.Sprintf("%s-%s", dc.name, fw.DefaultField.Name)
+			path := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), fw.DefaultField.Template)
 
-			name := fmt.Sprintf("%s-%s", dc.name, df.DefaultField.Name)
-			path := fmt.Sprintf("%s%s%s", dc.processor.options.TemplatesDir, string(os.PathSeparator), df.DefaultField.Template)
-
-			executor, err := NewFieldExecutor(name, path, dc, bot, message, params, df.DefaultField)
+			executor, err := NewFieldExecutor(name, path, dc, bot, message, params, fw)
 			if err != nil {
-				dc.logger.Error("Default field template %s command %s field %s executor error: %s", path, dc.name, df.DefaultField.Name, err)
+				dc.logger.Error("Default field template %s command %s field %s executor error: %s", path, dc.name, fw.DefaultField.Name, err)
 				return
 			}
 
 			flds, err := executor.Execute()
 			if err != nil {
-				dc.logger.Error("Default field template %s command %s field %s create error: %s", path, dc.name, df.DefaultField.Name, err)
+				dc.logger.Error("Default field template %s command %s field %s create error: %s", path, dc.name, fw.DefaultField.Name, err)
 				return
 			}
 
-			df.DefaultField.Children = flds
-			fields.Store(df.DefaultField.Name, df)
-		}()
+			fw.children = flds
+			fields.Store(fw.DefaultField.Name, fw)
+		}(field)
 	}
 	wGroup.Wait()
 
-	return dc.flatFields(items, fields)
+	r := dc.flatFields(items, fields)
+
+	return r
 }
 
 func (dc *DefaultCommand) Priority() int {

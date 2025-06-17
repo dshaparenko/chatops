@@ -84,6 +84,16 @@ type SlackChannel struct {
 	id string
 }
 
+type SlackMessageField struct {
+	field  common.Field
+	values []string
+	value  string
+}
+
+type SlackMessageFields struct {
+	items []*SlackMessageField
+}
+
 type SlackMessage struct {
 	slack       *Slack
 	typ         string
@@ -100,7 +110,7 @@ type SlackMessage struct {
 	blocks      []slack.Block
 	actions     []common.Action
 	params      common.ExecuteParams
-	fields      []common.Field
+	fields      SlackMessageFields
 }
 
 type SlackFileResponseFull struct {
@@ -179,7 +189,6 @@ type SlackResponse struct {
 	original bool
 	duration bool
 	error    bool
-	reaction bool
 }
 
 const (
@@ -243,10 +252,6 @@ func (r *SlackResponse) Error() bool {
 	return r.error
 }
 
-/*func (r *SlackResponse) Reaction() bool {
-	return r.reaction
-}*/
-
 // SlackRichTextQuote
 func (r SlackRichTextQuote) RichTextElementType() slack.RichTextElementType {
 	return r.Type
@@ -288,6 +293,184 @@ func (su *SlackUser) Commands() []string {
 
 func (sc *SlackChannel) ID() string {
 	return sc.id
+}
+
+// SlackMessageField
+
+func (smf *SlackMessageField) Name() string {
+	if utils.IsEmpty(smf.field) {
+		return ""
+	}
+	return smf.field.Name()
+}
+
+func (smf *SlackMessageField) Type() common.FieldType {
+	if utils.IsEmpty(smf.field) {
+		return common.FieldType("")
+	}
+	return smf.field.Type()
+}
+
+func (smf *SlackMessageField) Label() string {
+	if utils.IsEmpty(smf.field) {
+		return ""
+	}
+	return smf.field.Label()
+}
+
+func (smf *SlackMessageField) Default() string {
+	if utils.IsEmpty(smf.field) {
+		return ""
+	}
+	return smf.field.Default()
+}
+
+func (smf *SlackMessageField) Required() bool {
+	if utils.IsEmpty(smf.field) {
+		return false
+	}
+	return smf.field.Required()
+}
+
+/*
+func (smf *SlackMessageField) Template() string {
+	if utils.IsEmpty(smf.field) {
+		return ""
+	}
+	return smf.field.Template()
+}
+*/
+
+func (smf *SlackMessageField) Dependencies() []string {
+	if utils.IsEmpty(smf.field) {
+		return nil
+	}
+	return smf.field.Dependencies()
+}
+
+func (smf *SlackMessageField) Hint() string {
+	if utils.IsEmpty(smf.field) {
+		return ""
+	}
+	return smf.field.Hint()
+}
+
+func (smf *SlackMessageField) Filter() string {
+	if utils.IsEmpty(smf.field) {
+		return ""
+	}
+	return smf.field.Filter()
+}
+
+func (smf *SlackMessageField) Value() string {
+	if utils.IsEmpty(smf.field) {
+		return ""
+	}
+
+	if !utils.IsEmpty(smf.value) {
+		return smf.value
+	}
+
+	return smf.field.Value()
+}
+
+func (smf *SlackMessageField) Values() []string {
+	if utils.IsEmpty(smf.field) {
+		return nil
+	}
+
+	if !utils.IsEmpty(smf.values) {
+		return smf.values
+	}
+
+	return smf.field.Values()
+}
+
+func (smf *SlackMessageField) copyFrom(field common.Field, empty bool) bool {
+
+	if utils.IsEmpty(field) {
+		return false
+	}
+
+	smf.field = field
+
+	values := field.Values()
+	if len(values) > 0 || (len(values) == 0 && empty) {
+		smf.values = values
+	}
+
+	value := field.Value()
+	if !utils.IsEmpty(value) || (utils.IsEmpty(value) && empty) {
+		smf.value = value
+	}
+
+	return true
+}
+
+func (smf *SlackMessageField) merge(field *SlackMessageField) bool {
+
+	if utils.IsEmpty(field) {
+		return false
+	}
+
+	smf.field = field.field
+	smf.values = field.values
+	smf.value = field.value
+	return true
+}
+
+// SlackMessageFields
+
+func (smf *SlackMessageFields) findField(name string) *SlackMessageField {
+
+	for _, f := range smf.items {
+		if f.Name() == name {
+			return f
+		}
+	}
+	return nil
+}
+
+func (smf *SlackMessageFields) fieldDependencies(name string) []*SlackMessageField {
+
+	r := []*SlackMessageField{}
+	for _, field := range smf.items {
+		if utils.Contains(field.Dependencies, name) {
+			r = append(r, field)
+		}
+	}
+	return r
+}
+
+func (smf *SlackMessageFields) copyFrom(fields []common.Field, empty bool) {
+
+	for _, f := range fields {
+		if utils.IsEmpty(f) {
+			continue
+		}
+		fn := &SlackMessageField{}
+		fn.copyFrom(f, empty)
+		smf.items = append(smf.items, fn)
+	}
+}
+
+func (smf *SlackMessageFields) merge(fields []*SlackMessageField) {
+
+	if len(fields) == 0 {
+		return
+	}
+
+	for _, f := range fields {
+		if f == nil || utils.IsEmpty(f.Name()) {
+			continue
+		}
+		existing := smf.findField(f.Name())
+		if existing != nil {
+			existing.merge(f)
+			continue
+		}
+		smf.items = append(smf.items, f)
+	}
 }
 
 // SlackMessage
@@ -365,6 +548,159 @@ func (sm *SlackMessage) getKey() *SlackMessageKey {
 	}
 
 	return nil
+}
+
+func (sm *SlackMessage) findFieldByName(fields []common.Field, name string) common.Field {
+
+	if utils.IsEmpty(name) {
+		return nil
+	}
+
+	for _, f := range fields {
+		if f.Name() == name {
+			return f
+		}
+	}
+	return nil
+}
+
+func (sm *SlackMessage) fieldValueToString(field *SlackMessageField, value interface{}) string {
+
+	r := ""
+	if utils.IsEmpty(value) || utils.IsEmpty(field) {
+		return r
+	}
+
+	switch field.Type() {
+	case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
+		switch v := value.(type) {
+		case []string:
+			r = strings.Join(v, ",")
+		case string:
+			r = v
+		}
+	default:
+		r = fmt.Sprintf("%v", value)
+	}
+	return r
+}
+
+func (sm *SlackMessage) mergeParams(params common.ExecuteParams, olds []string) {
+
+	for _, k := range olds {
+		delete(sm.params, k)
+	}
+
+	for k, v := range params {
+		if utils.IsEmpty(k) || utils.IsEmpty(v) {
+			continue
+		}
+		if sm.params == nil {
+			sm.params = make(common.ExecuteParams)
+		}
+		sm.params[k] = v
+	}
+
+	if sm.params == nil {
+		sm.params = make(common.ExecuteParams)
+	}
+
+	for _, f := range sm.fields.items {
+
+		name := f.Name()
+		if _, ok := sm.params[name]; !ok {
+			sm.params[name] = f.Value()
+		}
+	}
+}
+
+func (sm *SlackMessage) mergeFields(fields []common.Field, params common.ExecuteParams) ([]*SlackMessageField, bool) {
+
+	updateIsNeeded := false
+	newFields := []*SlackMessageField{}
+
+	// merge fields with existing ones
+	for _, f := range sm.fields.items {
+		fnew := sm.findFieldByName(fields, f.Name())
+		if utils.IsEmpty(fnew) {
+			newFields = append(newFields, f)
+			continue
+		}
+		if f.copyFrom(fnew, false) {
+			newFields = append(newFields, f)
+			updateIsNeeded = true
+		}
+	}
+
+	// add new fields that are not in the merged list
+	for _, f := range fields {
+		fold := sm.fields.findField(f.Name())
+		if fold != nil {
+			continue
+		}
+		fnew := &SlackMessageField{}
+		if fnew.copyFrom(f, true) {
+			newFields = append(newFields, fnew)
+		}
+	}
+
+	paramKeys := common.GetStringKeys(params)
+
+	// generate result
+	for _, f := range newFields {
+
+		fName := f.Name()
+		fValue := f.Value()
+		fDef := f.Default()
+		fValues := f.Values()
+		fDeps := f.Dependencies()
+
+		if utils.Contains(paramKeys, fName) {
+			f.value = sm.fieldValueToString(f, params[fName])
+			continue
+		}
+
+		skip := false
+		for _, dep := range fDeps {
+			if utils.Contains(paramKeys, dep) {
+				skip = true
+				break
+			}
+		}
+
+		if skip {
+			continue
+		}
+
+		v := ""
+		if params != nil {
+			pv := params[fName]
+			if !utils.IsEmpty(pv) && pv != fDef {
+				v = sm.fieldValueToString(f, pv)
+			}
+		}
+
+		if utils.IsEmpty(v) {
+			v = fValue
+		}
+
+		if utils.IsEmpty(v) {
+			v = fDef
+		}
+
+		if len(fValues) > 0 && !utils.IsEmpty(v) && !utils.Contains(fValues, v) {
+			v = fDef
+		}
+
+		if utils.IsEmpty(v) && !utils.IsEmpty(sm.params) {
+			pv := sm.params[fName]
+			if !utils.IsEmpty(pv) && pv != fDef {
+				v = sm.fieldValueToString(f, pv)
+			}
+		}
+		f.value = v
+	}
+	return newFields, updateIsNeeded
 }
 
 // SlackCacheMessageKey
@@ -1573,17 +1909,6 @@ func (s *Slack) replyError(m *SlackMessage, replier interface{}, err error, chan
 	return key.timestamp, nil
 }
 
-func (s *Slack) fieldDependencies(name string, fields []common.Field) []common.Field {
-
-	r := []common.Field{}
-	for _, field := range fields {
-		if utils.Contains(field.Dependencies(), name) {
-			r = append(r, field)
-		}
-	}
-	return r
-}
-
 func (s *Slack) parseArrayValues(sarr string) []string {
 
 	arr := common.RemoveEmptyStrings(strings.Split(sarr, ","))
@@ -1622,27 +1947,6 @@ func (s *Slack) findUserGroupNameByID(groups []slack.UserGroup, ID string) strin
 	return ID
 }
 
-func (s *Slack) fieldValueToString(field common.Field, value interface{}) string {
-
-	r := ""
-	if utils.IsEmpty(value) || utils.IsEmpty(field) {
-		return r
-	}
-
-	switch field.Type() {
-	case common.FieldTypeMultiSelect, common.FieldTypeDynamicMultiSelect:
-		switch v := value.(type) {
-		case []string:
-			r = strings.Join(v, ",")
-		case string:
-			r = v
-		}
-	default:
-		r = fmt.Sprintf("%v", value)
-	}
-	return r
-}
-
 func (s *Slack) fieldValueTransform(field common.Field, value interface{}) interface{} {
 
 	if utils.IsEmpty(field) {
@@ -1660,7 +1964,7 @@ func (s *Slack) fieldValueTransform(field common.Field, value interface{}) inter
 	return r
 }
 
-func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params common.ExecuteParams, u *SlackUser) ([]slack.Block, error) {
+func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params common.ExecuteParams, u *SlackUser) ([]slack.Block, error) {
 
 	blocks := []slack.Block{}
 	blockID := common.UUID()
@@ -1671,15 +1975,18 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 		confirmationParams[k] = v
 	}
 
-	for _, field := range fields {
+	for _, field := range fields.items {
 
 		fName := field.Name()
-		actionID := s.encodeActionID(blockID, slackFormFieldType, fName)
+		fValue := field.Value()
 		fType := field.Type()
+		fDef := field.Default()
+
+		actionID := s.encodeActionID(blockID, slackFormFieldType, fName)
 
 		var dac *slack.DispatchActionConfig
 
-		deps := s.fieldDependencies(fName, fields)
+		deps := fields.fieldDependencies(fName)
 		if len(deps) > 0 {
 			dac = &slack.DispatchActionConfig{
 				TriggerActionsOn: []string{slackTriggerOnEnterPressed},
@@ -1688,18 +1995,23 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 
 		def := ""
 		pv := params[fName]
-		if !utils.IsEmpty(pv) {
-			def = s.fieldValueToString(field, pv)
+		if !utils.IsEmpty(pv) && pv != fDef {
+			def = fmt.Sprintf("%v", pv)
 		}
+
 		if utils.IsEmpty(def) {
-			def = field.Default()
+			def = fValue
+		}
+
+		if utils.IsEmpty(def) {
+			def = fDef
 		}
 
 		if utils.IsEmpty(confirmationParams[fName]) {
 			confirmationParams[fName] = def
 		}
 
-		// updating values from params if exists
+		// updating values from params if exists  // ? remove
 		currentValues := field.Values()
 		if paramValues, exists := params[fName+"_values"]; exists {
 			switch v := paramValues.(type) {
@@ -2042,7 +2354,7 @@ func (s *Slack) formBlocks(cmd common.Command, fields []common.Field, params com
 	return blocks, nil
 }
 
-func (s *Slack) cacheReplyForm(m *SlackMessage, fields []common.Field, params common.ExecuteParams,
+func (s *Slack) cacheReplyForm(m *SlackMessage, fields SlackMessageFields, params common.ExecuteParams,
 	replier *slacker.ResponseReplier) error {
 
 	mThreadTS := m.key.threadTS
@@ -2066,10 +2378,10 @@ func (s *Slack) cacheReplyForm(m *SlackMessage, fields []common.Field, params co
 		return err
 	}
 
-	nParams := make(common.ExecuteParams)
-	for _, f := range fields {
+	/*nParams := make(common.ExecuteParams)
+	for _, f := range fields.items {
 		nParams[f.Name()] = f.Default()
-	}
+	}*/
 
 	mNew := s.cloneMessage(m)
 	mNew.originKey = m.key
@@ -2079,8 +2391,6 @@ func (s *Slack) cacheReplyForm(m *SlackMessage, fields []common.Field, params co
 		threadTS:  mThreadTS,
 	}
 	mNew.blocks = blocks
-	mNew.params = nParams
-	mNew.fields = fields
 
 	s.putMessageToCache(mNew)
 
@@ -2500,22 +2810,20 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		}
 
 		m := &SlackMessage{
-			slack:     s,
-			typ:       event.Type,
-			cmdText:   event.Text,
-			cmd:       cmd,
-			wrapper:   nil,
-			originKey: nil,
-			key:       key,
-			user:      u,
-			caller:    u,
-			botID:     event.BotID,
-			//visible:     false,
+			slack:       s,
+			typ:         event.Type,
+			cmdText:     event.Text,
+			cmd:         cmd,
+			wrapper:     nil,
+			originKey:   nil,
+			key:         key,
+			user:        u,
+			caller:      u,
+			botID:       event.BotID,
 			responseURL: "",
 			blocks:      nil,
 			actions:     nil,
 			params:      nil,
-			fields:      nil,
 		}
 
 		replier := cc.Response()
@@ -2624,12 +2932,12 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			approvalParams = rParams
 		}
 
-		m.fields = rFields
-		m.params = rParams
+		m.fields.copyFrom(rFields, true)
+		m.mergeParams(rParams, nil)
 		s.putMessageToCache(m)
 
 		if s.formNeeded(rFields, rParams) && u != nil {
-			err := s.cacheReplyForm(m, rFields, rParams, replier)
+			err := s.cacheReplyForm(m, m.fields, rParams, replier)
 			if err != nil {
 				s.replyError(m, replier, err, "", nil, nil)
 				s.addRemoveReactions(m.typ, m.key, s.options.ReactionFailed, s.options.ReactionDoing)
@@ -2794,7 +3102,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		m.cmd = cmd
 		m.key = key
 		m.originKey = mOrigin.key
-		m.fields = fields
+		m.fields.copyFrom(fields, true)
 	} else {
 		m = &SlackMessage{
 			slack:     s,
@@ -2812,7 +3120,6 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 			blocks:      nil,
 			actions:     nil,
 			params:      params,
-			fields:      fields,
 		}
 	}
 
@@ -2851,6 +3158,9 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 					channelID = mOrigin.key.channelID
 				}
 				threadTS = mOrigin.key.threadTS
+			}
+			if utils.IsEmpty(threadTS) && !utils.IsEmpty(mOrigin.ParentID()) {
+				threadTS = mOrigin.ParentID()
 			}
 			r = s.buildResponse(false, append(s.messageResponses(mOrigin, true), response)...)
 		}
@@ -2937,19 +3247,18 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 			blocks:      blocks,
 			actions:     actions,
 			params:      nil,
-			fields:      nil,
 		}
 		s.putMessageToCache(m)
 	}
 	return ts, nil
 }
 
-func (s *Slack) getActionValue(field common.Field, state slack.BlockAction) interface{} {
+func (s *Slack) getActionValue(field *SlackMessageField, state slack.BlockAction) (interface{}, bool) {
 
 	var v interface{}
 	v = state.Value
 	if utils.IsEmpty(field) {
-		return v
+		return v, false
 	}
 
 	fType := field.Type()
@@ -3005,17 +3314,7 @@ func (s *Slack) getActionValue(field common.Field, state slack.BlockAction) inte
 		arr = append(arr, state.SelectedChannels...)
 		v = arr
 	}
-	return v
-}
-
-func (s *Slack) findField(fields []common.Field, name string) common.Field {
-
-	for _, f := range fields {
-		if f.Name() == name {
-			return f
-		}
-	}
-	return nil
+	return v, true
 }
 
 func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage, action *slack.BlockAction, name string) bool {
@@ -3025,19 +3324,31 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		return false
 	}
 
-	// find all fields that depend on name
+	// find all fields that depends on name
 	deps := []string{}
 	skip := []common.FieldType{common.FieldTypeDynamicSelect, common.FieldTypeDynamicMultiSelect}
 
-	allFields := m.cmd.Fields(s, nil, nil, nil, nil)
-	for _, field := range allFields {
-		fDeps := field.Dependencies()
-		fType := field.Type()
-		if utils.Contains(fDeps, name) && !utils.Contains(skip, fType) {
-			deps = append(deps, field.Name())
+	if len(m.fields.items) == 0 {
+		fields := m.cmd.Fields(s, nil, nil, nil, nil)
+		m.fields.copyFrom(fields, true)
+	}
+
+	var parent common.Field
+
+	// find dependencies and parent field
+	for _, f := range m.fields.items {
+		fDeps := f.Dependencies()
+		fType := f.Type()
+		fName := f.Name()
+		if utils.Contains(fDeps, name) && !utils.Contains(skip, fType) && !utils.Contains(deps, fName) {
+			deps = append(deps, fName)
+		}
+		if fName == name {
+			parent = f.field
 		}
 	}
 
+	// set default value based on action
 	params := make(common.ExecuteParams)
 	params[name] = action.Value
 
@@ -3047,56 +3358,55 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 			if utils.IsEmpty(n2) {
 				continue
 			}
-			field := s.findField(allFields, n2)
-			params[n2] = s.getActionValue(field, v2)
+			f := m.fields.findField(n2)
+			v, ok := s.getActionValue(f, v2)
+			if ok {
+				params[n2] = v
+			}
 		}
 	}
 
-	// get dependent fields
-	depFields := m.cmd.Fields(s, m, params, deps, nil)
-	for _, field := range depFields {
-
-		name := field.Name()
-		if !utils.Contains(deps, name) {
-			continue
-		}
-		// check if fields have values to update
-		values := field.Values()
-
-		if len(values) > 0 {
-			params[name+"_values"] = values
-		}
-
-		def := field.Default()
-		if !utils.IsEmpty(def) {
-			params[name] = s.fieldValueTransform(field, def)
+	if !utils.IsEmpty(parent) && len(deps) == 0 {
+		tpl := parent.Template()
+		name := parent.Name()
+		_, ok := params[name]
+		if utils.IsEmpty(tpl) && ok {
+			m.params = common.MergeInterfaceMaps(m.params, params)
+			s.putMessageToCache(m)
+			return false
 		}
 	}
 
-	// keep old values if they exist (which not in params)
-	for k, v := range m.params {
-		if _, ok := params[k]; ok {
-			continue
-		}
-		params[k] = v
-	}
-	m.params = params
+	// calculate fields based on dependencies
+
+	// ??? parent is not always working, it is needed to pass a field wiich should be calculated
+	// its also important to pass fields that already calculated
+
+	calcs := m.cmd.Fields(s, m, params, deps, parent)
+	flds, update := m.mergeFields(calcs, params)
+
+	m.mergeParams(params, deps)
+	m.fields.merge(flds)
 	m.responseURL = callback.ResponseURL
 	s.putMessageToCache(m)
 
-	if len(deps) == 0 {
+	if !update {
 		return false
 	}
 
-	blocks, err := s.formBlocks(m.cmd /*m.fields*/, depFields, params, m.user)
+	blocks, err := s.formBlocks(m.cmd, m.fields, m.params, m.user)
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return false
 	}
 
 	options := []slack.MsgOption{}
-	//options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionPostEphemeral(m.userID)) // section doesn't work
-	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionTS(m.key.threadTS)) // section works :(
+
+	// section doesn't work
+	//options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionPostEphemeral(m.userID))
+
+	// section works :(, but there is a message in the channel if a request is the thread
+	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionTS(m.key.threadTS))
 
 	_, _, _, err = s.client.SlackClient().UpdateMessage(m.key.channelID, m.key.timestamp, options...)
 	if err != nil {
@@ -3122,31 +3432,26 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 		states := callback.BlockActionState
 		if states != nil && len(states.Values) > 0 {
 
-			cmdFields := m.cmd.Fields(s, nil, nil, nil, nil)
 			for _, v1 := range states.Values {
 				for k2, v2 := range v1 {
 					_, _, n2 := s.decodeActionID(k2)
 					if utils.IsEmpty(n2) {
 						continue
 					}
-					field := s.findField(cmdFields, n2)
-					params[n2] = s.getActionValue(field, v2)
+					f := m.fields.findField(n2)
+					v, ok := s.getActionValue(f, v2)
+					if ok {
+						params[n2] = v
+					}
 				}
 			}
 		}
 
-		// check cache params
-		for k, v := range m.params {
-			if _, ok := params[k]; ok {
-				continue
-			}
-			params[k] = v
-		}
-		m.params = params
+		m.mergeParams(params, nil)
 		s.putMessageToCache(m)
 
 		// check approval
-		message, channel := s.approvalNeeded(m, m.cmd, params)
+		message, channel := s.approvalNeeded(m, m.cmd, m.params)
 		if !utils.IsEmpty(message) {
 
 			replier := ctx.Response()
@@ -3173,7 +3478,7 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 
 		s.removeMessage(m)
 		s.addRemoveReactions(m.typ, m.originKey, s.options.ReactionDoing, reaction)
-		s.executeCommandAfterApprovalReaction(ctx, m, m.originKey, params, s.options.ReactionDoing)
+		s.executeCommandAfterApprovalReaction(ctx, m, m.originKey, m.params, s.options.ReactionDoing)
 
 	default:
 		s.removeMessage(m)
@@ -3448,23 +3753,24 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 		return
 	}
 
-	params := make(common.ExecuteParams)
-	cache := m.params
-	for k, v := range cache {
-		if _, ok := params[k]; ok {
-			continue
-		}
-		params[k] = v
-	}
-
 	options := []*slack.OptionBlockObject{}
 	value := callback.Value
 	if utils.IsEmpty(value) {
 		return
 	}
+	params := make(common.ExecuteParams)
 	params[name] = value
 
-	fields := m.cmd.Fields(s, m, params, []string{name}, nil)
+	var parent common.Field
+	f := m.fields.findField(name)
+	if !utils.IsEmpty(f) {
+		parent = f.field.Parent()
+	}
+
+	deps := []string{name}
+
+	fields := m.cmd.Fields(s, m, params, deps, parent)
+
 	var field common.Field
 
 	for _, f := range fields {
@@ -3477,6 +3783,12 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 	if field == nil {
 		return
 	}
+
+	flds, _ := m.mergeFields(fields, params)
+
+	m.mergeParams(params, deps)
+	m.fields.merge(flds)
+	s.putMessageToCache(m)
 
 	values := field.Values()
 
