@@ -434,7 +434,8 @@ func (smf *SlackMessageFields) fieldDependencies(name string) []*SlackMessageFie
 
 	r := []*SlackMessageField{}
 	for _, field := range smf.items {
-		if utils.Contains(field.Dependencies, name) {
+		deps := field.Dependencies()
+		if utils.Contains(deps, name) {
 			r = append(r, field)
 		}
 	}
