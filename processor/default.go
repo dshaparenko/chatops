@@ -157,6 +157,7 @@ type DefaultField struct {
 	Hint         string
 	Filter       string
 	Value        string
+	Visible      *bool
 }
 
 type DefaultAction struct {
@@ -1110,6 +1111,15 @@ func (df *DefaultFieldWrapper) Filter() string {
 
 func (df *DefaultFieldWrapper) Value() string {
 	return df.DefaultField.Value
+}
+
+func (df *DefaultFieldWrapper) Visible() bool {
+
+	v := df.DefaultField.Visible
+	if v == nil {
+		return true
+	}
+	return *df.DefaultField.Visible
 }
 
 func (df *DefaultFieldWrapper) Parent() common.Field {
