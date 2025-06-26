@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -682,7 +681,7 @@ func (sm *SlackMessage) mergeFields(fields []common.Field, params common.Execute
 	updateIsNeeded := false
 	newFields := []*SlackMessageField{}
 
-	keys := maps.Keys(params)
+	keys := common.GetStringKeys(params)
 	// merge fields with existing ones
 	for _, f := range sm.fields.items {
 
@@ -2068,8 +2067,8 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 		}
 
 		def := ""
-		pv := params[fName]
-		if !utils.IsEmpty(pv) && pv != fDef {
+		pv, ok := params[fName]
+		if ok && pv != fDef {
 			def = fmt.Sprintf("%v", pv)
 		}
 
