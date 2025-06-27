@@ -1218,6 +1218,15 @@ func (de *DefaultFieldExecutor) fFieldList(items ...*DefaultField) []*DefaultFie
 	return items
 }
 
+func (de *DefaultFieldExecutor) fSetFieldLabel(label string) (string, error) {
+
+	if de.field == nil || de.field.DefaultField == nil {
+		return "", fmt.Errorf("Default couldn't set field label, field is nil")
+	}
+	de.field.DefaultField.Label = label
+	return "", nil
+}
+
 func (de *DefaultFieldExecutor) fSetFieldValue(value string) (string, error) {
 
 	if de.field == nil || de.field.DefaultField == nil {
@@ -1312,9 +1321,16 @@ func (de *DefaultFieldExecutor) fSetField(field *DefaultField, params map[string
 		field.Filter = filter
 	}
 
-	value, ok := params["value"].(string)
+	value := params["value"]
+	if utils.IsEmpty(value) {
+		field.Value = ""
+	} else {
+		field.Value = fmt.Sprintf("%v", value)
+	}
+
+	visible, ok := params["visible"].(bool)
 	if ok {
-		field.Value = value
+		field.Visible = &visible
 	}
 
 	return ""
@@ -1392,6 +1408,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	funcs["readMessage"] = executor.fReadMessage
 
 	funcs["fieldList"] = executor.fFieldList
+	funcs["setFieldLabel"] = executor.fSetFieldLabel
 	funcs["setFieldValue"] = executor.fSetFieldValue
 	funcs["setFieldValues"] = executor.fSetFieldValues
 	funcs["setField"] = executor.fSetField

@@ -145,6 +145,7 @@ const (
 	FieldTypeMultiChannel       = "multichannel"
 	FieldTypeGroup              = "group"
 	FieldTypeMultiGroup         = "multigroup"
+	FieldTypeHidden             = "hidden"
 )
 
 // Processors

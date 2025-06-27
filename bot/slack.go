@@ -492,17 +492,22 @@ func (smf *SlackMessageFields) merge(fields []*SlackMessageField) {
 		return
 	}
 
+	newFields := []*SlackMessageField{}
 	for _, f := range fields {
-		if f == nil || utils.IsEmpty(f.Name()) {
+
+		name := f.Name()
+		if f == nil || utils.IsEmpty(name) {
 			continue
 		}
-		existing := smf.findField(f.Name())
-		if existing != nil {
+		existing := smf.findField(name)
+		if !utils.IsEmpty(existing) {
 			existing.merge(f)
+			newFields = append(newFields, existing)
 			continue
 		}
-		smf.items = append(smf.items, f)
+		newFields = append(newFields, f)
 	}
+	smf.items = newFields
 }
 
 // SlackMessage
@@ -689,7 +694,7 @@ func (sm *SlackMessage) mergeFields(fields []common.Field, params common.Execute
 		fold := sm.findFieldByName(fields, name)
 
 		if utils.IsEmpty(fold) {
-			newFields = append(newFields, f)
+			//newFields = append(newFields, f) //???
 			continue
 		}
 		flag := utils.Contains(keys, name)
@@ -731,6 +736,7 @@ func (sm *SlackMessage) mergeFields(fields []common.Field, params common.Execute
 		for _, dep := range fDeps {
 			if utils.Contains(paramKeys, dep) {
 				skip = true
+				//f.value = fDef //???
 				break
 			}
 		}
@@ -2383,6 +2389,8 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 			min := s.options.MinQueryLength
 			e.MinQueryLength = &min
 			el = e
+		case common.FieldTypeHidden:
+			addToBlocks = false
 		default:
 			e := slack.NewPlainTextInputBlockElement(h, actionID)
 			e.InitialValue = def
@@ -3908,26 +3916,25 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 	}
 
 	re := regexp.MustCompile(value)
-	if re == nil {
-		return
-	}
+	if re != nil {
 
-	for _, v := range values {
+		for _, v := range values {
 
-		if len(options) >= s.options.MaxQueryOptions {
-			break
-		}
-
-		if re.MatchString(v) {
-
-			var h *slack.TextBlockObject
-			fHint := field.Hint()
-			if !utils.IsEmpty(fHint) {
-				h = slack.NewTextBlockObject(slack.PlainTextType, fHint, false, false)
+			if len(options) >= s.options.MaxQueryOptions {
+				break
 			}
 
-			options = append(options,
-				slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h))
+			if re.MatchString(v) {
+
+				var h *slack.TextBlockObject
+				fHint := field.Hint()
+				if !utils.IsEmpty(fHint) {
+					h = slack.NewTextBlockObject(slack.PlainTextType, fHint, false, false)
+				}
+
+				options = append(options,
+					slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h))
+			}
 		}
 	}
 
