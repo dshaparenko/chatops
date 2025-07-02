@@ -3406,6 +3406,26 @@ func (s *Slack) getActionValue(field *SlackMessageField, state slack.BlockAction
 	return v, true
 }
 
+func (s *Slack) AddDivider(channelID, message string) error {
+
+	if utils.IsEmpty(channelID) {
+		return nil
+	}
+
+	blocks := []slack.Block{slack.NewDividerBlock()}
+	opts := []slack.MsgOption{slack.MsgOptionBlocks(blocks...)}
+	if !utils.IsEmpty(message) {
+		opts = append(opts, slack.MsgOptionTS(message))
+	}
+
+	_, _, err := s.client.SlackClient().PostMessage(channelID, opts...)
+	if err != nil {
+		s.logger.Error("Slack couldn't add divider to %s: %s", channelID, err)
+		return err
+	}
+	return nil
+}
+
 func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage, action *slack.BlockAction, name string) bool {
 
 	callback := ctx.Callback()
