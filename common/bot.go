@@ -23,6 +23,8 @@ type Bot interface {
 	DeleteMessage(channel, ID string) error
 	ReadMessage(channel, ID string) (string, error)
 	UpdateMessage(channel, ID, message string) error
+
+	AddDivider(channel, ID string) error
 }
 
 type Bots struct {
