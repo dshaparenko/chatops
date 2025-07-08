@@ -633,6 +633,17 @@ func (de *DefaultExecutor) fReadMessage(channelID, messageID string) string {
 	}
 	return text
 }
+func (de *DefaultExecutor) fReadMessageV2(channelID, messageTS, threadTS string) string {
+
+	text, err := de.bot.ReadMessageV2(channelID, messageTS, threadTS)
+
+	if err != nil {
+		e := true
+		de.error = &e
+		return err.Error()
+	}
+	return text
+}
 
 func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) string {
 
@@ -1014,6 +1025,8 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
+	funcs["readMessageV2"] = executor.fReadMessageV2
+
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
 
@@ -1185,6 +1198,16 @@ func (de *DefaultFieldExecutor) fReadMessage(channelID, messageID string) string
 
 	text, err := de.bot.ReadMessage(channelID, messageID)
 	if err != nil {
+		return err.Error()
+	}
+	return text
+}
+func (de *DefaultFieldExecutor) fReadMessageV2(channelID, messageTS, threadTS string) string {
+
+	text, err := de.bot.ReadMessageV2(channelID, messageTS, threadTS)
+
+	if err != nil {
+
 		return err.Error()
 	}
 	return text
@@ -1406,6 +1429,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	funcs := make(map[string]any)
 	funcs["runTemplate"] = executor.fRunTemplate
 	funcs["readMessage"] = executor.fReadMessage
+	funcs["readMessageV2"] = executor.fReadMessageV2
 
 	funcs["fieldList"] = executor.fFieldList
 	funcs["setFieldLabel"] = executor.fSetFieldLabel
