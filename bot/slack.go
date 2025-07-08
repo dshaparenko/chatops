@@ -2099,7 +2099,12 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 		def := ""
 		pv, ok := params[fName]
 		if ok && pv != fDef {
-			def = fmt.Sprintf("%v", pv)
+			switch pv := pv.(type) {
+			case []string:
+				def = strings.Join(pv, ",")
+			default:
+				def = fmt.Sprintf("%v", pv)
+			}
 		}
 
 		if utils.IsEmpty(def) {
@@ -2114,16 +2119,7 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 			confirmationParams[fName] = def
 		}
 
-		// updating values from params if exists  // ? remove
 		currentValues := field.Values()
-		if paramValues, exists := params[fName+"_values"]; exists {
-			switch v := paramValues.(type) {
-			case []string:
-				currentValues = v
-			case string:
-				currentValues = strings.Split(v, ",")
-			}
-		}
 
 		fHint := field.Hint()
 		l := slack.NewTextBlockObject(slack.PlainTextType, field.Label(), false, false)
@@ -3515,6 +3511,9 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		}
 	}
 
+	mParams := make(common.ExecuteParams)
+	mParams[name] = params[name]
+
 	// calculate fields based on dependencies
 
 	// ??? parent is not always working, it is needed to pass a field wiich should be calculated
@@ -3523,7 +3522,7 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 	reqParams := m.prepareParams(params)
 
 	calcs := m.cmd.Fields(s, m, reqParams, deps, parent)
-	flds, update := m.mergeFields(calcs, params)
+	flds, update := m.mergeFields(calcs, mParams)
 
 	m.mergeParams(params, deps)
 	m.fields.merge(flds)
