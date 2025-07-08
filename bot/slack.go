@@ -1736,7 +1736,7 @@ func (s *Slack) ReadMessage(channel, ID string) (string, error) {
 
 	params := &slack.GetConversationHistoryParameters{
 		ChannelID: channel,
-		Latest:    ID,
+		Oldest:    ID,
 		Limit:     1,
 		Inclusive: true,
 	}
