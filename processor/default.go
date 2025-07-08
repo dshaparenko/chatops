@@ -622,9 +622,9 @@ func (de *DefaultExecutor) fDeleteMessage(channelID, messageID string) string {
 	return ""
 }
 
-func (de *DefaultExecutor) fReadMessage(channelID, messageID string) string {
+func (de *DefaultExecutor) fReadMessage(channelID, messageTS, threadTS string) string {
 
-	text, err := de.bot.ReadMessage(channelID, messageID)
+	text, err := de.bot.ReadMessage(channelID, messageTS, threadTS)
 
 	if err != nil {
 		e := true
@@ -1025,6 +1025,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
+
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
 	funcs["addDivider"] = executor.fAddDivider
@@ -1193,10 +1194,12 @@ func (df *DefaultField) merge(field *DefaultField, empty bool) bool {
 
 // DefaultFieldExecutor
 
-func (de *DefaultFieldExecutor) fReadMessage(channelID, messageID string) string {
+func (de *DefaultFieldExecutor) fReadMessage(channelID, messageTS, threadTS string) string {
 
-	text, err := de.bot.ReadMessage(channelID, messageID)
+	text, err := de.bot.ReadMessage(channelID, messageTS, threadTS)
+
 	if err != nil {
+
 		return err.Error()
 	}
 	return text

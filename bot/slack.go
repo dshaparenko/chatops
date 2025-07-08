@@ -1731,30 +1731,54 @@ func (s *Slack) DeleteMessage(channel, ID string) error {
 	s.logger.Info("Message deleted successfully")
 	return nil
 }
+func (s *Slack) ReadMessage(channel, messageTS, threadTS string) (string, error) {
 
-func (s *Slack) ReadMessage(channel, ID string) (string, error) {
+	if threadTS != "" {
+		s.logger.Info("Fetching message from thread. Channel: %s, ThreadTS: %s, MessageTS: %s", channel, threadTS, messageTS)
+		params := &slack.GetConversationRepliesParameters{
+			ChannelID: channel,
+			Timestamp: threadTS,
+		}
 
-	params := &slack.GetConversationHistoryParameters{
-		ChannelID: channel,
-		Latest:    ID,
-		Limit:     1,
-		Inclusive: true,
-	}
+		messages, _, _, err := s.client.SlackClient().GetConversationReplies(params)
+		if err != nil {
+			s.logger.Error("Failed to get thread replies: %s", err)
+			return "", err
+		}
 
-	r, err := s.client.SlackClient().GetConversationHistory(params)
+		for _, message := range messages {
+			if message.Timestamp == messageTS {
+				return message.Text, nil
+			}
+		}
 
-	if err != nil {
-		s.logger.Error("Failed to get message: %s", err)
+		err = fmt.Errorf("message with ts %s not found in thread %s", messageTS, threadTS)
+		s.logger.Error(err.Error())
 		return "", err
-	}
 
-	if len(r.Messages) == 0 {
-		err := fmt.Errorf("message not found")
-		s.logger.Error("Failed to get message: %s", err)
-		return "", err
-	}
+	} else {
+		s.logger.Info("Fetching parent message. Channel: %s, MessageTS: %s", channel, messageTS)
+		params := &slack.GetConversationHistoryParameters{
+			ChannelID: channel,
+			Latest:    messageTS,
+			Limit:     1,
+			Inclusive: true,
+		}
 
-	return r.Messages[0].Text, nil
+		r, err := s.client.SlackClient().GetConversationHistory(params)
+		if err != nil {
+			s.logger.Error("Failed to get message history: %s", err)
+			return "", err
+		}
+
+		if len(r.Messages) == 0 {
+			err := fmt.Errorf("message with ts %s not found in channel %s", messageTS, channel)
+			s.logger.Error(err.Error())
+			return "", err
+		}
+
+		return r.Messages[0].Text, nil
+	}
 }
 
 func (s *Slack) UpdateMessage(channel, ID, message string) error {
