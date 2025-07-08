@@ -1731,7 +1731,7 @@ func (s *Slack) DeleteMessage(channel, ID string) error {
 	s.logger.Info("Message deleted successfully")
 	return nil
 }
-func (s *Slack) ReadMessageV2(channel, messageTS, threadTS string) (string, error) {
+func (s *Slack) ReadMessage(channel, messageTS, threadTS string) (string, error) {
 
 	if threadTS != "" {
 		s.logger.Info("Fetching message from thread. Channel: %s, ThreadTS: %s, MessageTS: %s", channel, threadTS, messageTS)
@@ -1779,30 +1779,6 @@ func (s *Slack) ReadMessageV2(channel, messageTS, threadTS string) (string, erro
 
 		return r.Messages[0].Text, nil
 	}
-}
-func (s *Slack) ReadMessage(channel, ID string) (string, error) {
-
-	params := &slack.GetConversationHistoryParameters{
-		ChannelID: channel,
-		Latest:    ID,
-		Limit:     1,
-		Inclusive: true,
-	}
-
-	r, err := s.client.SlackClient().GetConversationHistory(params)
-
-	if err != nil {
-		s.logger.Error("Failed to get message: %s", err)
-		return "", err
-	}
-
-	if len(r.Messages) == 0 {
-		err := fmt.Errorf("message not found")
-		s.logger.Error("Failed to get message: %s", err)
-		return "", err
-	}
-
-	return r.Messages[0].Text, nil
 }
 
 func (s *Slack) UpdateMessage(channel, ID, message string) error {

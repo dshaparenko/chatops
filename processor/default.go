@@ -622,20 +622,9 @@ func (de *DefaultExecutor) fDeleteMessage(channelID, messageID string) string {
 	return ""
 }
 
-func (de *DefaultExecutor) fReadMessage(channelID, messageID string) string {
+func (de *DefaultExecutor) fReadMessage(channelID, messageTS, threadTS string) string {
 
-	text, err := de.bot.ReadMessage(channelID, messageID)
-
-	if err != nil {
-		e := true
-		de.error = &e
-		return err.Error()
-	}
-	return text
-}
-func (de *DefaultExecutor) fReadMessageV2(channelID, messageTS, threadTS string) string {
-
-	text, err := de.bot.ReadMessageV2(channelID, messageTS, threadTS)
+	text, err := de.bot.ReadMessage(channelID, messageTS, threadTS)
 
 	if err != nil {
 		e := true
@@ -1036,7 +1025,6 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
-	funcs["readMessageV2"] = executor.fReadMessageV2
 
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
@@ -1206,17 +1194,9 @@ func (df *DefaultField) merge(field *DefaultField, empty bool) bool {
 
 // DefaultFieldExecutor
 
-func (de *DefaultFieldExecutor) fReadMessage(channelID, messageID string) string {
+func (de *DefaultFieldExecutor) fReadMessage(channelID, messageTS, threadTS string) string {
 
-	text, err := de.bot.ReadMessage(channelID, messageID)
-	if err != nil {
-		return err.Error()
-	}
-	return text
-}
-func (de *DefaultFieldExecutor) fReadMessageV2(channelID, messageTS, threadTS string) string {
-
-	text, err := de.bot.ReadMessageV2(channelID, messageTS, threadTS)
+	text, err := de.bot.ReadMessage(channelID, messageTS, threadTS)
 
 	if err != nil {
 
@@ -1441,7 +1421,6 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	funcs := make(map[string]any)
 	funcs["runTemplate"] = executor.fRunTemplate
 	funcs["readMessage"] = executor.fReadMessage
-	funcs["readMessageV2"] = executor.fReadMessageV2
 
 	funcs["fieldList"] = executor.fFieldList
 	funcs["setFieldLabel"] = executor.fSetFieldLabel

@@ -21,8 +21,7 @@ type Bot interface {
 
 	PostMessage(channel string, message string, attachments []*Attachment, actions []Action, user User, parent Message, response Response) (string, error)
 	DeleteMessage(channel, ID string) error
-	ReadMessage(channel, ID string) (string, error)
-	ReadMessageV2(channel, ID, threadID string) (string, error)
+	ReadMessage(channel, ID, threadID string) (string, error)
 	UpdateMessage(channel, ID, message string) error
 
 	AddDivider(channel, ID string) error
