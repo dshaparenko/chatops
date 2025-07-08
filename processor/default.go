@@ -744,6 +744,17 @@ func (de *DefaultExecutor) fAskOpenAI(params map[string]interface{}) string {
 	return string(response)
 }
 
+func (de *DefaultExecutor) fAddDivider(channelID, ID string) string {
+	err := de.bot.AddDivider(channelID, ID)
+
+	if err != nil {
+		e := true
+		de.error = &e
+		return err.Error()
+	}
+	return ""
+}
+
 func (de *DefaultExecutor) fSetError() string {
 	e := true
 	de.error = &e
@@ -1029,6 +1040,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
+	funcs["addDivider"] = executor.fAddDivider
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),

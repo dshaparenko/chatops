@@ -24,6 +24,8 @@ type Bot interface {
 	ReadMessage(channel, ID string) (string, error)
 	ReadMessageV2(channel, ID, threadID string) (string, error)
 	UpdateMessage(channel, ID, message string) error
+
+	AddDivider(channel, ID string) error
 }
 
 type Bots struct {
