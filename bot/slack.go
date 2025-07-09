@@ -684,19 +684,52 @@ func (sm *SlackMessage) mergeParams(params common.ExecuteParams, olds []string) 
 func (sm *SlackMessage) mergeFields(fields []common.Field, params common.ExecuteParams) ([]*SlackMessageField, bool) {
 
 	updateIsNeeded := false
-	newFields := []*SlackMessageField{}
+
+	paramsFields := []string{}
+	depFields := []string{}
 
 	keys := common.GetStringKeys(params)
-	// merge fields with existing ones
+
+	// find fields that depend on params
+	for _, f := range sm.fields.items {
+		name := f.Name()
+		if utils.Contains(keys, name) {
+			paramsFields = append(paramsFields, name)
+		}
+	}
+
+	// find dep fields
+	for _, name := range paramsFields {
+		for _, f2 := range sm.fields.items {
+			name2 := f2.Name()
+			if name == name2 {
+				continue
+			}
+			deps := f2.Dependencies()
+			if utils.Contains(deps, name) {
+				depFields = append(depFields, name2)
+			}
+		}
+	}
+
+	paramsFields = append(paramsFields, depFields...)
+	newFields := []*SlackMessageField{}
+
+	// merge found fields with existing ones
 	for _, f := range sm.fields.items {
 
 		name := f.Name()
-		fold := sm.findFieldByName(fields, name)
 
-		if utils.IsEmpty(fold) {
-			//newFields = append(newFields, f) //???
+		if !utils.Contains(paramsFields, name) {
+			newFields = append(newFields, f)
 			continue
 		}
+
+		fold := sm.findFieldByName(fields, name)
+		if utils.IsEmpty(fold) {
+			continue
+		}
+
 		flag := utils.Contains(keys, name)
 		if f.copyFrom(fold, flag) {
 			newFields = append(newFields, f)
@@ -706,7 +739,8 @@ func (sm *SlackMessage) mergeFields(fields []common.Field, params common.Execute
 
 	// add new fields that are not in the merged list
 	for _, f := range fields {
-		fold := sm.fields.findField(f.Name())
+		name := f.Name()
+		fold := sm.fields.findField(name)
 		if fold != nil {
 			continue
 		}
