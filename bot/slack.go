@@ -4118,6 +4118,7 @@ func (s *Slack) newJob(cmd common.Command) *slacker.JobDefinition {
 		mNew.blocks = blocks
 		mNew.actions = actions
 		mNew.visible = r.visible
+		mNew.SetParentID(mNew.ID())
 		s.putMessageToCache(mNew)
 
 		err = executor.After(mNew)
