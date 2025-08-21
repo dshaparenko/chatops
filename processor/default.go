@@ -497,6 +497,20 @@ func (de *DefaultExecutor) fRunTemplate(fileName string, obj interface{}) (strin
 	return de.template.TemplateRenderFile(s, obj)
 }
 
+func (de *DefaultExecutor) fRunTemplateAsJson(fileName string, obj interface{}) interface{} {
+
+	s, err := de.fRunTemplate(fileName, obj)
+	if err != nil {
+		return nil
+	}
+	var r interface{}
+	err = json.Unmarshal([]byte(s), &r)
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
 func (de *DefaultExecutor) fRunBook(fileName string, obj interface{}) (string, error) {
 
 	s := de.filePath(de.command.processor.options.RunbooksDir, fileName)
@@ -1013,6 +1027,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["runFile"] = executor.fRunFile
 	funcs["runCommand"] = executor.fRunCommand
 	funcs["runTemplate"] = executor.fRunTemplate
+	funcs["runTemplateAsJson"] = executor.fRunTemplateAsJson
 	funcs["runBook"] = executor.fRunBook
 	funcs["postFile"] = executor.fPostFile
 	funcs["postCommand"] = executor.fPostCommand
@@ -1229,6 +1244,23 @@ func (de *DefaultFieldExecutor) fRunTemplate(fileName string, obj interface{}) (
 	return t.TemplateRenderFile(s, obj)
 }
 
+func (de *DefaultFieldExecutor) fRunTemplateAsJson(fileName string, obj interface{}) interface{} {
+
+	s, err := de.fRunTemplate(fileName, obj)
+	if err != nil {
+		return nil
+	}
+	if utils.IsEmpty(s) {
+		return nil
+	}
+	var r interface{}
+	err = json.Unmarshal([]byte(s), &r)
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
 func (de *DefaultFieldExecutor) fFieldList(items ...*DefaultField) []*DefaultField {
 	return items
 }
@@ -1420,6 +1452,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 
 	funcs := make(map[string]any)
 	funcs["runTemplate"] = executor.fRunTemplate
+	funcs["runTemplateAsJson"] = executor.fRunTemplateAsJson
 	funcs["readMessage"] = executor.fReadMessage
 
 	funcs["fieldList"] = executor.fFieldList
@@ -2227,7 +2260,7 @@ func (dc *DefaultCommand) Execute(bot common.Bot, message common.Message, params
 
 	msg, atts, acts, err := executor.execute("", m, message)
 	if err != nil {
-		dc.logger.Error(err)
+		dc.logger.Error(common.TemplateShortError(err))
 		err = fmt.Errorf("%s", dc.processor.options.Error)
 		return nil, "", nil, nil, err
 	}
@@ -2319,42 +2352,63 @@ func NewDefault(name string, options DefaultOptions, observability *common.Obser
 	}
 }
 
+func (dca *DefaultCommandApproval) runTemplate(fileName string, obj interface{}) (string, error) {
+
+	path := fmt.Sprintf("%s%s%s", dca.command.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
+	if !utils.FileExists(path) {
+		return "", fmt.Errorf("couldn't find template file %s", path)
+	}
+
+	content, err := utils.Content(path)
+	if err != nil {
+		return "", fmt.Errorf("error reading template %s: %v", path, err)
+	}
+
+	templateName := fmt.Sprintf("approval-runtemplate-%s", fileName)
+	templateOpts := toolsRender.TemplateOptions{
+		Name:    templateName,
+		Content: string(content),
+	}
+
+	t, err := toolsRender.NewTextTemplate(templateOpts, dca.command.processor.observability)
+	if err != nil {
+		return "", fmt.Errorf("error creating template %s: %v", fileName, err)
+	}
+
+	result, err := t.RenderObject(obj)
+	if err != nil {
+		return "", fmt.Errorf("error rendering template %s: %v", fileName, err)
+	}
+
+	return string(result), nil
+}
+
+func (dca *DefaultCommandApproval) runTemplateAsJson(fileName string, obj interface{}) interface{} {
+
+	s, err := dca.runTemplate(fileName, obj)
+	if err != nil {
+		return nil
+	}
+	if utils.IsEmpty(s) {
+		return nil
+	}
+	var r interface{}
+	err = json.Unmarshal([]byte(s), &r)
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
 func (dca *DefaultCommandApproval) addTemplateFunctions(funcs map[string]any, bot common.Bot, message common.Message, params common.ExecuteParams) {
+
 	funcs["getBot"] = func() interface{} { return bot }
 	funcs["getUser"] = func() interface{} { return message.User() }
 	funcs["getParams"] = func() interface{} { return params }
 	funcs["getMessage"] = func() interface{} { return message }
 	funcs["getChannel"] = func() interface{} { return message.Channel() }
-
-	funcs["runTemplate"] = func(fileName string, obj interface{}) (string, error) {
-		path := fmt.Sprintf("%s%s%s", dca.command.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
-		if !utils.FileExists(path) {
-			return "", fmt.Errorf("couldn't find template file %s", path)
-		}
-
-		content, err := utils.Content(path)
-		if err != nil {
-			return "", fmt.Errorf("error reading template %s: %v", path, err)
-		}
-
-		templateName := fmt.Sprintf("approval-runtemplate-%s", fileName)
-		templateOpts := toolsRender.TemplateOptions{
-			Name:    templateName,
-			Content: string(content),
-		}
-
-		t, err := toolsRender.NewTextTemplate(templateOpts, dca.command.processor.observability)
-		if err != nil {
-			return "", fmt.Errorf("error creating template %s: %v", fileName, err)
-		}
-
-		result, err := t.RenderObject(obj)
-		if err != nil {
-			return "", fmt.Errorf("error rendering template %s: %v", fileName, err)
-		}
-
-		return string(result), nil
-	}
+	funcs["runTemplate"] = dca.runTemplate
+	funcs["runTemplateAsJson"] = dca.runTemplateAsJson
 
 	// postTemplate cannot be used in the approval template (as it implements after)
 

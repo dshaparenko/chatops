@@ -177,3 +177,33 @@ func Schedule(what func(), delay time.Duration) chan bool {
 
 	return stop
 }
+
+// template: tenplate-name:17:4: executing ... error calling ...
+func TemplateShortError(err error) error {
+
+	if err == nil {
+		return nil
+	}
+
+	s := err.Error()
+	if utils.IsEmpty(s) {
+		return err
+	}
+
+	executing := ": executing"
+	errorCalling := "error calling "
+
+	eIdx := strings.Index(s, executing)
+	ecIndx := strings.LastIndex(s, errorCalling)
+	if eIdx < 0 || ecIndx < 0 || ecIndx < eIdx {
+		return err
+	}
+
+	old := s[eIdx : ecIndx+len(errorCalling)]
+	if utils.IsEmpty(old) {
+		return err
+	}
+
+	new := strings.Replace(s, old, " ", 1)
+	return errors.New(strings.TrimSpace(new))
+}

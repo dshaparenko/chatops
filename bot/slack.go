@@ -2036,7 +2036,7 @@ func (s *Slack) reply(m *SlackMessage, message, channel string,
 func (s *Slack) replyError(m *SlackMessage, replier interface{}, err error, channelID string,
 	attachments []*common.Attachment, actions []common.Action) (string, error) {
 
-	s.logger.Error("Slack reply error: %s", err)
+	//s.logger.Error("Slack reply error: %s", err)
 	key, _, err := s.reply(m, err.Error(), channelID, replier, attachments, actions, nil, nil, true)
 	if err != nil {
 		return "", err
@@ -2731,7 +2731,7 @@ func (s *Slack) getMessageChannel(m *SlackMessage) string {
 }
 
 func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.InteractionCallback, replier interface{},
-	params common.ExecuteParams, action common.Action, response common.Response, overwrite bool) error {
+	params common.ExecuteParams, action common.Action, response common.Response, overwrite bool) (*SlackResponse, error) {
 
 	responseURL := ""
 	blocks := []slack.Block{}
@@ -2749,7 +2749,7 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 	executor, message, attachments, actions, err := m.cmd.Execute(s, m, params, action)
 	if err != nil {
 		s.replyError(m, replier, err, "", attachments, nil)
-		return err
+		return s.buildResponse(overwrite, response), err
 	}
 	if action == nil {
 		actions = s.mergeActions(actions, m.cmd.Actions())
@@ -2764,7 +2764,7 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 		k, blks, err := s.reply(m, message, s.getMessageChannel(m), replier, attachments, actions, r, &start, r.error)
 		if err != nil {
 			s.replyError(m, replier, err, "", attachments, nil)
-			return err
+			return r, err
 		}
 		key = k
 		blocks = blks
@@ -2785,7 +2785,7 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 
 	s.putMessageToCache(mNew)
 
-	return executor.After(mNew)
+	return r, executor.After(mNew)
 }
 
 func (s *Slack) formNeeded(fields []common.Field, params map[string]interface{}) bool {
@@ -2972,9 +2972,9 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		replier := cc.Response()
 
 		if def == s.defaultDefinition {
-			err := s.cachePostUserCommand(m, nil, replier, nil, nil, nil, false)
+			_, err := s.cachePostUserCommand(m, nil, replier, nil, nil, nil, false)
 			if err != nil {
-				s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+				s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
 			}
 			s.addRemoveReactions(m.typ, m.key, s.options.ReactionFailed, s.options.ReactionDoing)
 			return
@@ -3056,7 +3056,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 				if def != s.defaultDefinition {
 					if len(u.commands) > 0 && !utils.Contains(u.commands, wrapperGroupName) {
-						s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID, wrapperGroupName)
+						s.logger.Debug("Slack user %s is not permitted to execute %s", m.userID(), wrapperGroupName)
 						s.removeReaction(m.typ, m.key, s.options.ReactionDoing)
 						s.unsupportedCommandHandler(cc)
 						return
@@ -3115,13 +3115,14 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 
 		rParams = common.MergeInterfaceMaps(eParams, rParams)
 		r := s.buildResponse(false, s.messageResponses(m, false)...)
-		err := s.cachePostUserCommand(m, nil, replier, rParams, nil, r, true) // why we ever need overwrite false here?
+		nr, err := s.cachePostUserCommand(m, nil, replier, rParams, nil, r, true) // why we ever need overwrite false here?
 		if err != nil {
-			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+			s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
 			s.addRemoveReactions(m.typ, m.key, s.options.ReactionFailed, s.options.ReactionDoing)
 			return
 		}
-		s.addRemoveReactions(m.typ, m.key, s.options.ReactionDone, s.options.ReactionDoing)
+		reaction := common.IfDef(nr != nil && nr.error, s.options.ReactionFailed, s.options.ReactionDone)
+		s.addRemoveReactions(m.typ, m.key, reaction.(string), s.options.ReactionDoing)
 	}
 	return def
 }
@@ -3266,7 +3267,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		}
 	}
 
-	err := s.cachePostUserCommand(m, nil, nil, params, nil, r, true)
+	_, err := s.cachePostUserCommand(m, nil, nil, params, nil, r, true)
 	if err != nil {
 		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, userID, err)
 		return err
@@ -3669,9 +3670,9 @@ func (s *Slack) executeCommandAfterApprovalReaction(ctx *slacker.InteractionCont
 
 	r := s.buildResponse(false, s.messageResponses(m, false)...)
 
-	err := s.cachePostUserCommand(m, callback, ctx.Response(), params, nil, r, false)
+	_, err := s.cachePostUserCommand(m, callback, ctx.Response(), params, nil, r, false)
 	if err != nil {
-		s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+		s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
 		s.addRemoveReactions(m.typ, reactionKey, s.options.ReactionFailed, reaction)
 		return false
 	}
@@ -3781,7 +3782,7 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 
 	key, blocks, err := s.reply(mInit, message, "", ctx.Response(), nil, nil, r, nil, false)
 	if err != nil {
-		s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+		s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
 		s.addRemoveReactions(mInit.typ, mInit.key, s.options.ReactionFailed, reaction)
 		return false
 	}
@@ -3834,9 +3835,9 @@ func (s *Slack) cacheHandleActionButton(ctx *slacker.InteractionContext, m *Slac
 
 	r := s.buildResponse(false, s.messageResponses(m, false)...)
 
-	err := s.cachePostUserCommand(m, callback, ctx.Response(), m.params, action, r, true)
+	_, err := s.cachePostUserCommand(m, callback, ctx.Response(), m.params, action, r, true)
 	if err != nil {
-		s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+		s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
 		return false
 	}
 	return true
@@ -4109,7 +4110,7 @@ func (s *Slack) newJob(cmd common.Command) *slacker.JobDefinition {
 
 		key, blocks, err := s.reply(m, message, channelID, cc.Response(), attachments, actions, r, &start, r.error)
 		if err != nil {
-			s.logger.Error("Slack couldn't post from %s: %s", m.userID, err)
+			s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
 			return
 		}
 		mNew := s.cloneMessage(m)
