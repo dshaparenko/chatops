@@ -181,6 +181,8 @@ func Schedule(what func(), delay time.Duration) chan bool {
 // template: tenplate-name:17:4: executing ... error calling ...
 func TemplateShortError(err error) error {
 
+	return err
+	/* later
 	if err == nil {
 		return nil
 	}
@@ -206,4 +208,15 @@ func TemplateShortError(err error) error {
 
 	new := strings.Replace(s, old, " ", 1)
 	return errors.New(strings.TrimSpace(new))
+	*/
+}
+
+func MakeTemplateJsonResult(err error) map[string]interface{} {
+
+	r := make(map[string]interface{})
+	if err == nil {
+		return r
+	}
+	r["error"] = err.Error()
+	return r
 }

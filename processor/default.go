@@ -501,12 +501,14 @@ func (de *DefaultExecutor) fRunTemplateAsJson(fileName string, obj interface{}) 
 
 	s, err := de.fRunTemplate(fileName, obj)
 	if err != nil {
-		return nil
+		de.command.logger.Error(s)
+		return common.MakeTemplateJsonResult(err)
 	}
 	var r interface{}
 	err = json.Unmarshal([]byte(s), &r)
 	if err != nil {
-		return nil
+		de.command.logger.Error(s)
+		return common.MakeTemplateJsonResult(err)
 	}
 	return r
 }
@@ -1248,15 +1250,19 @@ func (de *DefaultFieldExecutor) fRunTemplateAsJson(fileName string, obj interfac
 
 	s, err := de.fRunTemplate(fileName, obj)
 	if err != nil {
-		return nil
+		de.command.logger.Error(s)
+		return common.MakeTemplateJsonResult(err)
 	}
 	if utils.IsEmpty(s) {
-		return nil
+		err := fmt.Errorf("Default couldn't run template %s, empty result", fileName)
+		de.command.logger.Error(err)
+		return common.MakeTemplateJsonResult(err)
 	}
 	var r interface{}
 	err = json.Unmarshal([]byte(s), &r)
 	if err != nil {
-		return nil
+		de.command.logger.Error(err)
+		return common.MakeTemplateJsonResult(err)
 	}
 	return r
 }
@@ -2387,15 +2393,18 @@ func (dca *DefaultCommandApproval) runTemplateAsJson(fileName string, obj interf
 
 	s, err := dca.runTemplate(fileName, obj)
 	if err != nil {
-		return nil
+		dca.command.logger.Error(err)
+		return common.MakeTemplateJsonResult(err)
 	}
 	if utils.IsEmpty(s) {
-		return nil
+		err := fmt.Errorf("Default couldn't run template %s, empty result", fileName)
+		return common.MakeTemplateJsonResult(err)
 	}
 	var r interface{}
 	err = json.Unmarshal([]byte(s), &r)
 	if err != nil {
-		return nil
+		dca.command.logger.Error(err)
+		return common.MakeTemplateJsonResult(err)
 	}
 	return r
 }
