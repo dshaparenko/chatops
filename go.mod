@@ -8,7 +8,7 @@ replace gopkg.in/DataDog/dd-trace-go.v1 => github.com/devopsext/dd-trace-go v1.3
 
 replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-3
 
-replace github.com/devopsext/tools => ./../tools
+//replace github.com/devopsext/tools => ./../tools
 
 //replace github.com/devopsext/slacker => ./../slacker
 
