@@ -14,7 +14,7 @@ replace github.com/devopsext/tools => ./../tools
 
 require (
 	github.com/devopsext/sre v0.6.3
-	github.com/devopsext/tools v0.18.5
+	github.com/devopsext/tools v0.18.6
 	github.com/devopsext/utils v0.4.8
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/google/uuid v1.6.0
@@ -49,6 +49,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
+	github.com/go-playground/form/v4 v4.2.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
