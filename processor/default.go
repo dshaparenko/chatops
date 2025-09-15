@@ -650,6 +650,17 @@ func (de *DefaultExecutor) fReadMessage(channelID, messageTS, threadTS string) s
 	return text
 }
 
+func (de *DefaultExecutor) fReadThread(channelID, threadTS string) []string {
+
+	messages, err := de.bot.ReadThread(channelID, threadTS)
+	if err != nil {
+		e := true
+		de.error = &e
+		return []string{err.Error()}
+	}
+	return messages
+}
+
 func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) string {
 
 	err := de.bot.UpdateMessage(channelID, messageID, text)
@@ -1042,6 +1053,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
+	funcs["readThread"] = executor.fReadThread
 
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
@@ -1220,6 +1232,16 @@ func (de *DefaultFieldExecutor) fReadMessage(channelID, messageTS, threadTS stri
 		return err.Error()
 	}
 	return text
+}
+
+func (de *DefaultFieldExecutor) fReadThread(channelID, threadTS string) []string {
+
+	messages, err := de.bot.ReadThread(channelID, threadTS)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return messages
+
 }
 
 func (de *DefaultFieldExecutor) fRunTemplate(fileName string, obj interface{}) (string, error) {
@@ -1460,6 +1482,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	funcs["runTemplate"] = executor.fRunTemplate
 	funcs["runTemplateAsJson"] = executor.fRunTemplateAsJson
 	funcs["readMessage"] = executor.fReadMessage
+	funcs["readThread"] = executor.fReadThread
 
 	funcs["fieldList"] = executor.fFieldList
 	funcs["setFieldLabel"] = executor.fSetFieldLabel
