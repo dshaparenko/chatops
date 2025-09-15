@@ -107,6 +107,8 @@ var slackOptions = bot.SlackOptions{
 	MinQueryLength:  envGet("SLACK_MIN_QUERY_LENGTH", 2).(int),
 
 	UserGroupsInterval: envGet("SLACK_USER_GROUPS_INTERVAL", 5).(int),
+
+	CacheFileName: envGet("SLACK_CACHE_FILE_NAME", "").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{

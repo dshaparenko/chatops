@@ -3,7 +3,9 @@ package bot
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -65,6 +67,8 @@ type SlackOptions struct {
 	MinQueryLength  int
 
 	UserGroupsInterval int
+
+	CacheFileName string
 }
 
 type SlackMessageKey struct {
@@ -4322,16 +4326,65 @@ func (t *Slack) Start(wg *sync.WaitGroup) {
 	}(wg)
 }
 
+// saveCacheToFile saves key-value map from Slack.messages to a file
+func (t *Slack) saveCache() error {
+	if utils.IsEmpty(t.options.CacheFileName) {
+		return nil
+	}
+
+	f, err := os.Create(t.options.CacheFileName)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("", "  ")
+	messages := make(map[string]*SlackMessage)
+	for key, item := range t.messages.Items() {
+		messages[key] = item.Value()
+	}
+	err = encoder.Encode(messages)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func NewSlack(options SlackOptions, observability *common.Observability, processors *common.Processors) *Slack {
 
 	ttl := 1 * 60 * 60 * time.Second
 	if !utils.IsEmpty(options.CacheTTL) {
-		ttl, _ = time.ParseDuration(options.CacheTTL)
+		if newTTL, err := time.ParseDuration(options.CacheTTL); err == nil {
+			ttl = newTTL
+		} else {
+			observability.Logs().Error("Slack couldn't parse cache TTL %s: %s", options.CacheTTL, err)
+		}
 	}
 
-	messagesOpts := []ttlcache.Option[string, *SlackMessage]{}
-	messagesOpts = append(messagesOpts, ttlcache.WithTTL[string, *SlackMessage](ttl))
+	messagesOpts := []ttlcache.Option[string, *SlackMessage]{ttlcache.WithTTL[string, *SlackMessage](ttl)}
+
 	messages := ttlcache.New[string, *SlackMessage](messagesOpts...)
+
+	if options.CacheFileName != "" {
+		f, err := os.Open(options.CacheFileName)
+		if err != nil {
+			observability.Logs().Error("Slack couldn't open cache file %s: %s", options.CacheFileName, err)
+		} else {
+			decoder := json.NewDecoder(f)
+			m := make(map[string]*SlackMessage)
+			err = decoder.Decode(&m)
+			if err != nil {
+				observability.Logs().Error("Slack couldn't decode cache file %s: %s", options.CacheFileName, err)
+			} else {
+				for key, item := range m {
+					messages.Set(key, item, ttl)
+				}
+				observability.Logs().Info("Slack loaded %d cached messages from %s", len(m), options.CacheFileName)
+			}
+		}
+	}
+
 	go messages.Start()
 
 	return &Slack{
