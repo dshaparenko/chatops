@@ -1815,6 +1815,28 @@ func (s *Slack) ReadMessage(channel, messageTS, threadTS string) (string, error)
 	}
 }
 
+func (s *Slack) ReadThread(channel, threadTS string) ([]string, error) {
+	s.logger.Info("Fetching all messages from thread. Channel: %s, ThreadTS: %s", channel, threadTS)
+
+	params := &slack.GetConversationRepliesParameters{
+		ChannelID: channel,
+		Timestamp: threadTS,
+	}
+
+	messages, _, _, err := s.client.SlackClient().GetConversationReplies(params)
+	if err != nil {
+		s.logger.Error("Failed to get thread replies: %s", err)
+		return nil, err
+	}
+
+	var threadMessages []string
+	for _, message := range messages {
+		threadMessages = append(threadMessages, message.Text)
+	}
+
+	return threadMessages, nil
+}
+
 func (s *Slack) UpdateMessage(channel, ID, message string) error {
 
 	_, _, _, err := s.client.SlackClient().UpdateMessage(channel, ID, slack.MsgOptionText(message, false))
