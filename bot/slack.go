@@ -4326,6 +4326,17 @@ func (t *Slack) Start(wg *sync.WaitGroup) {
 	}(wg)
 }
 
+// Stop gracefully shuts down the Slack bot and saves the cache
+func (t *Slack) Stop() {
+	t.logger.Info("Stopping Slack bot...")
+	err := t.saveCache()
+	if err != nil {
+		t.logger.Error("Error saving Slack cache: %v", err)
+	} else {
+		t.logger.Info("Slack cache saved successfully")
+	}
+}
+
 // saveCacheToFile saves key-value map from Slack.messages to a file
 func (t *Slack) saveCache() error {
 	if utils.IsEmpty(t.options.CacheFileName) {

@@ -124,14 +124,24 @@ func envGet(s string, def interface{}) interface{} {
 	return utils.EnvGet(fmt.Sprintf("%s_%s", APPNAME, s), def)
 }
 
-func interceptSyscall() {
+// botsInstance holds a reference to the bots for shutdown
+var botsInstance *common.Bots
 
+func interceptSyscall() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		<-c
+		logs.Info("Graceful shutdown initiated...")
+
+		// Call Stop on all bots if available
+		if botsInstance != nil {
+			logs.Info("Stopping bots...")
+			botsInstance.Stop()
+		}
+
 		logs.Info("Exiting...")
-		os.Exit(1)
+		os.Exit(0)
 	}()
 }
 
@@ -274,6 +284,9 @@ func Execute() {
 			bots := common.NewBots()
 			//bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
 			bots.Add(bot.NewSlack(slackOptions, obs, processors))
+
+			// Store bots reference for graceful shutdown
+			botsInstance = bots
 
 			bots.Start(&mainWG)
 			mainWG.Wait()

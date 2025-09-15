@@ -8,6 +8,7 @@ import (
 
 type Bot interface {
 	Start(wg *sync.WaitGroup)
+	Stop()
 	Name() string
 	Command(channel, text string, user User, parent Message, response Response) error
 
@@ -43,6 +44,15 @@ func (bs *Bots) Start(wg *sync.WaitGroup) {
 
 		if i != nil {
 			i.Start(wg)
+		}
+	}
+}
+
+// Stop calls Stop on each bot in the list
+func (bs *Bots) Stop() {
+	for _, i := range bs.list {
+		if i != nil {
+			i.Stop()
 		}
 	}
 }
