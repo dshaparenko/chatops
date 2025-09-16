@@ -328,6 +328,13 @@ func Execute() {
 	flags.StringVar(&slackOptions.AttachmentColor, "slack-attachment-color", slackOptions.AttachmentColor, "Slack attachment color")
 	flags.StringVar(&slackOptions.ErrorColor, "slack-error-color", slackOptions.ErrorColor, "Slack error color")
 	flags.StringVar(&slackOptions.WaitingMessage, "slack-waiting-message", slackOptions.WaitingMessage, "Slack waiting approval message")
+	flags.StringVar(&slackOptions.ApprovedMessage, "slack-approved-message", slackOptions.ApprovedMessage, "Slack approved message")
+	flags.StringVar(&slackOptions.RejectedMessage, "slack-rejected-message", slackOptions.RejectedMessage, "Slack rejected message")
+	flags.StringVar(&slackOptions.CacheFileName, "slack-cache-file-name", slackOptions.CacheFileName, "Slack cache file name")
+	flags.StringVar(&slackOptions.CacheTTL, "slack-cache-ttl", slackOptions.CacheTTL, "Slack cache TTL")
+	flags.IntVar(&slackOptions.MaxQueryOptions, "slack-max-query-options", slackOptions.MaxQueryOptions, "Slack max query options")
+	flags.IntVar(&slackOptions.MinQueryLength, "slack-min-query-length", slackOptions.MinQueryLength, "Slack min query length")
+	flags.IntVar(&slackOptions.UserGroupsInterval, "slack-user-groups-interval", slackOptions.UserGroupsInterval, "Slack user groups interval")
 
 	flags.StringVar(&defaultOptions.CommandsDir, "default-commands-dir", defaultOptions.CommandsDir, "Default commands directory")
 	flags.StringVar(&defaultOptions.TemplatesDir, "default-templates-dir", defaultOptions.TemplatesDir, "Default templates directory")
