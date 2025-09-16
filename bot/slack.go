@@ -4418,8 +4418,28 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 	if options.CacheFileName != "" {
 		f, err := os.Open(options.CacheFileName)
 		if err != nil {
-			observability.Logs().Error("Slack couldn't open cache file %s: %s", options.CacheFileName, err)
-		} else {
+			if os.IsNotExist(err) {
+				observability.Logs().Info("Slack cache file %s doesn't exist, creating it", options.CacheFileName)
+				f, err = os.Create(options.CacheFileName)
+				if err != nil {
+					observability.Logs().Error("Slack couldn't create cache file %s: %s", options.CacheFileName, err)
+				} else {
+					_, err = f.WriteString("{}")
+					if err != nil {
+						observability.Logs().Error("Slack couldn't write to cache file %s: %s", options.CacheFileName, err)
+					}
+					f.Close()
+					f, err = os.Open(options.CacheFileName)
+					if err != nil {
+						observability.Logs().Error("Slack couldn't reopen cache file %s: %s", options.CacheFileName, err)
+					}
+				}
+			} else {
+				observability.Logs().Error("Slack couldn't open cache file %s: %s", options.CacheFileName, err)
+			}
+		}
+
+		if err == nil && f != nil {
 			decoder := json.NewDecoder(f)
 			cacheMessages := make(map[string]*SlackMessageCache)
 			err = decoder.Decode(&cacheMessages)

@@ -125,8 +125,8 @@ func ToSlackMessageCache(sm *SlackMessage) (*SlackMessageCache, error) {
 		fieldsSimplified := make([]map[string]interface{}, len(sm.fields.items))
 		for i, field := range sm.fields.items {
 			fieldMap := map[string]interface{}{
-				"value":  field.value,
-				"values": field.values,
+				"value": field.value,
+				// "values": field.values, disabling while list
 			}
 
 			// Only store field name if available
