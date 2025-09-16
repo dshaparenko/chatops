@@ -4350,7 +4350,6 @@ func (t *Slack) saveCache() error {
 	defer f.Close()
 
 	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
 
 	// Convert complex SlackMessage objects to simpler SlackMessageCache objects
 	cacheMessages := make(map[string]*SlackMessageCache)
