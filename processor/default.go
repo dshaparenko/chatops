@@ -1058,6 +1058,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
 	funcs["addDivider"] = executor.fAddDivider
+	funcs["gracefulAbort"] = executor.fGracefulAbort
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -1187,7 +1188,7 @@ func (df *DefaultField) merge(field *DefaultField, empty bool) bool {
 		return false
 	}
 
-	ft := fmt.Sprintf("%s", field.Type)
+	ft := string(field.Type)
 	if !utils.IsEmpty(ft) || (utils.IsEmpty(ft) && empty) {
 		df.Type = field.Type
 	}
@@ -1257,7 +1258,7 @@ func (de *DefaultFieldExecutor) fRunTemplate(fileName string, obj interface{}) (
 	}
 
 	tOpts := toolsRender.TemplateOptions{
-		Name:    fmt.Sprintf("default-internal-field-%s", de.field.Name),
+		Name:    fmt.Sprintf("default-internal-field-%s", de.field.Name()),
 		Content: string(content),
 		Funcs:   de.funcs,
 	}
@@ -2304,6 +2305,41 @@ func (d *Default) Name() string {
 
 func (d *Default) Commands() []common.Command {
 	return d.commands
+}
+
+func (de *DefaultExecutor) fGracefulAbort() string {
+	var userID, userName, userTimezone, channelID string
+	var userCommands []string
+
+	if de.message != nil {
+		user := de.message.User()
+		if user != nil {
+			userID = user.ID()
+			userName = user.Name()
+			userTimezone = user.TimeZone()
+			userCommands = user.Commands()
+		}
+
+		channel := de.message.Channel()
+		if channel != nil {
+			channelID = channel.ID()
+		}
+	}
+
+	if de.command != nil && de.command.logger != nil {
+		de.command.logger.Info("SECURITY AUDIT: Graceful shutdown initiated by user. UserID: %s, UserName: %s, ChannelID: %s, UserTimezone: %s, UserPermissions: %v, MessageID: %s",
+			userID, userName, channelID, userTimezone, userCommands, de.message.ID())
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+
+		if proc, err := os.FindProcess(os.Getpid()); err == nil {
+			proc.Signal(os.Interrupt)
+		}
+	}()
+
+	return fmt.Sprintf("Initiating graceful shutdown... by Slack user %s (%s)", userName, userID)
 }
 
 func (d *Default) loadConfig(path string) (*DefaultCommandConfig, error) {
