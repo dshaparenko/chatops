@@ -266,6 +266,10 @@ func (s SlackImageBlock) BlockType() slack.MessageBlockType {
 	return s.Type
 }
 
+func (s SlackImageBlock) ID() string {
+	return s.BlockID
+}
+
 // SlackFileBlock
 func (s SlackFileBlock) BlockType() slack.MessageBlockType {
 	return s.Type
