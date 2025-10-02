@@ -650,6 +650,17 @@ func (de *DefaultExecutor) fReadMessage(channelID, messageTS, threadTS string) s
 	return text
 }
 
+func (de *DefaultExecutor) fReadThread(channelID, threadTS string) []string {
+
+	messages, err := de.bot.ReadThread(channelID, threadTS)
+	if err != nil {
+		e := true
+		de.error = &e
+		return []string{err.Error()}
+	}
+	return messages
+}
+
 func (de *DefaultExecutor) fUpdateMessage(channelID, messageID, text string) string {
 
 	err := de.bot.UpdateMessage(channelID, messageID, text)
@@ -1042,10 +1053,12 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["setError"] = executor.fSetError
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
+	funcs["readThread"] = executor.fReadThread
 
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
 	funcs["addDivider"] = executor.fAddDivider
+	funcs["gracefulAbort"] = executor.fGracefulAbort
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -1175,7 +1188,7 @@ func (df *DefaultField) merge(field *DefaultField, empty bool) bool {
 		return false
 	}
 
-	ft := fmt.Sprintf("%s", field.Type)
+	ft := string(field.Type)
 	if !utils.IsEmpty(ft) || (utils.IsEmpty(ft) && empty) {
 		df.Type = field.Type
 	}
@@ -1222,6 +1235,16 @@ func (de *DefaultFieldExecutor) fReadMessage(channelID, messageTS, threadTS stri
 	return text
 }
 
+func (de *DefaultFieldExecutor) fReadThread(channelID, threadTS string) []string {
+
+	messages, err := de.bot.ReadThread(channelID, threadTS)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return messages
+
+}
+
 func (de *DefaultFieldExecutor) fRunTemplate(fileName string, obj interface{}) (string, error) {
 
 	s := fmt.Sprintf("%s%s%s", de.command.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
@@ -1235,7 +1258,7 @@ func (de *DefaultFieldExecutor) fRunTemplate(fileName string, obj interface{}) (
 	}
 
 	tOpts := toolsRender.TemplateOptions{
-		Name:    fmt.Sprintf("default-internal-field-%s", de.field.Name),
+		Name:    fmt.Sprintf("default-internal-field-%s", de.field.Name()),
 		Content: string(content),
 		Funcs:   de.funcs,
 	}
@@ -1460,6 +1483,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 	funcs["runTemplate"] = executor.fRunTemplate
 	funcs["runTemplateAsJson"] = executor.fRunTemplateAsJson
 	funcs["readMessage"] = executor.fReadMessage
+	funcs["readThread"] = executor.fReadThread
 
 	funcs["fieldList"] = executor.fFieldList
 	funcs["setFieldLabel"] = executor.fSetFieldLabel
@@ -2281,6 +2305,41 @@ func (d *Default) Name() string {
 
 func (d *Default) Commands() []common.Command {
 	return d.commands
+}
+
+func (de *DefaultExecutor) fGracefulAbort() string {
+	var userID, userName, userTimezone, channelID string
+	var userCommands []string
+
+	if de.message != nil {
+		user := de.message.User()
+		if user != nil {
+			userID = user.ID()
+			userName = user.Name()
+			userTimezone = user.TimeZone()
+			userCommands = user.Commands()
+		}
+
+		channel := de.message.Channel()
+		if channel != nil {
+			channelID = channel.ID()
+		}
+	}
+
+	if de.command != nil && de.command.logger != nil {
+		de.command.logger.Info("SECURITY AUDIT: Graceful shutdown initiated by user. UserID: %s, UserName: %s, ChannelID: %s, UserTimezone: %s, UserPermissions: %v, MessageID: %s",
+			userID, userName, channelID, userTimezone, userCommands, de.message.ID())
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+
+		if proc, err := os.FindProcess(os.Getpid()); err == nil {
+			proc.Signal(os.Interrupt)
+		}
+	}()
+
+	return fmt.Sprintf("Initiating graceful shutdown... by Slack user %s (%s)", userName, userID)
 }
 
 func (d *Default) loadConfig(path string) (*DefaultCommandConfig, error) {

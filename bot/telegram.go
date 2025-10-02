@@ -121,6 +121,12 @@ func (t *Telegram) Start(wg *sync.WaitGroup) {
 	}(wg)
 }
 
+// Stop gracefully shuts down the Telegram bot
+func (t *Telegram) Stop() {
+	t.logger.Info("Stopping Telegram bot...")
+	// Add any cleanup code here if needed in the future
+}
+
 func NewTelegram(options TelegramOptions, observability *common.Observability, processors *common.Processors) *Telegram {
 
 	return &Telegram{

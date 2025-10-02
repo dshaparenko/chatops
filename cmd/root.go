@@ -107,6 +107,8 @@ var slackOptions = bot.SlackOptions{
 	MinQueryLength:  envGet("SLACK_MIN_QUERY_LENGTH", 2).(int),
 
 	UserGroupsInterval: envGet("SLACK_USER_GROUPS_INTERVAL", 5).(int),
+
+	CacheFileName: envGet("SLACK_CACHE_FILE_NAME", "").(string),
 }
 
 var defaultOptions = processor.DefaultOptions{
@@ -122,14 +124,24 @@ func envGet(s string, def interface{}) interface{} {
 	return utils.EnvGet(fmt.Sprintf("%s_%s", APPNAME, s), def)
 }
 
-func interceptSyscall() {
+// botsInstance holds a reference to the bots for shutdown
+var botsInstance *common.Bots
 
+func interceptSyscall() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		<-c
+		logs.Info("Graceful shutdown initiated...")
+
+		// Call Stop on all bots if available
+		if botsInstance != nil {
+			logs.Info("Stopping bots...")
+			botsInstance.Stop()
+		}
+
 		logs.Info("Exiting...")
-		os.Exit(1)
+		os.Exit(0)
 	}()
 }
 
@@ -273,6 +285,9 @@ func Execute() {
 			//bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
 			bots.Add(bot.NewSlack(slackOptions, obs, processors))
 
+			// Store bots reference for graceful shutdown
+			botsInstance = bots
+
 			bots.Start(&mainWG)
 			mainWG.Wait()
 		},
@@ -313,6 +328,13 @@ func Execute() {
 	flags.StringVar(&slackOptions.AttachmentColor, "slack-attachment-color", slackOptions.AttachmentColor, "Slack attachment color")
 	flags.StringVar(&slackOptions.ErrorColor, "slack-error-color", slackOptions.ErrorColor, "Slack error color")
 	flags.StringVar(&slackOptions.WaitingMessage, "slack-waiting-message", slackOptions.WaitingMessage, "Slack waiting approval message")
+	flags.StringVar(&slackOptions.ApprovedMessage, "slack-approved-message", slackOptions.ApprovedMessage, "Slack approved message")
+	flags.StringVar(&slackOptions.RejectedMessage, "slack-rejected-message", slackOptions.RejectedMessage, "Slack rejected message")
+	flags.StringVar(&slackOptions.CacheFileName, "slack-cache-file-name", slackOptions.CacheFileName, "Slack cache file name")
+	flags.StringVar(&slackOptions.CacheTTL, "slack-cache-ttl", slackOptions.CacheTTL, "Slack cache TTL")
+	flags.IntVar(&slackOptions.MaxQueryOptions, "slack-max-query-options", slackOptions.MaxQueryOptions, "Slack max query options")
+	flags.IntVar(&slackOptions.MinQueryLength, "slack-min-query-length", slackOptions.MinQueryLength, "Slack min query length")
+	flags.IntVar(&slackOptions.UserGroupsInterval, "slack-user-groups-interval", slackOptions.UserGroupsInterval, "Slack user groups interval")
 
 	flags.StringVar(&defaultOptions.CommandsDir, "default-commands-dir", defaultOptions.CommandsDir, "Default commands directory")
 	flags.StringVar(&defaultOptions.TemplatesDir, "default-templates-dir", defaultOptions.TemplatesDir, "Default templates directory")

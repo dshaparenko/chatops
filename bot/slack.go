@@ -3,7 +3,9 @@ package bot
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -65,6 +67,8 @@ type SlackOptions struct {
 	MinQueryLength  int
 
 	UserGroupsInterval int
+
+	CacheFileName string
 }
 
 type SlackMessageKey struct {
@@ -1817,6 +1821,28 @@ func (s *Slack) ReadMessage(channel, messageTS, threadTS string) (string, error)
 
 		return r.Messages[0].Text, nil
 	}
+}
+
+func (s *Slack) ReadThread(channel, threadTS string) ([]string, error) {
+	s.logger.Info("Fetching all messages from thread. Channel: %s, ThreadTS: %s", channel, threadTS)
+
+	params := &slack.GetConversationRepliesParameters{
+		ChannelID: channel,
+		Timestamp: threadTS,
+	}
+
+	messages, _, _, err := s.client.SlackClient().GetConversationReplies(params)
+	if err != nil {
+		s.logger.Error("Failed to get thread replies: %s", err)
+		return nil, err
+	}
+
+	var threadMessages []string
+	for _, message := range messages {
+		threadMessages = append(threadMessages, message.Text)
+	}
+
+	return threadMessages, nil
 }
 
 func (s *Slack) UpdateMessage(channel, ID, message string) error {
@@ -4326,23 +4352,123 @@ func (t *Slack) Start(wg *sync.WaitGroup) {
 	}(wg)
 }
 
+// Stop gracefully shuts down the Slack bot and saves the cache
+func (t *Slack) Stop() {
+	t.logger.Info("Stopping Slack bot...")
+	err := t.saveCache()
+	if err != nil {
+		t.logger.Error("Error saving Slack cache: %v", err)
+	} else {
+		t.logger.Info("Slack cache saved successfully")
+	}
+}
+
+// saveCache saves messages from cache to a file using the simplified SlackMessageCache struct
+func (t *Slack) saveCache() error {
+	if utils.IsEmpty(t.options.CacheFileName) {
+		return nil
+	}
+
+	f, err := os.Create(t.options.CacheFileName)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	encoder := json.NewEncoder(f)
+
+	// Convert complex SlackMessage objects to simpler SlackMessageCache objects
+	cacheMessages := make(map[string]*SlackMessageCache)
+	for key, item := range t.messages.Items() {
+		cacheItem, err := ToSlackMessageCache(item.Value())
+		if err != nil {
+			t.logger.Warn("Failed to convert message to cache: %v", err)
+			continue
+		}
+		cacheMessages[key] = cacheItem
+	}
+
+	err = encoder.Encode(cacheMessages)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func NewSlack(options SlackOptions, observability *common.Observability, processors *common.Processors) *Slack {
 
 	ttl := 1 * 60 * 60 * time.Second
 	if !utils.IsEmpty(options.CacheTTL) {
-		ttl, _ = time.ParseDuration(options.CacheTTL)
+		if newTTL, err := time.ParseDuration(options.CacheTTL); err == nil {
+			ttl = newTTL
+		} else {
+			observability.Logs().Error("Slack couldn't parse cache TTL %s: %s", options.CacheTTL, err)
+		}
 	}
 
-	messagesOpts := []ttlcache.Option[string, *SlackMessage]{}
-	messagesOpts = append(messagesOpts, ttlcache.WithTTL[string, *SlackMessage](ttl))
-	messages := ttlcache.New[string, *SlackMessage](messagesOpts...)
-	go messages.Start()
+	messagesOpts := []ttlcache.Option[string, *SlackMessage]{ttlcache.WithTTL[string, *SlackMessage](ttl)}
 
-	return &Slack{
+	messages := ttlcache.New[string, *SlackMessage](messagesOpts...)
+
+	// Create slack instance first so we can use it in FromSlackMessageCache
+	slack := &Slack{
 		options:    options,
 		processors: processors,
 		logger:     observability.Logs(),
 		meter:      observability.Metrics(),
 		messages:   messages,
 	}
+
+	if options.CacheFileName != "" {
+		f, err := os.Open(options.CacheFileName)
+		if err != nil {
+			if os.IsNotExist(err) {
+				observability.Logs().Info("Slack cache file %s doesn't exist, creating it", options.CacheFileName)
+				f, err = os.Create(options.CacheFileName)
+				if err != nil {
+					observability.Logs().Error("Slack couldn't create cache file %s: %s", options.CacheFileName, err)
+				} else {
+					_, err = f.WriteString("{}")
+					if err != nil {
+						observability.Logs().Error("Slack couldn't write to cache file %s: %s", options.CacheFileName, err)
+					}
+					f.Close()
+					f, err = os.Open(options.CacheFileName)
+					if err != nil {
+						observability.Logs().Error("Slack couldn't reopen cache file %s: %s", options.CacheFileName, err)
+					}
+				}
+			} else {
+				observability.Logs().Error("Slack couldn't open cache file %s: %s", options.CacheFileName, err)
+			}
+		}
+
+		if err == nil && f != nil {
+			decoder := json.NewDecoder(f)
+			cacheMessages := make(map[string]*SlackMessageCache)
+			err = decoder.Decode(&cacheMessages)
+			if err != nil {
+				observability.Logs().Error("Slack couldn't decode cache file %s: %s", options.CacheFileName, err)
+			} else {
+				loadedCount := 0
+				for key, cacheItem := range cacheMessages {
+					slackMessage, err := FromSlackMessageCache(cacheItem, slack)
+					if err != nil {
+						observability.Logs().Warn("Failed to convert cache item to SlackMessage: %v", err)
+						continue
+					}
+					if slackMessage != nil {
+						messages.Set(key, slackMessage, ttl)
+						loadedCount++
+					}
+				}
+				observability.Logs().Info("Slack loaded %d cached messages from %s", loadedCount, options.CacheFileName)
+			}
+			f.Close()
+		}
+	}
+
+	go messages.Start()
+
+	return slack
 }
