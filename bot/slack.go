@@ -995,7 +995,7 @@ func (s *Slack) uploadFileV2(att *common.Attachment) (*FileWithURL, error) {
 		return nil, err
 	}
 
-	time.Sleep(5000 * time.Millisecond) // wait for Slack to process the file
+	time.Sleep(6000 * time.Millisecond) // wait for Slack to process the file
 
 	// get file info to obtain the URL
 	file, _, _, err := s.client.SlackClient().GetFileInfo(r.ID, 0, 0)
