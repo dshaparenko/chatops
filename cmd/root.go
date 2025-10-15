@@ -120,6 +120,18 @@ var defaultOptions = processor.DefaultOptions{
 	Error:        envGet("DEFAULT_ERROR", "Couldn't execute command").(string),
 }
 
+var pubSubOptions = common.PubSubOptions{
+	ProjectID:              envGet("PUBSUB_PROJECT_ID", "").(string),
+	TopicID:                envGet("PUBSUB_TOPIC_ID", "").(string),
+	SubscriptionID:         envGet("PUBSUB_SUBSCRIPTION_ID", "").(string),
+	Credentials:            envGet("PUBSUB_CREDENTIALS", "").(string),
+	AckDeadlineSeconds:     envGet("PUBSUB_ACK_DEADLINE_SECONDS", 60).(int),
+	RetentionSeconds:       envGet("PUBSUB_RETENTION_SECONDS", 86000).(int),
+	MaxOutstandingMessages: envGet("PUBSUB_MAX_OUTSTANDING_MESSAGES", 100).(int),
+	NumGoroutines:          envGet("PUBSUB_NUM_GOROUTINES", 10).(int),
+	CacheDir:               envGet("PUBSUB_CACHE_DIR", "cache/asset").(string),
+}
+
 func envGet(s string, def interface{}) interface{} {
 	return utils.EnvGet(fmt.Sprintf("%s_%s", APPNAME, s), def)
 }
@@ -281,6 +293,12 @@ func Execute() {
 				os.Exit(1)
 			}
 
+			pubSub := common.NewPubSub(pubSubOptions, obs, logs)
+			err = pubSub.Start()
+			if err != nil {
+				logs.Error("Couldn't start pubsub, error %s", err)
+			}
+
 			bots := common.NewBots()
 			//bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
 			bots.Add(bot.NewSlack(slackOptions, obs, processors))
@@ -341,6 +359,16 @@ func Execute() {
 	flags.StringVar(&defaultOptions.CommandExt, "default-command-ext", defaultOptions.CommandExt, "Default command extension")
 	flags.StringVar(&defaultOptions.ConfigExt, "default-config-ext", defaultOptions.ConfigExt, "Default config extension")
 	flags.StringVar(&defaultOptions.Error, "default-error", defaultOptions.Error, "Default error")
+
+	flags.StringVar(&pubSubOptions.ProjectID, "pubsub-project-id", pubSubOptions.ProjectID, "PubSub project ID")
+	flags.StringVar(&pubSubOptions.TopicID, "pubsub-topic-id", pubSubOptions.TopicID, "PubSub topic ID")
+	flags.StringVar(&pubSubOptions.SubscriptionID, "pubsub-subscription-id", pubSubOptions.SubscriptionID, "PubSub subscription ID")
+	flags.StringVar(&pubSubOptions.Credentials, "pubsub-credentials", pubSubOptions.Credentials, "PubSub credentials file")
+	flags.IntVar(&pubSubOptions.AckDeadlineSeconds, "pubsub-ack-deadline-seconds", pubSubOptions.AckDeadlineSeconds, "PubSub ack deadline seconds")
+	flags.IntVar(&pubSubOptions.RetentionSeconds, "pubsub-retention-seconds", pubSubOptions.RetentionSeconds, "PubSub retention seconds")
+	flags.IntVar(&pubSubOptions.MaxOutstandingMessages, "pubsub-max-outstanding-messages", pubSubOptions.MaxOutstandingMessages, "PubSub max outstanding messages")
+	flags.IntVar(&pubSubOptions.NumGoroutines, "pubsub-num-goroutines", pubSubOptions.NumGoroutines, "PubSub number of goroutines")
+	flags.StringVar(&pubSubOptions.CacheDir, "pubsub-cache-dir", pubSubOptions.CacheDir, "PubSub cache directory for storing JSON payloads")
 
 	interceptSyscall()
 
