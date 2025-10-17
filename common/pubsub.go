@@ -241,12 +241,7 @@ func (ps *PubSub) storeFile(filename string, data []byte) {
 	// try to parse and store as formatted JSON
 	var jsonData any
 	if err := json.Unmarshal(data, &jsonData); err != nil {
-		ps.logger.Warn("File data is not valid JSON for %s: %v", filename, err)
-		// store as raw data if not JSON
-		if err := os.WriteFile(filePath, data, 0644); err != nil {
-			ps.logger.Error("Failed to write file %s: %v", filename, err)
-			return
-		}
+		ps.logger.Debug("File data is not valid JSON for %s: %v", filename, err)
 	} else {
 		// Store as formatted JSON
 		formattedJSON, err := json.MarshalIndent(jsonData, "", "  ")
