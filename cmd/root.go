@@ -121,15 +121,13 @@ var defaultOptions = processor.DefaultOptions{
 }
 
 var pubSubOptions = common.PubSubOptions{
-	ProjectID:              envGet("PUBSUB_PROJECT_ID", "").(string),
-	TopicID:                envGet("PUBSUB_TOPIC_ID", "").(string),
-	SubscriptionID:         envGet("PUBSUB_SUBSCRIPTION_ID", "").(string),
-	Credentials:            envGet("PUBSUB_CREDENTIALS", "").(string),
-	AckDeadlineSeconds:     envGet("PUBSUB_ACK_DEADLINE_SECONDS", 60).(int),
-	RetentionSeconds:       envGet("PUBSUB_RETENTION_SECONDS", 86000).(int),
-	MaxOutstandingMessages: envGet("PUBSUB_MAX_OUTSTANDING_MESSAGES", 100).(int),
-	NumGoroutines:          envGet("PUBSUB_NUM_GOROUTINES", 10).(int),
-	CacheDir:               envGet("PUBSUB_CACHE_DIR", "cache/asset").(string),
+	ProjectID:          envGet("PUBSUB_PROJECT_ID", "").(string),
+	TopicID:            envGet("PUBSUB_TOPIC_ID", "").(string),
+	SubscriptionID:     envGet("PUBSUB_SUBSCRIPTION_ID", "").(string),
+	Credentials:        envGet("PUBSUB_CREDENTIALS", "").(string),
+	AckDeadlineSeconds: envGet("PUBSUB_ACK_DEADLINE_SECONDS", 60).(int),
+	RetentionSeconds:   envGet("PUBSUB_RETENTION_SECONDS", 86000).(int),
+	CacheDir:           envGet("PUBSUB_CACHE_DIR", "cache/asset").(string),
 }
 
 func envGet(s string, def interface{}) interface{} {
@@ -294,10 +292,7 @@ func Execute() {
 			}
 
 			pubSub := common.NewPubSub(pubSubOptions, obs, logs)
-			err = pubSub.Start()
-			if err != nil {
-				logs.Error("Couldn't start pubsub, error %s", err)
-			}
+			pubSub.StartAsync()
 
 			bots := common.NewBots()
 			//bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
@@ -366,8 +361,6 @@ func Execute() {
 	flags.StringVar(&pubSubOptions.Credentials, "pubsub-credentials", pubSubOptions.Credentials, "PubSub credentials file")
 	flags.IntVar(&pubSubOptions.AckDeadlineSeconds, "pubsub-ack-deadline-seconds", pubSubOptions.AckDeadlineSeconds, "PubSub ack deadline seconds")
 	flags.IntVar(&pubSubOptions.RetentionSeconds, "pubsub-retention-seconds", pubSubOptions.RetentionSeconds, "PubSub retention seconds")
-	flags.IntVar(&pubSubOptions.MaxOutstandingMessages, "pubsub-max-outstanding-messages", pubSubOptions.MaxOutstandingMessages, "PubSub max outstanding messages")
-	flags.IntVar(&pubSubOptions.NumGoroutines, "pubsub-num-goroutines", pubSubOptions.NumGoroutines, "PubSub number of goroutines")
 	flags.StringVar(&pubSubOptions.CacheDir, "pubsub-cache-dir", pubSubOptions.CacheDir, "PubSub cache directory for storing JSON payloads")
 
 	interceptSyscall()
