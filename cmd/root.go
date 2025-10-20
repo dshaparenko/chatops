@@ -292,7 +292,9 @@ func Execute() {
 			}
 
 			pubSub := common.NewPubSub(pubSubOptions, obs, logs)
-			pubSub.StartAsync()
+			if pubSub != nil {
+				pubSub.StartAsync()
+			}
 
 			bots := common.NewBots()
 			//bots.Add(bot.NewTelegram(telegramOptions, obs, processors))
