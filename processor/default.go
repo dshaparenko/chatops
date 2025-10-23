@@ -75,6 +75,7 @@ type DefaultExecutor struct {
 	command     *DefaultCommand
 	visible     *bool
 	error       *bool
+	iconURL     string
 	attachments *sync.Map
 	actions     *sync.Map
 	posts       *sync.Map
@@ -134,6 +135,7 @@ type DefaultResponse struct {
 	Visible  *bool
 	Original *bool
 	Duration *bool
+	IconURL  string `yaml:"iconURL"`
 }
 
 type DefaultApproval struct {
@@ -235,6 +237,20 @@ func (de *DefaultExecutor) Error() bool {
 		return *de.error
 	}
 	return false
+}
+
+func (de *DefaultExecutor) IconURL() string {
+	if !utils.IsEmpty(de.iconURL) {
+		return de.iconURL
+	}
+	if de.command.config != nil {
+		url := de.command.config.Response.IconURL
+		if !utils.IsEmpty(url) {
+			return url
+		}
+	}
+
+	return ""
 }
 
 /*func (de *DefaultExecutor) Reaction() bool {
@@ -777,6 +793,11 @@ func (de *DefaultExecutor) fSetError() string {
 	return ""
 }
 
+func (de *DefaultExecutor) fSetIconURL(url string) string {
+	de.iconURL = url
+	return ""
+}
+
 func (de *DefaultExecutor) render(obj interface{}) (string, []*common.Attachment, []common.Action, error) {
 
 	gid := utils.GoRoutineID()
@@ -1049,8 +1070,11 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["sendMessage"] = executor.fSendMessage
 	funcs["sendMessageByParent"] = executor.fSendMessageByParent
 	funcs["sendMessageEx"] = executor.fSendMessageEx
+
 	funcs["setInvisible"] = executor.fSetInvisible
 	funcs["setError"] = executor.fSetError
+	funcs["setIconURL"] = executor.fSetIconURL
+
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["readThread"] = executor.fReadThread
@@ -1494,6 +1518,7 @@ func NewFieldExecutorTemplate(name string, content string, executor *DefaultFiel
 
 	funcs["setError"] = func() string { return "" }
 	funcs["setInvisible"] = func() string { return "" }
+	funcs["setIconURL"] = func() string { return "" }
 
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    fmt.Sprintf("default-internal-%s", name),
@@ -1801,6 +1826,10 @@ func (dcr *DefaultCommandResponse) Original() bool {
 
 func (dcr *DefaultCommandResponse) Error() bool {
 	return false
+}
+
+func (dcr *DefaultCommandResponse) IconURL() string {
+	return ""
 }
 
 // DefaultCommandApproval
@@ -2406,17 +2435,6 @@ func (d *Default) AddCommand(name, path string) error {
 	return nil
 }
 
-func NewDefault(name string, options DefaultOptions, observability *common.Observability, processors *common.Processors) *Default {
-
-	return &Default{
-		name:          name,
-		options:       options,
-		processors:    processors,
-		meter:         observability.Metrics(),
-		observability: observability,
-	}
-}
-
 func (dca *DefaultCommandApproval) runTemplate(fileName string, obj interface{}) (string, error) {
 
 	path := fmt.Sprintf("%s%s%s", dca.command.processor.options.TemplatesDir, string(os.PathSeparator), fileName)
@@ -2481,4 +2499,15 @@ func (dca *DefaultCommandApproval) addTemplateFunctions(funcs map[string]any, bo
 	// postTemplate cannot be used in the approval template (as it implements after)
 
 	funcs["isEmpty"] = utils.IsEmpty
+}
+
+func NewDefault(name string, options DefaultOptions, observability *common.Observability, processors *common.Processors) *Default {
+
+	return &Default{
+		name:          name,
+		options:       options,
+		processors:    processors,
+		meter:         observability.Metrics(),
+		observability: observability,
+	}
 }

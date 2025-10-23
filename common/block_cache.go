@@ -65,7 +65,7 @@ func TextBlockObjectToCache(text *slack.TextBlockObject) *TextBlockCache {
 	return &TextBlockCache{
 		Type:     string(text.Type),
 		Text:     text.Text,
-		Emoji:    text.Emoji,
+		Emoji:    *text.Emoji,
 		Verbatim: text.Verbatim,
 	}
 }

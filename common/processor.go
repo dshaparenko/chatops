@@ -37,10 +37,11 @@ type Attachment struct {
 type ExecuteParams = map[string]interface{}
 
 type Response interface {
-	Visible() bool  // visible for others, not only you
-	Duration() bool // show duration in replay
-	Original() bool // show orignal as quote
-	Error() bool    // show as error
+	Visible() bool   // visible for others, not only you
+	Duration() bool  // show duration in replay
+	Original() bool  // show orignal as quote
+	Error() bool     // show as error
+	IconURL() string // icon URL for the message
 }
 
 type FieldType string

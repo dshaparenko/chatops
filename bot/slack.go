@@ -193,6 +193,7 @@ type SlackResponse struct {
 	original bool
 	duration bool
 	error    bool
+	iconURL  string
 }
 
 const (
@@ -254,6 +255,10 @@ func (r *SlackResponse) Original() bool {
 
 func (r *SlackResponse) Error() bool {
 	return r.error
+}
+
+func (r *SlackResponse) IconURL() string {
+	return r.iconURL
 }
 
 // SlackRichTextQuote
@@ -1911,11 +1916,13 @@ func (s *Slack) reply(m *SlackMessage, message, channel string,
 	visible := false
 	original := false
 	duration := false
+	iconURL := ""
 
 	if !utils.IsEmpty(response) {
 		visible = response.visible
 		original = response.original
 		duration = response.duration
+		iconURL = response.iconURL
 	}
 
 	if !utils.IsEmpty(m.botID) && error {
@@ -2003,6 +2010,10 @@ func (s *Slack) reply(m *SlackMessage, message, channel string,
 		}
 	}
 
+	if !utils.IsEmpty(iconURL) {
+		opts = append(opts, slacker.SetIconURL(iconURL))
+	}
+
 	// ResponseReplier => commands
 	rr, ok := replier.(*slacker.ResponseReplier)
 	if ok {
@@ -2046,6 +2057,10 @@ func (s *Slack) reply(m *SlackMessage, message, channel string,
 
 	if !visible {
 		slackOpts = append(slackOpts, slack.MsgOptionPostEphemeral(userID))
+	}
+
+	if !utils.IsEmpty(iconURL) {
+		slackOpts = append(slackOpts, slack.MsgOptionIconURL(iconURL))
 	}
 
 	_, ts, err := s.client.SlackClient().PostMessageContext(
@@ -2701,6 +2716,9 @@ func (s *Slack) buildResponse(overwrite bool, list ...common.Response) *SlackRes
 		if !r.original || overwrite {
 			r.original = response.Original()
 		}
+		if utils.IsEmpty(r.iconURL) || overwrite {
+			r.iconURL = response.IconURL()
+		}
 	}
 	return r
 }
@@ -2716,11 +2734,13 @@ func (s *Slack) messageResponses(m *SlackMessage, skip bool) []common.Response {
 		if cr != nil {
 			r1 := &SlackResponse{
 				visible: cr.Visible(),
+				iconURL: cr.IconURL(),
 			}
 			if !skip {
 				r1.error = cr.Error()
 				r1.duration = cr.Duration()
 				r1.original = cr.Original()
+
 			}
 			r = append(r, r1)
 		}
@@ -2730,6 +2750,7 @@ func (s *Slack) messageResponses(m *SlackMessage, skip bool) []common.Response {
 		if cr != nil {
 			r1 := &SlackResponse{
 				visible: cr.Visible(),
+				iconURL: cr.IconURL(),
 			}
 			if !skip {
 				r1.error = cr.Error()
@@ -4136,6 +4157,7 @@ func (s *Slack) newJob(cmd common.Command) *slacker.JobDefinition {
 		if !utils.IsEmpty(response) {
 			r.visible = response.Visible()
 			r.error = response.Error()
+			r.iconURL = response.IconURL()
 		}
 
 		key, blocks, err := s.reply(m, message, channelID, cc.Response(), attachments, actions, r, &start, r.error)
