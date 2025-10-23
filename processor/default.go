@@ -654,6 +654,29 @@ func (de *DefaultExecutor) fDeleteMessage(channelID, messageID string) string {
 	return ""
 }
 
+func (de *DefaultExecutor) fSendImage(params map[string]any) string {
+
+	channelID, _ := params["channelID"].(string)
+	threadTS, _ := params["threadID"].(string)
+	fileContent, _ := params["fileContent"].([]byte)
+	filename, _ := params["filename"].(string)
+	initialComment, _ := params["initialComment"].(string)
+
+	if len(fileContent) == 0 {
+		e := true
+		de.error = &e
+		return "SendImage err => empty file content"
+	}
+
+	err := de.bot.SendImage(channelID, threadTS, fileContent, filename, initialComment)
+	if err != nil {
+		e := true
+		de.error = &e
+		return err.Error()
+	}
+	return ""
+}
+
 func (de *DefaultExecutor) fReadMessage(channelID, messageTS, threadTS string) string {
 
 	text, err := de.bot.ReadMessage(channelID, messageTS, threadTS)
@@ -1078,6 +1101,7 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["deleteMessage"] = executor.fDeleteMessage
 	funcs["readMessage"] = executor.fReadMessage
 	funcs["readThread"] = executor.fReadThread
+	funcs["sendImage"] = executor.fSendImage
 
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI

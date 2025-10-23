@@ -12,7 +12,7 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-4
 
 require (
 	github.com/devopsext/sre v0.7.0
-	github.com/devopsext/tools v0.20.2
+	github.com/devopsext/tools v0.20.5
 	github.com/devopsext/utils v0.4.8
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/google/uuid v1.6.0

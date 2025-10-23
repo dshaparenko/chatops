@@ -168,24 +168,9 @@ type SlackRichTextQuote struct {
 	Elements []*SlackRichTextQuoteElement `json:"elements"`
 }
 
-type SlackFile struct {
-	URL string `json:"url,omitempty"`
-	ID  string `json:"id,omitempty"`
-}
-
-type SlackImageBlock struct {
-	Type      slack.MessageBlockType `json:"type"`
-	SlackFile *SlackFile             `json:"slack_file"`
-	AltText   string                 `json:"alt_text"`
-	BlockID   string                 `json:"block_id,omitempty"`
-	Title     *slack.TextBlockObject `json:"title,omitempty"`
-}
-
-type SlackFileBlock struct {
-	Type       slack.MessageBlockType `json:"type"`
-	ExternalID string                 `json:"external_id"`
-	Source     string                 `json:"source"`
-	BlockID    string                 `json:"block_id,omitempty"`
+type FileWithURL struct {
+	ID  string
+	URL string
 }
 
 type SlackResponse struct {
@@ -268,20 +253,6 @@ func (r SlackRichTextQuote) RichTextElementType() slack.RichTextElementType {
 
 func (r SlackRichTextQuoteElement) RichTextElementType() slack.RichTextElementType {
 	return r.Type
-}
-
-// SlackImageBlock
-func (s SlackImageBlock) BlockType() slack.MessageBlockType {
-	return s.Type
-}
-
-func (s SlackImageBlock) ID() string {
-	return s.BlockID
-}
-
-// SlackFileBlock
-func (s SlackFileBlock) BlockType() slack.MessageBlockType {
-	return s.Type
 }
 
 // SlackUser
@@ -968,27 +939,47 @@ func (s *Slack) prepareInputText(input, typ string) string {
 	return text
 }
 
-func (s *Slack) uploadFileV1(att *common.Attachment) (*slack.File, error) {
+// func (s *Slack) uploadFileV1(att *common.Attachment) (*slack.File, error) {
 
-	botID := "unknown"
-	if s.auth != nil {
-		botID = s.auth.BotID
-	}
-	stamp := time.Now().Format("20060102T150405")
-	name := fmt.Sprintf("%s-%s", botID, stamp)
-	params := slack.FileUploadParameters{
-		Filename: name,
-		Reader:   bytes.NewReader(att.Data),
-		Channels: []string{s.options.PublicChannel},
-	}
-	r, err := s.client.SlackClient().UploadFile(params)
-	if err != nil {
-		return nil, err
-	}
-	return r, nil
+// 	botID := "unknown"
+// 	if s.auth != nil {
+// 		botID = s.auth.BotID
+// 	}
+// 	stamp := time.Now().Format("20060102T150405")
+// 	name := fmt.Sprintf("%s-%s", botID, stamp)
+// 	params := slack.FileUploadParameters{
+// 		Filename: name,
+// 		Reader:   bytes.NewReader(att.Data),
+// 		Channels: []string{s.options.PublicChannel},
+// 	}
+// 	r, err := s.client.SlackClient().UploadFile(params)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return r, nil
+// }
+
+func (s *Slack) SendImage(channelID, threadTS string, fileContent []byte, filename, initialComment string) error {
+
+	return s.sendImage(channelID, threadTS, fileContent, filename, initialComment)
 }
 
-func (s *Slack) uploadFileV2(att *common.Attachment) (*slack.FileSummary, error) {
+func (s *Slack) sendImage(channelID, threadTS string, fileContent []byte, filename, initialComment string) error {
+
+	params := slack.UploadFileV2Parameters{
+		Filename:        filename,
+		FileSize:        len(fileContent),
+		Reader:          bytes.NewReader(fileContent),
+		Channel:         channelID,
+		ThreadTimestamp: threadTS,
+		InitialComment:  initialComment,
+	}
+	_, err := s.client.SlackClient().UploadFileV2(params)
+	return err
+
+}
+
+func (s *Slack) uploadFileV2(att *common.Attachment) (*FileWithURL, error) {
 
 	botID := "unknown"
 	if s.auth != nil {
@@ -1002,34 +993,37 @@ func (s *Slack) uploadFileV2(att *common.Attachment) (*slack.FileSummary, error)
 		Reader:   bytes.NewReader(att.Data),
 		Channel:  s.options.PublicChannel,
 	}
+
 	r, err := s.client.SlackClient().UploadFileV2(params)
 	if err != nil {
+		s.logger.Error("File upload failed: %s", err)
 		return nil, err
 	}
-	return r, nil
-}
 
-func (s *Slack) shareFilePublicURL(file *slack.File) (*slack.File, error) {
+	time.Sleep(6000 * time.Millisecond) // wait for Slack to process the file
 
-	r, _, _, err := s.client.SlackClient().ShareFilePublicURL(file.ID)
+	// get file info to obtain the URL
+	file, _, _, err := s.client.SlackClient().GetFileInfo(r.ID, 0, 0)
 	if err != nil {
+		s.logger.Error("Failed to get file info for ID %s: %s", r.ID, err)
 		return nil, err
 	}
-	return r, nil
-}
+	s.logger.Debug("Got file info for ID: %s", r.ID)
 
-func (s *Slack) addRemoteFile(att *common.Attachment, file *slack.File) (*slack.RemoteFile, error) {
+	fileURL := file.URLPrivate
+	if fileURL == "" {
+		fileURL = file.Permalink
+	}
+	if fileURL == "" {
+		s.logger.Error("No accessible URL found for file ID: %s", r.ID)
+		return nil, fmt.Errorf("no accessible URL found for file")
+	}
 
-	params := slack.RemoteFileParameters{
-		ExternalID:  file.ID,
-		ExternalURL: file.PermalinkPublic,
-		Title:       att.Title,
-	}
-	r, err := s.client.SlackClient().AddRemoteFile(params)
-	if err != nil {
-		return nil, err
-	}
-	return r, nil
+	s.logger.Debug("Using file URL: %s", fileURL)
+	return &FileWithURL{
+		ID:  r.ID,
+		URL: fileURL,
+	}, nil
 }
 
 func (s *Slack) limitText(text string, max int) string {
@@ -1096,34 +1090,24 @@ func (s *Slack) buildAttachmentBlocks(attachments []*common.Attachment) ([]slack
 		switch a.Type {
 		case common.AttachmentTypeImage:
 
-			// uploading image via V1 - important !!!
-			f, err := s.uploadFileV1(a)
+			f, err := s.uploadFileV2(a)
 			if err != nil {
+				s.logger.Error("Failed to upload file for image attachment: %s", err)
 				return r, err
 			}
 
-			blks = append(blks, &SlackImageBlock{
-				Type:    slack.MBTImage,
-				AltText: a.Text,
-				Title: &slack.TextBlockObject{
-					Type: slack.PlainTextType, // only
-					Text: a.Title,
-				},
-				SlackFile: &SlackFile{ID: f.ID},
-			})
+			imageAttachment := slack.Attachment{
+				Color:    s.options.AttachmentColor,
+				Title:    a.Title,
+				ImageURL: f.URL,
+				Fallback: "Image attachment",
+			}
+
+			r = append(r, imageAttachment)
+			s.logger.Debug("Successfully created image attachment with file ID: %s, URL: %s", f.ID, f.URL)
+			continue
 		case common.AttachmentTypeFile:
 
-			// uploading file
-			/*f, err := s.uploadFileV1(a)
-			if err != nil {
-				return r, err
-			}
-
-			blks = append(blks, &SlackFileBlock{
-				Type:       slack.MBTFile,
-				ExternalID: f.ID,
-				Source:     "remote",
-			})*/
 		default:
 
 			// title

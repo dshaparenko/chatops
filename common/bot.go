@@ -26,6 +26,8 @@ type Bot interface {
 	ReadThread(channel, threadID string) ([]string, error)
 	UpdateMessage(channel, ID, message string) error
 
+	SendImage(channelID, threadTS string, fileContent []byte, filename, initialComment string) error
+
 	AddDivider(channel, ID string) error
 }
 
