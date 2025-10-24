@@ -2947,6 +2947,33 @@ func (s *Slack) newSlackUser(userID, botID string) *SlackUser {
 
 func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
 
+	// on the first run commandDefinition sometimes set commands not correctly due to wide regex patterns
+	/* in slacker lib they do:
+
+		for _, group := range s.commandGroups {
+	    for _, cmd := range group.GetCommands() {
+	        parameters, isMatch := cmd.Match(eventText)
+	        if !isMatch {
+	            continue
+	        }
+	        // EXECUTES THE FIRST MATCH AND RETURNS
+	        executeCommand(ctx, definition.Handler, middlewares...)
+	        return  // <-- Returns on first match!
+	    }
+	}
+
+	____
+	our workaround now is to re-check the command after finding params:
+	eCommand := ""
+		if eCmd != nil {
+			eCommand = eCmd.Name()
+			if !utils.IsEmpty(eCommand) {
+				cmd = eCmd
+				m.cmd = cmd // message cmd update with correct one
+			}
+		}
+	*/
+
 	def := &slacker.CommandDefinition{
 		Command:     cmd.Name(),
 		Aliases:     cmd.Aliases(),
@@ -3056,6 +3083,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			eCommand = eCmd.Name()
 			if !utils.IsEmpty(eCommand) {
 				cmd = eCmd
+				m.cmd = cmd // message cmd update with correct one
 			}
 		}
 
