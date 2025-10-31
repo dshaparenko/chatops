@@ -53,8 +53,8 @@ github.com/devopsext/slacker v0.1.1-4 h1:VCXqKvzMuciB2Vfex1WQLhCWtnMDsxhyYX9myIy
 github.com/devopsext/slacker v0.1.1-4/go.mod h1:0dIY7rxW5j4aSRq+rg79dpg3My012uZdGrzFmewSKUA=
 github.com/devopsext/sre v0.7.0 h1:jaP8AYkds79a2TkLAY8U9RPuf+9rlWIUT5adcwA4mLo=
 github.com/devopsext/sre v0.7.0/go.mod h1:w+uUaCQd0EM1lGDrmSFwmQDL0+H5MVooiEOJE2tVzEs=
-github.com/devopsext/tools v0.20.5 h1:QKTfMtOvVgo+9b+5xbfHND4y8Cj6ZwHTgwJqhiAeBRY=
-github.com/devopsext/tools v0.20.5/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
+github.com/devopsext/tools v0.20.6 h1:RT3QtLYpFUnZW2tCYwZKTKyNLHfeI9bitYdNMFXfx1U=
+github.com/devopsext/tools v0.20.6/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
 github.com/devopsext/utils v0.4.8 h1:Ql8fwF36lUcHj5nw/IlZrfHEcPNmh1YPJws3MOnuCKA=
 github.com/devopsext/utils v0.4.8/go.mod h1:3Apwsy4/k+baHRxsHuK0ipqdgK/YNHif0fZmO7m0W4Q=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
