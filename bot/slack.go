@@ -3410,6 +3410,10 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 		options = append(options, slack.MsgOptionPostEphemeral(userID))
 	}
 
+	if !utils.IsEmpty(r.iconURL) {
+		options = append(options, slack.MsgOptionIconURL(r.iconURL))
+	}
+
 	client := s.client.SlackClient()
 	_, ts, err := client.PostMessage(channelID, options...)
 	if err != nil {
