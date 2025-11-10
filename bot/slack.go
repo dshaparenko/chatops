@@ -1735,6 +1735,16 @@ func (s *Slack) findParams(wrapper bool, text string) (common.ExecuteParams, com
 
 func (s *Slack) updateCounters(group, command, text, userID string) {
 
+	sanitizedText := text
+	if !utils.IsEmpty(text) {
+		// replace newlines and other problematic characters
+		sanitizedText = strings.ReplaceAll(sanitizedText, "\n", " ")
+		sanitizedText = strings.ReplaceAll(sanitizedText, "\r", " ")
+		sanitizedText = strings.ReplaceAll(sanitizedText, "\t", " ")
+		sanitizedText = strings.ReplaceAll(sanitizedText, "\"", "")
+		sanitizedText = strings.Join(strings.Fields(sanitizedText), " ")
+	}
+
 	labels := make(map[string]string)
 	if !utils.IsEmpty(group) {
 		labels["group"] = group
@@ -1742,8 +1752,8 @@ func (s *Slack) updateCounters(group, command, text, userID string) {
 	if !utils.IsEmpty(text) {
 		labels["command"] = command
 	}
-	if !utils.IsEmpty(text) {
-		labels["text"] = text
+	if !utils.IsEmpty(sanitizedText) {
+		labels["text"] = sanitizedText
 	}
 	labels["user_id"] = userID
 
