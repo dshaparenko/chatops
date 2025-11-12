@@ -834,10 +834,13 @@ func (s *Slack) findMessageInCache(key *SlackMessageKey) *SlackMessage {
 	if key == nil {
 		return nil
 	}
-	item := s.messages.Get(key.String())
+	keyStr := key.String()
+	item := s.messages.Get(keyStr)
 	if item != nil {
+		s.logger.Debug("Slack found message in cache: %s (expires in: %v)", keyStr, time.Until(item.ExpiresAt()))
 		return item.Value()
 	}
+	s.logger.Debug("Slack message NOT found in cache: %s (cache size: %d)", keyStr, s.messages.Len())
 	return nil
 }
 
@@ -4508,9 +4511,10 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 					if slackMessage != nil {
 						messages.Set(key, slackMessage, ttl)
 						loadedCount++
+						observability.Logs().Debug("Slack loaded cache item %s (cached at: %v, TTL: %v)", key, cacheItem.CachedAt, ttl)
 					}
 				}
-				observability.Logs().Info("Slack loaded %d cached messages from %s", loadedCount, options.CacheFileName)
+				observability.Logs().Info("Slack loaded %d cached messages from %s with TTL %v", loadedCount, options.CacheFileName, ttl)
 			}
 			f.Close()
 		}
