@@ -746,6 +746,7 @@ func (de *DefaultExecutor) fAddRemoveReactionOnMessage(channelID, messageID, fir
 func (de *DefaultExecutor) fAskOpenAI(params map[string]interface{}) string {
 	apiKey, _ := params["apiKey"].(string)
 	model, _ := params["model"].(string)
+	baseURL, _ := params["baseURL"].(string)
 	timeout, _ := params["timeout"].(int)
 	if timeout == 0 {
 		timeout = 30
@@ -785,6 +786,7 @@ func (de *DefaultExecutor) fAskOpenAI(params map[string]interface{}) string {
 		Model:    model,
 		Timeout:  timeout,
 		Messages: messages,
+		BaseURL:  baseURL,
 	}
 
 	openAI := vendors.NewOpenAI(options)
