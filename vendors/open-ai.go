@@ -13,6 +13,7 @@ type OpenAIOptions struct {
 	Timeout  int
 	Model    string
 	Messages []map[string]string
+	BaseURL  string // Optional: custom base URL for OpenAI-compatible APIs
 }
 
 type OpenAI struct {
@@ -79,9 +80,20 @@ func (ai *OpenAI) CreateChatCompletion(options OpenAIOptions) ([]byte, error) {
 }
 
 func NewOpenAI(options OpenAIOptions) *OpenAI {
+	var client *openai.Client
+
+	if options.BaseURL != "" {
+		// create client with custom base URL for OpenAI-compatible APIs
+		config := openai.DefaultConfig(options.APIKey)
+		config.BaseURL = options.BaseURL
+		client = openai.NewClientWithConfig(config)
+	} else {
+		client = openai.NewClient(options.APIKey)
+	}
+
 	ai := &OpenAI{
 		options: options,
-		client:  openai.NewClient(options.APIKey),
+		client:  client,
 	}
 	return ai
 }
