@@ -115,7 +115,7 @@ type SlackMessage struct {
 	actions     []common.Action
 	params      common.ExecuteParams
 	fields      SlackMessageFields
-	tags        map[string]string // for grouping and bulk operations
+	tags        map[string]string // custom tags for message grouping
 }
 
 type SlackFileResponseFull struct {
@@ -958,42 +958,41 @@ func (s *Slack) TagMessage(channelID, timestamp string, tags map[string]string) 
 	return nil
 }
 
-func (s *Slack) findMessagesByTagInternal(key, value string) []*SlackMessage {
+// func (s *Slack) findMessagesByTagInternal(key, value string) []*SlackMessage {
 
-	tagKey := fmt.Sprintf("%s:%s", key, value)
+// 	tagKey := fmt.Sprintf("%s:%s", key, value)
 
-	s.tagMutex.RLock()
-	item := s.messageTags.Get(tagKey)
-	s.tagMutex.RUnlock()
+// 	s.tagMutex.RLock()
+// 	item := s.messageTags.Get(tagKey)
+// 	s.tagMutex.RUnlock()
 
-	if item == nil {
-		s.logger.Debug("No messages found for tag: %s", tagKey)
-		return nil
-	}
+// 	if item == nil {
+// 		s.logger.Debug("No messages found for tag: %s", tagKey)
+// 		return nil
+// 	}
 
-	msgKeys := item.Value()
-	messages := make([]*SlackMessage, 0, len(msgKeys))
+// 	msgKeys := item.Value()
+// 	messages := make([]*SlackMessage, 0, len(msgKeys))
 
-	for _, keyStr := range msgKeys {
-		// Parse key string back to SlackMessageKey
-		parts := strings.SplitN(keyStr, "/", 2)
-		if len(parts) != 2 {
-			continue
-		}
+// 	for _, keyStr := range msgKeys {
+// 		parts := strings.SplitN(keyStr, "/", 2)
+// 		if len(parts) != 2 {
+// 			continue
+// 		}
 
-		msgKey := &SlackMessageKey{
-			channelID: parts[0],
-			timestamp: parts[1],
-		}
+// 		msgKey := &SlackMessageKey{
+// 			channelID: parts[0],
+// 			timestamp: parts[1],
+// 		}
 
-		if msg := s.findMessageInCache(msgKey); msg != nil {
-			messages = append(messages, msg)
-		}
-	}
+// 		if msg := s.findMessageInCache(msgKey); msg != nil {
+// 			messages = append(messages, msg)
+// 		}
+// 	}
 
-	s.logger.Debug("Found %d messages for tag: %s", len(messages), tagKey)
-	return messages
-}
+// 	s.logger.Debug("Found %d messages for tag: %s", len(messages), tagKey)
+// 	return messages
+// }
 
 func (s *Slack) FindMessagesByTag(key, value string) map[string]string {
 	tagKey := fmt.Sprintf("%s:%s", key, value)
@@ -1032,9 +1031,9 @@ func (s *Slack) FindMessagesByTag(key, value string) map[string]string {
 }
 
 // returns all messages created by a specific command
-func (s *Slack) FindMessagesByCommand(commandName string) []*SlackMessage {
-	return s.findMessagesByTagInternal("cmd", commandName)
-}
+// func (s *Slack) FindMessagesByCommand(commandName string) []*SlackMessage {
+// 	return s.findMessagesByTagInternal("cmd", commandName)
+// }
 
 func (s *Slack) encodeActionID(id, typ, name string) string {
 	return fmt.Sprintf("%s|%s|%s", id, typ, name)
