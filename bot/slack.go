@@ -4596,7 +4596,7 @@ func (t *Slack) startPeriodicSave(interval time.Duration) {
 func (t *Slack) Stop() {
 	t.logger.Info("Stopping Slack bot...")
 
-	// Stop periodic save
+	// stop periodic save
 	if t.saveTicker != nil {
 		t.saveTicker.Stop()
 		t.stopSave <- true
@@ -4611,7 +4611,6 @@ func (t *Slack) Stop() {
 	}
 }
 
-// saveCache saves messages from cache to a file using the simplified SlackMessageCache struct
 func (t *Slack) saveCache() error {
 	if utils.IsEmpty(t.options.CacheFileName) {
 		return nil
