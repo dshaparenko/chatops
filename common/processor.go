@@ -97,6 +97,7 @@ type Command interface {
 	Actions() []Action
 	Approval() Approval
 	Permissions() bool
+	TrackMessages() bool
 	Execute(bot Bot, message Message, params ExecuteParams, action Action) (Executor, string, []*Attachment, []Action, error)
 	Fields(bot Bot, message Message, params ExecuteParams, eval []string, parent Field) []Field
 }

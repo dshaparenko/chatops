@@ -115,6 +115,7 @@ type SlackMessage struct {
 	actions     []common.Action
 	params      common.ExecuteParams
 	fields      SlackMessageFields
+	tags        map[string]string // for grouping and bulk operations
 }
 
 type SlackFileResponseFull struct {
@@ -154,6 +155,10 @@ type Slack struct {
 	defaultDefinition *slacker.CommandDefinition
 	helpDefinition    *slacker.CommandDefinition
 	messages          *ttlcache.Cache[string, *SlackMessage]
+	messageTags       *ttlcache.Cache[string, []string] // tag -> list of message keys
+	tagMutex          sync.RWMutex
+	saveTicker        *time.Ticker
+	stopSave          chan bool
 	userGroups        SlackUserGroups
 }
 
@@ -889,6 +894,138 @@ func (s *Slack) putMessageToCache(msg *SlackMessage) {
 		return
 	}
 	s.messages.Set(msg.key.String(), msg, ttlcache.DefaultTTL)
+
+	if len(msg.tags) > 0 {
+		s.tagMutex.Lock()
+		defer s.tagMutex.Unlock()
+
+		for key, value := range msg.tags {
+			tagKey := fmt.Sprintf("%s:%s", key, value)
+			item := s.messageTags.Get(tagKey)
+			msgKeys := []string{}
+			if item != nil {
+				msgKeys = item.Value()
+			}
+			// add message key if not already present
+			msgKeyStr := msg.key.String()
+			found := false
+			for _, k := range msgKeys {
+				if k == msgKeyStr {
+					found = true
+					break
+				}
+			}
+			if !found {
+				msgKeys = append(msgKeys, msgKeyStr)
+				s.messageTags.Set(tagKey, msgKeys, ttlcache.DefaultTTL)
+			}
+		}
+	}
+}
+
+// TagMessage adds tags to an existing message in cache
+func (s *Slack) TagMessage(channelID, timestamp string, tags map[string]string) error {
+
+	key := &SlackMessageKey{
+		channelID: channelID,
+		timestamp: timestamp,
+	}
+
+	msg := s.findMessageInCache(key)
+	if msg == nil {
+		return fmt.Errorf("message not found: %s", key.String())
+	}
+
+	if msg.tags == nil {
+		msg.tags = make(map[string]string)
+	}
+
+	for k, v := range tags {
+		msg.tags[k] = v
+	}
+
+	s.putMessageToCache(msg)
+
+	s.logger.Debug("Tagged message %s with tags: %v", key.String(), tags)
+	return nil
+}
+
+func (s *Slack) findMessagesByTagInternal(key, value string) []*SlackMessage {
+
+	tagKey := fmt.Sprintf("%s:%s", key, value)
+
+	s.tagMutex.RLock()
+	item := s.messageTags.Get(tagKey)
+	s.tagMutex.RUnlock()
+
+	if item == nil {
+		s.logger.Debug("No messages found for tag: %s", tagKey)
+		return nil
+	}
+
+	msgKeys := item.Value()
+	messages := make([]*SlackMessage, 0, len(msgKeys))
+
+	for _, keyStr := range msgKeys {
+		// Parse key string back to SlackMessageKey
+		parts := strings.SplitN(keyStr, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		msgKey := &SlackMessageKey{
+			channelID: parts[0],
+			timestamp: parts[1],
+		}
+
+		if msg := s.findMessageInCache(msgKey); msg != nil {
+			messages = append(messages, msg)
+		}
+	}
+
+	s.logger.Debug("Found %d messages for tag: %s", len(messages), tagKey)
+	return messages
+}
+
+func (s *Slack) FindMessagesByTag(key, value string) map[string]string {
+	tagKey := fmt.Sprintf("%s:%s", key, value)
+
+	s.tagMutex.RLock()
+	item := s.messageTags.Get(tagKey)
+	s.tagMutex.RUnlock()
+
+	if item == nil {
+		s.logger.Debug("No messages found for tag: %s", tagKey)
+		return make(map[string]string)
+	}
+
+	msgKeys := item.Value()
+	result := make(map[string]string)
+
+	for _, keyStr := range msgKeys {
+		parts := strings.SplitN(keyStr, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		msgKey := &SlackMessageKey{
+			channelID: parts[0],
+			timestamp: parts[1],
+		}
+
+		if msg := s.findMessageInCache(msgKey); msg != nil {
+			// "channelID/timestamp" : "timestamp"
+			result[keyStr] = parts[1]
+		}
+	}
+
+	s.logger.Debug("Found %d messages for tag: %s", len(result), tagKey)
+	return result
+}
+
+// returns all messages created by a specific command
+func (s *Slack) FindMessagesByCommand(commandName string) []*SlackMessage {
+	return s.findMessagesByTagInternal("cmd", commandName)
 }
 
 func (s *Slack) encodeActionID(id, typ, name string) string {
@@ -2831,6 +2968,15 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 	mNew.actions = actions
 	mNew.params = params
 
+	// tag message if command has trackMessages enabled
+	if m.cmd != nil && m.cmd.TrackMessages() && mNew.key != nil {
+		if mNew.tags == nil {
+			mNew.tags = make(map[string]string)
+		}
+		mNew.tags["cmd"] = m.cmd.Name()
+		s.logger.Debug("Auto-tagged message %s with command: %s", mNew.key.String(), m.cmd.Name())
+	}
+
 	s.putMessageToCache(mNew)
 
 	return r, executor.After(mNew)
@@ -3453,6 +3599,16 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 		m.originKey = mOrigin.key
 		m.blocks = blocks
 		m.actions = actions
+
+		// tag message if parent's command has trackMessages "true"
+		if mOrigin.cmd != nil && mOrigin.cmd.TrackMessages() {
+			if m.tags == nil {
+				m.tags = make(map[string]string)
+			}
+			m.tags["cmd"] = mOrigin.cmd.Name()
+			s.logger.Debug("Auto-tagged PostMessage %s with command: %s (inherited from parent)", key.String(), mOrigin.cmd.Name())
+		}
+
 		s.putMessageToCache(m)
 	} else {
 		m = &SlackMessage{
@@ -4391,6 +4547,7 @@ func (t *Slack) Start(wg *sync.WaitGroup) {
 
 	if wg == nil {
 		t.start()
+		t.startPeriodicSave(1 * time.Hour)
 		return
 	}
 
@@ -4401,11 +4558,43 @@ func (t *Slack) Start(wg *sync.WaitGroup) {
 		defer wg.Done()
 		t.start()
 	}(wg)
+
+	t.startPeriodicSave(1 * time.Hour)
+}
+
+func (t *Slack) startPeriodicSave(interval time.Duration) {
+	t.saveTicker = time.NewTicker(interval)
+	t.stopSave = make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-t.saveTicker.C:
+				err := t.saveCache()
+				if err != nil {
+					t.logger.Error("Error during periodic cache save: %v", err)
+				} else {
+					t.logger.Debug("Periodic cache save completed")
+				}
+			case <-t.stopSave:
+				t.logger.Debug("Stopping periodic cache save")
+				return
+			}
+		}
+	}()
 }
 
 // Stop gracefully shuts down the Slack bot and saves the cache
 func (t *Slack) Stop() {
 	t.logger.Info("Stopping Slack bot...")
+
+	// Stop periodic save
+	if t.saveTicker != nil {
+		t.saveTicker.Stop()
+		t.stopSave <- true
+		close(t.stopSave)
+	}
+
 	err := t.saveCache()
 	if err != nil {
 		t.logger.Error("Error saving Slack cache: %v", err)
@@ -4458,16 +4647,20 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 	}
 
 	messagesOpts := []ttlcache.Option[string, *SlackMessage]{ttlcache.WithTTL[string, *SlackMessage](ttl)}
-
 	messages := ttlcache.New[string, *SlackMessage](messagesOpts...)
+
+	// Create message tags cache (secondary index for tag-based lookups)
+	messageTagsOpts := []ttlcache.Option[string, []string]{ttlcache.WithTTL[string, []string](ttl)}
+	messageTags := ttlcache.New[string, []string](messageTagsOpts...)
 
 	// Create slack instance first so we can use it in FromSlackMessageCache
 	slack := &Slack{
-		options:    options,
-		processors: processors,
-		logger:     observability.Logs(),
-		meter:      observability.Metrics(),
-		messages:   messages,
+		options:     options,
+		processors:  processors,
+		logger:      observability.Logs(),
+		meter:       observability.Metrics(),
+		messages:    messages,
+		messageTags: messageTags,
 	}
 
 	if options.CacheFileName != "" {
@@ -4502,19 +4695,49 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 				observability.Logs().Error("Slack couldn't decode cache file %s: %s", options.CacheFileName, err)
 			} else {
 				loadedCount := 0
+				skippedExpired := 0
+				now := time.Now()
+
 				for key, cacheItem := range cacheMessages {
+					//  remaining TTL based on when the message was originally cached
+					age := now.Sub(cacheItem.CachedAt)
+					remainingTTL := ttl - age
+
+					if remainingTTL <= 0 {
+						skippedExpired++
+						observability.Logs().Debug("Skipping expired cache item %s (age: %v, TTL: %v)", key, age, ttl)
+						continue
+					}
+
 					slackMessage, err := FromSlackMessageCache(cacheItem, slack)
 					if err != nil {
 						observability.Logs().Warn("Failed to convert cache item to SlackMessage: %v", err)
 						continue
 					}
 					if slackMessage != nil {
-						messages.Set(key, slackMessage, ttl)
+						// Set message with remaining TTL
+						messages.Set(key, slackMessage, remainingTTL)
 						loadedCount++
-						observability.Logs().Debug("Slack loaded cache item %s (cached at: %v, TTL: %v)", key, cacheItem.CachedAt, ttl)
+						observability.Logs().Debug("Slack loaded cache item %s (cached at: %v, age: %v, remaining TTL: %v)", key, cacheItem.CachedAt, age, remainingTTL)
+
+						// Rebuild tag index for messages with tags
+						if len(slackMessage.tags) > 0 {
+							for tagKey, tagValue := range slackMessage.tags {
+								tagIndexKey := fmt.Sprintf("%s:%s", tagKey, tagValue)
+								item := messageTags.Get(tagIndexKey)
+								msgKeys := []string{}
+								if item != nil {
+									msgKeys = item.Value()
+								}
+								msgKeys = append(msgKeys, key)
+								// Use same remaining TTL for tag index
+								messageTags.Set(tagIndexKey, msgKeys, remainingTTL)
+							}
+							observability.Logs().Debug("Rebuilt tag index for message %s with tags: %v", key, slackMessage.tags)
+						}
 					}
 				}
-				observability.Logs().Info("Slack loaded %d cached messages from %s with TTL %v", loadedCount, options.CacheFileName, ttl)
+				observability.Logs().Info("Slack loaded %d cached messages from %s (skipped %d expired, TTL: %v)", loadedCount, options.CacheFileName, skippedExpired, ttl)
 			}
 			f.Close()
 		}

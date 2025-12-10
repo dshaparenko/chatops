@@ -25,6 +25,8 @@ type Bot interface {
 	ReadMessage(channel, ID, threadID string) (string, error)
 	ReadThread(channel, threadID string) ([]string, error)
 	UpdateMessage(channel, ID, message string) error
+	TagMessage(channel, ID string, tags map[string]string) error
+	FindMessagesByTag(tagKey, tagValue string) map[string]string
 
 	SendImage(channelID, threadTS string, fileContent []byte, filename, initialComment string) error
 
