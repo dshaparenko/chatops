@@ -893,7 +893,15 @@ func (s *Slack) putMessageToCache(msg *SlackMessage) {
 	if msg.key == nil {
 		return
 	}
-	s.messages.Set(msg.key.String(), msg, ttlcache.DefaultTTL)
+
+	// tagged messages get no expiration (NoTTL), regular messages use default TTL
+	messageTTL := ttlcache.DefaultTTL
+	if len(msg.tags) > 0 {
+		messageTTL = ttlcache.NoTTL
+		s.logger.Debug("Setting NoTTL for tagged message %s with tags: %v", msg.key.String(), msg.tags)
+	}
+
+	s.messages.Set(msg.key.String(), msg, messageTTL)
 
 	if len(msg.tags) > 0 {
 		s.tagMutex.Lock()
@@ -917,7 +925,7 @@ func (s *Slack) putMessageToCache(msg *SlackMessage) {
 			}
 			if !found {
 				msgKeys = append(msgKeys, msgKeyStr)
-				s.messageTags.Set(tagKey, msgKeys, ttlcache.DefaultTTL)
+				s.messageTags.Set(tagKey, msgKeys, ttlcache.NoTTL)
 			}
 		}
 	}
@@ -4699,45 +4707,50 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 				now := time.Now()
 
 				for key, cacheItem := range cacheMessages {
-					//  remaining TTL based on when the message was originally cached
-					age := now.Sub(cacheItem.CachedAt)
-					remainingTTL := ttl - age
-
-					if remainingTTL <= 0 {
-						skippedExpired++
-						observability.Logs().Debug("Skipping expired cache item %s (age: %v, TTL: %v)", key, age, ttl)
-						continue
-					}
-
 					slackMessage, err := FromSlackMessageCache(cacheItem, slack)
 					if err != nil {
 						observability.Logs().Warn("Failed to convert cache item to SlackMessage: %v", err)
 						continue
 					}
-					if slackMessage != nil {
-						// Set message with remaining TTL
-						messages.Set(key, slackMessage, remainingTTL)
-						loadedCount++
-						observability.Logs().Debug("Slack loaded cache item %s (cached at: %v, age: %v, remaining TTL: %v)", key, cacheItem.CachedAt, age, remainingTTL)
+					if slackMessage == nil {
+						continue
+					}
 
-						// Rebuild tag index for messages with tags
-						if len(slackMessage.tags) > 0 {
-							for tagKey, tagValue := range slackMessage.tags {
-								tagIndexKey := fmt.Sprintf("%s:%s", tagKey, tagValue)
-								item := messageTags.Get(tagIndexKey)
-								msgKeys := []string{}
-								if item != nil {
-									msgKeys = item.Value()
-								}
-								msgKeys = append(msgKeys, key)
-								// Use same remaining TTL for tag index
-								messageTags.Set(tagIndexKey, msgKeys, remainingTTL)
-							}
-							observability.Logs().Debug("Rebuilt tag index for message %s with tags: %v", key, slackMessage.tags)
+					var messageTTL time.Duration
+					if len(slackMessage.tags) > 0 {
+						messageTTL = ttlcache.NoTTL
+						observability.Logs().Debug("Slack loaded tagged message %s with NoTTL (tags: %v)", key, slackMessage.tags)
+					} else {
+						age := now.Sub(cacheItem.CachedAt)
+						remainingTTL := ttl - age
+
+						if remainingTTL <= 0 {
+							skippedExpired++
+							observability.Logs().Debug("Skipping expired cache item %s (age: %v, TTL: %v)", key, age, ttl)
+							continue
 						}
+						messageTTL = remainingTTL
+						observability.Logs().Debug("Slack loaded cache item %s (cached at: %v, age: %v, remaining TTL: %v)", key, cacheItem.CachedAt, age, remainingTTL)
+					}
+
+					messages.Set(key, slackMessage, messageTTL)
+					loadedCount++
+
+					if len(slackMessage.tags) > 0 {
+						for tagKey, tagValue := range slackMessage.tags {
+							tagIndexKey := fmt.Sprintf("%s:%s", tagKey, tagValue)
+							item := messageTags.Get(tagIndexKey)
+							msgKeys := []string{}
+							if item != nil {
+								msgKeys = item.Value()
+							}
+							msgKeys = append(msgKeys, key)
+							messageTags.Set(tagIndexKey, msgKeys, ttlcache.NoTTL)
+						}
+						observability.Logs().Debug("Rebuilt tag index for message %s with tags: %v", key, slackMessage.tags)
 					}
 				}
-				observability.Logs().Info("Slack loaded %d cached messages from %s (skipped %d expired, TTL: %v)", loadedCount, options.CacheFileName, skippedExpired, ttl)
+				observability.Logs().Info("Slack loaded %d cached messages from %s (skipped %d expired, default TTL: %v)", loadedCount, options.CacheFileName, skippedExpired, ttl)
 			}
 			f.Close()
 		}
