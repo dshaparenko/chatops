@@ -62,9 +62,10 @@ type SlackOptions struct {
 	ButtonRejectCaption  string
 	ButtonApproveCaption string
 
-	CacheTTL        string
-	MaxQueryOptions int
-	MinQueryLength  int
+	CacheTTL            string
+	CacheTagMessagesTTL string
+	MaxQueryOptions     int
+	MinQueryLength      int
 
 	UserGroupsInterval int
 
@@ -157,6 +158,7 @@ type Slack struct {
 	messages          *ttlcache.Cache[string, *SlackMessage]
 	messageTags       *ttlcache.Cache[string, []string] // tag -> list of message keys
 	tagMutex          sync.RWMutex
+	taggedMessageTTL  time.Duration // TTL for tagged messages
 	saveTicker        *time.Ticker
 	stopSave          chan bool
 	userGroups        SlackUserGroups
@@ -894,11 +896,11 @@ func (s *Slack) putMessageToCache(msg *SlackMessage) {
 		return
 	}
 
-	// tagged messages get no expiration (NoTTL), regular messages use default TTL
+	// Tagged messages use configured taggedMessageTTL, regular messages use default TTL
 	messageTTL := ttlcache.DefaultTTL
 	if len(msg.tags) > 0 {
-		messageTTL = ttlcache.NoTTL
-		s.logger.Debug("Setting NoTTL for tagged message %s with tags: %v", msg.key.String(), msg.tags)
+		messageTTL = s.taggedMessageTTL
+		s.logger.Debug("Setting TTL %v for tagged message %s with tags: %v", s.taggedMessageTTL, msg.key.String(), msg.tags)
 	}
 
 	s.messages.Set(msg.key.String(), msg, messageTTL)
@@ -925,7 +927,8 @@ func (s *Slack) putMessageToCache(msg *SlackMessage) {
 			}
 			if !found {
 				msgKeys = append(msgKeys, msgKeyStr)
-				s.messageTags.Set(tagKey, msgKeys, ttlcache.NoTTL)
+				// Tag index uses DefaultTTL (matches messageTags cache default)
+				s.messageTags.Set(tagKey, msgKeys, ttlcache.DefaultTTL)
 			}
 		}
 	}
@@ -4652,21 +4655,31 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 		}
 	}
 
+	ttlTags := 24 * 60 * 60 * time.Second
+	if !utils.IsEmpty(options.CacheTagMessagesTTL) {
+		if newTTL, err := time.ParseDuration(options.CacheTagMessagesTTL); err == nil {
+			ttlTags = newTTL
+		} else {
+			observability.Logs().Error("Slack couldn't parse cache tag messages TTL %s: %s", options.CacheTagMessagesTTL, err)
+		}
+	}
+
 	messagesOpts := []ttlcache.Option[string, *SlackMessage]{ttlcache.WithTTL[string, *SlackMessage](ttl)}
 	messages := ttlcache.New[string, *SlackMessage](messagesOpts...)
 
 	// Create message tags cache (secondary index for tag-based lookups)
-	messageTagsOpts := []ttlcache.Option[string, []string]{ttlcache.WithTTL[string, []string](ttl)}
+	messageTagsOpts := []ttlcache.Option[string, []string]{ttlcache.WithTTL[string, []string](ttlTags)}
 	messageTags := ttlcache.New[string, []string](messageTagsOpts...)
 
 	// Create slack instance first so we can use it in FromSlackMessageCache
 	slack := &Slack{
-		options:     options,
-		processors:  processors,
-		logger:      observability.Logs(),
-		meter:       observability.Metrics(),
-		messages:    messages,
-		messageTags: messageTags,
+		options:          options,
+		processors:       processors,
+		logger:           observability.Logs(),
+		meter:            observability.Metrics(),
+		messages:         messages,
+		messageTags:      messageTags,
+		taggedMessageTTL: ttlTags,
 	}
 
 	if options.CacheFileName != "" {
@@ -4715,11 +4728,20 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 					}
 
 					var messageTTL time.Duration
+					age := now.Sub(cacheItem.CachedAt)
+
 					if len(slackMessage.tags) > 0 {
-						messageTTL = ttlcache.NoTTL
-						observability.Logs().Debug("Slack loaded tagged message %s with NoTTL (tags: %v)", key, slackMessage.tags)
+						// Tagged messages: calculate remaining TTL from ttlTags
+						remainingTTL := ttlTags - age
+						if remainingTTL <= 0 {
+							skippedExpired++
+							observability.Logs().Debug("Skipping expired tagged message %s (age: %v, tag TTL: %v)", key, age, ttlTags)
+							continue
+						}
+						messageTTL = remainingTTL
+						observability.Logs().Debug("Slack loaded tagged message %s (cached at: %v, age: %v, remaining TTL: %v, tags: %v)", key, cacheItem.CachedAt, age, remainingTTL, slackMessage.tags)
 					} else {
-						age := now.Sub(cacheItem.CachedAt)
+						// Untagged messages: calculate remaining TTL from regular ttl
 						remainingTTL := ttl - age
 
 						if remainingTTL <= 0 {
@@ -4743,7 +4765,8 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 								msgKeys = item.Value()
 							}
 							msgKeys = append(msgKeys, key)
-							messageTags.Set(tagIndexKey, msgKeys, ttlcache.NoTTL)
+							// Tag index uses same remaining TTL as the message
+							messageTags.Set(tagIndexKey, msgKeys, messageTTL)
 						}
 						observability.Logs().Debug("Rebuilt tag index for message %s with tags: %v", key, slackMessage.tags)
 					}
