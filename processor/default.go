@@ -170,19 +170,20 @@ type DefaultAction struct {
 }
 
 type DefaultCommandConfig struct {
-	Description  string
-	Params       []string
-	Aliases      []string
-	Response     DefaultResponse
-	Fields       []*DefaultField
-	Actions      []*DefaultAction
-	Priority     int
-	Wrapper      bool
-	Schedule     string
-	Channel      string
-	Confirmation string
-	Approval     *DefaultApproval
-	Permissions  *bool
+	Description   string
+	Params        []string
+	Aliases       []string
+	Response      DefaultResponse
+	Fields        []*DefaultField
+	Actions       []*DefaultAction
+	Priority      int
+	Wrapper       bool
+	Schedule      string
+	Channel       string
+	Confirmation  string
+	Approval      *DefaultApproval
+	Permissions   *bool
+	TrackMessages *bool `yaml:"trackMessages"` // enable message tracking/tagging
 }
 
 type DefaultCommandResponse struct {
@@ -812,6 +813,34 @@ func (de *DefaultExecutor) fAddDivider(channelID, ID string) string {
 	return ""
 }
 
+func (de *DefaultExecutor) fTagMessage(channelID, timestamp string, tags map[string]any) string {
+
+	strTags := make(map[string]string)
+	for k, v := range tags {
+		strTags[k] = fmt.Sprintf("%v", v)
+	}
+
+	err := de.bot.TagMessage(channelID, timestamp, strTags)
+	if err != nil {
+		e := true
+		de.error = &e
+		return err.Error()
+	}
+	return ""
+}
+
+func (de *DefaultExecutor) fFindMessagesByTag(tagKey, tagValue string) string {
+
+	messages := de.bot.FindMessagesByTag(tagKey, tagValue)
+	b, err := json.Marshal(messages)
+	if err != nil {
+		e := true
+		de.error = &e
+		return err.Error()
+	}
+	return string(b)
+}
+
 func (de *DefaultExecutor) fSetError() string {
 	e := true
 	de.error = &e
@@ -1108,6 +1137,8 @@ func NewExecutorTemplate(name string, content string, executor *DefaultExecutor,
 	funcs["updateMessage"] = executor.fUpdateMessage
 	funcs["askOpenAI"] = executor.fAskOpenAI
 	funcs["addDivider"] = executor.fAddDivider
+	funcs["tagMessage"] = executor.fTagMessage
+	funcs["findMessagesByTag"] = executor.fFindMessagesByTag
 	funcs["gracefulAbort"] = executor.fGracefulAbort
 
 	templateOpts := toolsRender.TemplateOptions{
@@ -2307,6 +2338,14 @@ func (dc *DefaultCommand) Permissions() bool {
 		return *dc.config.Permissions
 	}
 	return true
+}
+
+func (dc *DefaultCommand) TrackMessages() bool {
+
+	if dc.config != nil && dc.config.TrackMessages != nil {
+		return *dc.config.TrackMessages
+	}
+	return false
 }
 
 func (dc *DefaultCommand) Response() common.Response {

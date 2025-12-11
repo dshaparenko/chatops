@@ -43,6 +43,9 @@ type SlackMessageCache struct {
 	SerializedParams  string `json:"params,omitempty"`
 	SerializedFields  string `json:"fields,omitempty"`
 
+	// Message tags for grouping and bulk operations
+	Tags map[string]string `json:"tags,omitempty"`
+
 	// Timestamp for when this cache entry was created
 	CachedAt time.Time `json:"cached_at"`
 }
@@ -143,6 +146,14 @@ func ToSlackMessageCache(sm *SlackMessage) (*SlackMessageCache, error) {
 		}
 	}
 
+	// Copy tags
+	if len(sm.tags) > 0 {
+		cache.Tags = make(map[string]string)
+		for k, v := range sm.tags {
+			cache.Tags[k] = v
+		}
+	}
+
 	return cache, nil
 }
 
@@ -233,6 +244,14 @@ func FromSlackMessageCache(cache *SlackMessageCache, slack *Slack) (*SlackMessag
 			slack.logger.Error("Failed to deserialize actions: %v", err)
 		} else {
 			sm.actions = common.ActionsFromCaches(actionCaches)
+		}
+	}
+
+	// Restore tags
+	if len(cache.Tags) > 0 {
+		sm.tags = make(map[string]string)
+		for k, v := range cache.Tags {
+			sm.tags[k] = v
 		}
 	}
 
