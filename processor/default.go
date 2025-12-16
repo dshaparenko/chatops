@@ -2474,9 +2474,17 @@ func (dca *DefaultCommandApproval) runTemplate(fileName string, obj interface{})
 	}
 
 	templateName := fmt.Sprintf("approval-runtemplate-%s", fileName)
+
+	// Create funcs map with runTemplate and runTemplateAsJson to support nested template calls
+	funcs := make(map[string]any)
+	funcs["runTemplate"] = dca.runTemplate
+	funcs["runTemplateAsJson"] = dca.runTemplateAsJson
+	funcs["isEmpty"] = utils.IsEmpty
+
 	templateOpts := toolsRender.TemplateOptions{
 		Name:    templateName,
 		Content: string(content),
+		Funcs:   funcs,
 	}
 
 	t, err := toolsRender.NewTextTemplate(templateOpts, dca.command.processor.observability)
