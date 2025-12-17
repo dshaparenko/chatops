@@ -4239,7 +4239,7 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 		values = revls
 	}
 
-	re := regexp.MustCompile(value)
+	re, _ := regexp.Compile(value)
 	if re != nil {
 
 		for _, v := range values {
