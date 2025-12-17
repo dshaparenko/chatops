@@ -12,7 +12,7 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-4
 
 require (
 	github.com/devopsext/sre v0.7.0
-	github.com/devopsext/tools v0.20.8
+	github.com/devopsext/tools v0.20.9
 	github.com/devopsext/utils v0.4.8
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/google/uuid v1.6.0
@@ -54,6 +54,7 @@ require (
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-piv/piv-go/v2 v2.4.0 // indirect
+	github.com/go-playground/form/v4 v4.2.1 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
