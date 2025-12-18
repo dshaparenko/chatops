@@ -3165,18 +3165,27 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			return
 		}
 
-		key := &SlackMessageKey{
-			channelID: event.ChannelID,
-			timestamp: event.TimeStamp,
-			threadTS:  event.ThreadTimeStamp,
-		}
-		s.addReaction(event.Type, key, s.options.ReactionDoing)
-
 		u := s.newSlackUser(event.UserID, event.BotID)
 		if u == nil {
 			s.logger.Error("Slack couldn't process command from unknown user")
 			return
 		}
+
+		// For slash commands like "/release" , timestamp is empty which causes cache key collisions
+		// here func (smk *SlackMessageKey) String() string {
+		//         return fmt.Sprintf("%s/%s", smk.channelID, smk.timestamp)}
+
+		timestamp := event.TimeStamp
+		if event.Type == slackSlachCommand && utils.IsEmpty(timestamp) {
+			timestamp = fmt.Sprintf("%s-%s", u.id, common.UUID())
+		}
+
+		key := &SlackMessageKey{
+			channelID: event.ChannelID,
+			timestamp: timestamp,
+			threadTS:  event.ThreadTimeStamp,
+		}
+		s.addReaction(event.Type, key, s.options.ReactionDoing)
 
 		// check second time, possiblu bot ID
 		if s.auth != nil && s.auth.UserID == u.id {
