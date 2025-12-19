@@ -57,6 +57,8 @@ github.com/devopsext/tools v0.20.8 h1:b1B0wf4koWb8Nt5wwaAyEjXCVUXgR4h/PwS0MxNp1x
 github.com/devopsext/tools v0.20.8/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
 github.com/devopsext/tools v0.20.9 h1:Hd1H6aNKMsj/wpctFe0+mSiw+E6q5WYi9n2m1BUeXn0=
 github.com/devopsext/tools v0.20.9/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
+github.com/devopsext/tools v0.20.10 h1:J+B6tVD6jdWgntg98m5iB51E8HUeR6OytYM/+4c23W4=
+github.com/devopsext/tools v0.20.10/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
 github.com/devopsext/utils v0.4.8 h1:Ql8fwF36lUcHj5nw/IlZrfHEcPNmh1YPJws3MOnuCKA=
 github.com/devopsext/utils v0.4.8/go.mod h1:3Apwsy4/k+baHRxsHuK0ipqdgK/YNHif0fZmO7m0W4Q=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
