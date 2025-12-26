@@ -53,12 +53,8 @@ github.com/devopsext/slacker v0.1.1-4 h1:VCXqKvzMuciB2Vfex1WQLhCWtnMDsxhyYX9myIy
 github.com/devopsext/slacker v0.1.1-4/go.mod h1:0dIY7rxW5j4aSRq+rg79dpg3My012uZdGrzFmewSKUA=
 github.com/devopsext/sre v0.7.0 h1:jaP8AYkds79a2TkLAY8U9RPuf+9rlWIUT5adcwA4mLo=
 github.com/devopsext/sre v0.7.0/go.mod h1:w+uUaCQd0EM1lGDrmSFwmQDL0+H5MVooiEOJE2tVzEs=
-github.com/devopsext/tools v0.20.8 h1:b1B0wf4koWb8Nt5wwaAyEjXCVUXgR4h/PwS0MxNp1xQ=
-github.com/devopsext/tools v0.20.8/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
-github.com/devopsext/tools v0.20.9 h1:Hd1H6aNKMsj/wpctFe0+mSiw+E6q5WYi9n2m1BUeXn0=
-github.com/devopsext/tools v0.20.9/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
-github.com/devopsext/tools v0.20.10 h1:J+B6tVD6jdWgntg98m5iB51E8HUeR6OytYM/+4c23W4=
-github.com/devopsext/tools v0.20.10/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
+github.com/devopsext/tools v0.20.11 h1:LNt5nOUPTtPn1vOYMFVDkbHz8TV+7G1gXguP5MTUa4s=
+github.com/devopsext/tools v0.20.11/go.mod h1:5gok2TOOyEv0isRLXxikqpsZYwk4DAcMQEhCHiLs+Pk=
 github.com/devopsext/utils v0.4.8 h1:Ql8fwF36lUcHj5nw/IlZrfHEcPNmh1YPJws3MOnuCKA=
 github.com/devopsext/utils v0.4.8/go.mod h1:3Apwsy4/k+baHRxsHuK0ipqdgK/YNHif0fZmO7m0W4Q=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
@@ -88,9 +84,6 @@ github.com/go-openapi/swag v0.23.0 h1:vsEVJDUo2hPJ2tu0/Xc+4noaxyEffXNIs3cOULZ+Gr
 github.com/go-openapi/swag v0.23.0/go.mod h1:esZ8ITTYEsH1V2trKHjAN8Ai7xHb8RV+YSZ577vPjgQ=
 github.com/go-piv/piv-go/v2 v2.4.0 h1:xamQ/fR4MJiw/Ndbk6yi7MVwhjrwlnDAPuaH9zcGb+I=
 github.com/go-piv/piv-go/v2 v2.4.0/go.mod h1:ShZi74nnrWNQEdWzRUd/3cSig3uNOcEZp+EWl0oewnI=
-github.com/go-playground/assert/v2 v2.0.1/go.mod h1:VDjEfimB/XKnb+ZQfWdccd7VUvScMdVu0Titje2rxJ4=
-github.com/go-playground/form/v4 v4.2.1 h1:HjdRDKO0fftVMU5epjPW2SOREcZ6/wLUzEobqUGJuPw=
-github.com/go-playground/form/v4 v4.2.1/go.mod h1:q1a2BY+AQUUzhl6xA/6hBetay6dEIhMHjgvJiGo6K7U=
 github.com/go-task/slim-sprig/v3 v3.0.0 h1:sUs3vkvUymDpBKi3qH1YSqBQk9+9D/8M2mN1vB6EwHI=
 github.com/go-task/slim-sprig/v3 v3.0.0/go.mod h1:W848ghGpv3Qj3dhTPRyJypKRiqCdHZiAzKg9hl15HA8=
 github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible h1:2cauKuaELYAEARXRkq2LrJ0yDDv1rW7+wrTEdVL3uaU=
