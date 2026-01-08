@@ -3792,12 +3792,30 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 
 	if !utils.IsEmpty(parent) && len(allDeps) == 0 {
 		tpl := parent.Template()
-		name := parent.Name()
-		_, ok := params[name]
-		if utils.IsEmpty(tpl) && ok {
-			m.params = common.MergeInterfaceMaps(m.params, params)
-			s.putMessageToCache(m)
-			return false
+		pName := parent.Name()
+		_, ok := params[pName]
+
+		// if no template OR if it's a dynamic field with cached values, skip Fields() call
+		if ok {
+			pType := parent.Type()
+			isDynamic := utils.Contains(skip, pType)
+
+			if utils.IsEmpty(tpl) {
+				m.params = common.MergeInterfaceMaps(m.params, params)
+				s.putMessageToCache(m)
+				return false
+			}
+
+			// for dynamic fields with no dependents, check if we have cached values
+			if isDynamic {
+				cachedField := m.fields.findField(pName)
+				if cachedField != nil && len(cachedField.values) > 0 {
+					// use cached values - no need to re-execute template
+					m.params = common.MergeInterfaceMaps(m.params, params)
+					s.putMessageToCache(m)
+					return false
+				}
+			}
 		}
 	}
 
@@ -4192,38 +4210,57 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 	params[name] = value
 
 	var parent common.Field
-	f := m.fields.findField(name)
-	if !utils.IsEmpty(f) {
-		parent = f.field.Parent()
-	}
+	var values []string
+	var fHint string
+	var fFilter string
+	var fType common.FieldType
 
-	deps := []string{name}
-	reqParams := m.prepareParams(params)
+	// check if we have cached values for this field
+	cachedField := m.fields.findField(name)
 
-	fields := m.cmd.Fields(s, m, reqParams, deps, parent)
-
-	var field common.Field
-
-	for _, f := range fields {
-		if f.Name() == name {
-			field = f
-			break
+	if cachedField != nil && len(cachedField.values) > 0 {
+		values = cachedField.values
+		fHint = cachedField.Hint()
+		fFilter = cachedField.Filter()
+		fType = cachedField.Type()
+		parent = cachedField.field.Parent()
+	} else {
+		if cachedField != nil {
+			parent = cachedField.field.Parent()
 		}
+
+		deps := []string{name}
+		reqParams := m.prepareParams(params)
+
+		fields := m.cmd.Fields(s, m, reqParams, deps, parent)
+
+		var field common.Field
+		for _, f := range fields {
+			if f.Name() == name {
+				field = f
+				break
+			}
+		}
+
+		if field == nil {
+			return
+		}
+		values = field.Values()
+		fHint = field.Hint()
+		fFilter = field.Filter()
+		fType = field.Type()
+
+		m.mergeParams(params, deps)
+		fold := m.fields.findField(name)
+		if fold != nil {
+			fold.values = values
+			s.logger.Debug("Slack stored %d values in cache for field %s", len(values), name)
+		} else {
+			s.logger.Debug("Slack WARNING: could not find field %s to cache values", name)
+		}
+		s.putMessageToCache(m)
 	}
 
-	if field == nil {
-		return
-	}
-	values := field.Values()
-
-	m.mergeParams(params, deps)
-	fold := m.fields.findField(name)
-	if fold != nil {
-		fold.values = values
-	}
-	s.putMessageToCache(m)
-
-	fType := field.Type()
 	switch fType {
 	case common.FieldTypeGroup, common.FieldTypeMultiGroup:
 		values = []string{}
@@ -4233,7 +4270,6 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 		}
 	}
 
-	fFilter := field.Filter()
 	if !utils.IsEmpty(fFilter) {
 		revls := []string{}
 		re := regexp.MustCompile(fFilter)
@@ -4260,7 +4296,6 @@ func (s *Slack) handleBlockSuggestion(ctx *slacker.InteractionContext, req *sock
 			if re.MatchString(v) {
 
 				var h *slack.TextBlockObject
-				fHint := field.Hint()
 				if !utils.IsEmpty(fHint) {
 					h = slack.NewTextBlockObject(slack.PlainTextType, fHint, false, false)
 				}
