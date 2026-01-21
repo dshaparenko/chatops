@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1762,8 +1763,11 @@ func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot c
 		}
 
 		g.Go(func() error {
+			localParams := make(map[string]any)
 
-			executor, err := NewRunbookExecutor(dr, step, bot, parent, params)
+			maps.Copy(localParams, params)
+
+			executor, err := NewRunbookExecutor(dr, step, bot, parent, localParams)
 			if err != nil {
 				return err
 			}
@@ -1771,7 +1775,7 @@ func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot c
 				return nil
 			}
 
-			r1 := executor.execute(id1, params, parent)
+			r1 := executor.execute(id1, localParams, parent)
 			if r1 != nil && r1.Error != nil {
 				return r1.Error
 			}
@@ -1793,7 +1797,7 @@ func (dr *DefaultRunbook) runPipeline(id string, pl []*DefaultRunbookStep, bot c
 				}
 			}
 
-			err = dr.runPipeline(id1, step.Pipeline, bot, parent, params, callback, true)
+			err = dr.runPipeline(id1, step.Pipeline, bot, parent, localParams, callback, true)
 			if err != nil {
 				return err
 			}
