@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/devopsext/utils"
@@ -60,6 +61,30 @@ func (bs *Bots) Stop() {
 			i.Stop()
 		}
 	}
+}
+
+func (bs *Bots) FindByName(name string) Bot {
+	for _, b := range bs.list {
+		if b != nil && b.Name() == name {
+			return b
+		}
+	}
+	return nil
+}
+
+// ExecuteCommand implements CommandExecutor interface.
+func (bs *Bots) ExecuteCommand(botName, channel, command, userID string) error {
+	bot := bs.FindByName(botName)
+	if bot == nil {
+		return fmt.Errorf("bot %q not found", botName)
+	}
+
+	// needs to be handled as now all cmds are allowed
+	user := NewGenericUser(userID, userID, "", nil)
+
+	response := NewGenericResponse(true)
+
+	return bot.Command(channel, command, user, nil, response)
 }
 
 func NewBots() *Bots {

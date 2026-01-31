@@ -3444,6 +3444,14 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		u, ok := user.(*SlackUser)
 		if ok {
 			mUser = u
+		} else {
+			// fake slack user for API calls
+			mUser = &SlackUser{
+				id:       user.ID(),
+				name:     user.Name(),
+				timezone: user.TimeZone(),
+				commands: user.Commands(),
+			}
 		}
 		userID = user.ID()
 	}
@@ -3462,7 +3470,9 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 
 	if !utils.IsEmpty(user) {
 		userID := user.ID()
-		if !utils.Contains(user.Commands(), groupName) {
+		userCommands := user.Commands()
+		// Empty commands list means all commands are allowed (no restrictions)
+		if len(userCommands) > 0 && !utils.Contains(userCommands, groupName) {
 			s.logger.Debug("Slack command user %s is not permitted to execute %s", userID, groupName)
 			return nil
 		}

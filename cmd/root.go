@@ -14,6 +14,7 @@ import (
 	"github.com/devopsext/chatops/bot"
 	"github.com/devopsext/chatops/common"
 	"github.com/devopsext/chatops/processor"
+	"github.com/devopsext/chatops/server"
 	"github.com/slack-go/slack"
 
 	sreCommon "github.com/devopsext/sre/common"
@@ -33,6 +34,12 @@ var mainWG sync.WaitGroup
 type RootOptions struct {
 	Logs    []string
 	Metrics []string
+}
+
+var httpServerInstance *server.HttpServer
+
+var httpServerOptions = server.HttpServerOptions{
+	Listen: envGet("HTTP_SERVER_LISTEN", "127.0.0.1:8081").(string),
 }
 
 var rootOptions = RootOptions{
@@ -139,6 +146,12 @@ func interceptSyscall() {
 		if botsInstance != nil {
 			logs.Info("Stopping bots...")
 			botsInstance.Stop()
+		}
+
+		// Call Stop on HTTP server if available
+		if httpServerInstance != nil {
+			logs.Info("Stopping HTTP server...")
+			httpServerInstance.Stop()
 		}
 
 		logs.Info("Exiting...")
@@ -289,6 +302,11 @@ func Execute() {
 			// Store bots reference for graceful shutdown
 			botsInstance = bots
 
+			// Create and start HTTP server (bots implements CommandExecutor)
+			httpServer := server.NewHttpServer(httpServerOptions, obs, bots)
+			httpServerInstance = httpServer
+			httpServer.Start(&mainWG)
+
 			bots.Start(&mainWG)
 			mainWG.Wait()
 		},
@@ -343,6 +361,8 @@ func Execute() {
 	flags.StringVar(&defaultOptions.CommandExt, "default-command-ext", defaultOptions.CommandExt, "Default command extension")
 	flags.StringVar(&defaultOptions.ConfigExt, "default-config-ext", defaultOptions.ConfigExt, "Default config extension")
 	flags.StringVar(&defaultOptions.Error, "default-error", defaultOptions.Error, "Default error")
+
+	flags.StringVar(&httpServerOptions.Listen, "http-server-listen", httpServerOptions.Listen, "HTTP server listen address (e.g., :8081)")
 
 	interceptSyscall()
 
