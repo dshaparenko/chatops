@@ -71,6 +71,10 @@ func (b *MockBot) SendImage(channelID, threadTS string, fileContent []byte, file
 	return nil
 }
 func (b *MockBot) AddDivider(channel, ID string) error { return nil }
+func (b *MockBot) LookupUser(identifier string) common.User {
+	// Return a mock user with all commands allowed for testing
+	return common.NewGenericUser(identifier, identifier, "", nil)
+}
 
 func (b *MockBot) Command(channel, text string, user common.User, parent common.Message, response common.Response) error {
 	b.mu.Lock()

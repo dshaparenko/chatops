@@ -12,6 +12,8 @@ type Bot interface {
 	Stop()
 	Name() string
 	Command(channel, text string, user User, parent Message, response Response) error
+	// for API calls when event triggered not by slack
+	LookupUser(identifier string) User
 
 	AddReaction(channel, ID, name string) error
 	RemoveReaction(channel, ID, name string) error
@@ -73,16 +75,21 @@ func (bs *Bots) FindByName(name string) Bot {
 }
 
 // ExecuteCommand implements CommandExecutor interface.
-func (bs *Bots) ExecuteCommand(botName, channel, command, userID string) error {
+// userIdentifier can be a Slack user ID (e.g., "U12345678") or email (e.g., "user@example.com").
+// notifier is optional - if provided, it will be called when command completes (including after approval).
+func (bs *Bots) ExecuteCommand(botName, channel, command, userIdentifier string, notifier StatusNotifier) error {
 	bot := bs.FindByName(botName)
 	if bot == nil {
 		return fmt.Errorf("bot %q not found", botName)
 	}
 
-	// needs to be handled as now all cmds are allowed
-	user := NewGenericUser(userID, userID, "", nil)
+	// Look up user by ID or email to get their allowed commands
+	user := bot.LookupUser(userIdentifier)
+	if user == nil {
+		return fmt.Errorf("user %q not found", userIdentifier)
+	}
 
-	response := NewGenericResponse(true)
+	response := NewGenericResponseWithNotifier(true, notifier)
 
 	return bot.Command(channel, command, user, nil, response)
 }

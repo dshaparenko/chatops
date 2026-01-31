@@ -100,23 +100,24 @@ type SlackMessageFields struct {
 }
 
 type SlackMessage struct {
-	slack       *Slack
-	typ         string
-	cmdText     string
-	cmd         common.Command
-	wrapper     common.Command
-	originKey   *SlackMessageKey
-	key         *SlackMessageKey
-	user        *SlackUser
-	caller      *SlackUser
-	botID       string
-	visible     bool
-	responseURL string
-	blocks      []slack.Block
-	actions     []common.Action
-	params      common.ExecuteParams
-	fields      SlackMessageFields
-	tags        map[string]string // custom tags for message grouping
+	slack          *Slack
+	typ            string
+	cmdText        string
+	cmd            common.Command
+	wrapper        common.Command
+	originKey      *SlackMessageKey
+	key            *SlackMessageKey
+	user           *SlackUser
+	caller         *SlackUser
+	botID          string
+	visible        bool
+	responseURL    string
+	blocks         []slack.Block
+	actions        []common.Action
+	params         common.ExecuteParams
+	fields         SlackMessageFields
+	tags           map[string]string     // custom tags for message grouping
+	statusNotifier common.StatusNotifier // for async status updates (API calls)
 }
 
 type SlackFileResponseFull struct {
@@ -2788,7 +2789,14 @@ func (s *Slack) cacheAskApproval(m *SlackMessage, message, channel string,
 	ab := slack.NewActionBlock(blockID, submit, cancel)
 	blocks = append(blocks, ab)
 
-	ts, err := replier.PostBlocks(channel, blocks, opts...)
+	var ts string
+	var err error
+	if replier != nil {
+		ts, err = replier.PostBlocks(channel, blocks, opts...)
+	} else {
+		// if no replier create interaction message directly
+		_, ts, err = s.client.SlackClient().PostMessage(channel, slack.MsgOptionBlocks(blocks...))
+	}
 	if err != nil {
 		return err
 	}
@@ -2943,6 +2951,9 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 	start := time.Now()
 	executor, message, attachments, actions, err := m.cmd.Execute(s, m, params, action)
 	if err != nil {
+		if m.statusNotifier != nil {
+			m.statusNotifier.OnComplete(false, err)
+		}
 		s.replyError(m, replier, err, "", attachments, nil)
 		return s.buildResponse(overwrite, response), err
 	}
@@ -2989,7 +3000,13 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 
 	s.putMessageToCache(mNew)
 
-	return r, executor.After(mNew)
+	afterErr := executor.After(mNew)
+
+	if m.statusNotifier != nil {
+		m.statusNotifier.OnComplete(afterErr == nil, afterErr)
+	}
+
+	return r, afterErr
 }
 
 func (s *Slack) formNeeded(fields []common.Field, params map[string]interface{}) bool {
@@ -3112,6 +3129,36 @@ func (s *Slack) buildSlackUser(user *slack.User) *SlackUser {
 
 func (s *Slack) newSlackUser(userID, botID string) *SlackUser {
 	return s.buildSlackUser(s.findSlackUser(userID, botID))
+}
+
+func (s *Slack) LookupUser(identifier string) common.User {
+	if utils.IsEmpty(identifier) {
+		return nil
+	}
+
+	var user *slack.User
+	var err error
+
+	if strings.HasPrefix(identifier, "U") {
+		// Slack user ID
+		user, err = s.client.SlackClient().GetUserInfo(identifier)
+		if err != nil {
+			s.logger.Error("Slack couldn't get user by ID %s: %s", identifier, err)
+			return nil
+		}
+	} else if strings.Contains(identifier, "@") {
+		// Email
+		user, err = s.client.SlackClient().GetUserByEmail(identifier)
+		if err != nil {
+			s.logger.Error("Slack couldn't get user by email %s: %s", identifier, err)
+			return nil
+		}
+	} else {
+		s.logger.Error("Slack LookupUser: identifier must be a user ID (starts with U) or email (contains @): %s", identifier)
+		return nil
+	}
+
+	return s.buildSlackUser(user)
 }
 
 func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.CommandDefinition {
@@ -3416,6 +3463,12 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	threadTS := ""
 	userID := "unknown"
 
+	// Extract status notifier from response if available (for API calls)
+	var statusNotifier common.StatusNotifier
+	if gr, ok := response.(*common.GenericResponse); ok && gr != nil {
+		statusNotifier = gr.StatusNotifier()
+	}
+
 	r := s.buildResponse(true, response)
 
 	var mOrigin *SlackMessage
@@ -3445,7 +3498,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		if ok {
 			mUser = u
 		} else {
-			// fake slack user for API calls
+			// build Slack user from common.User (edge case)
 			mUser = &SlackUser{
 				id:       user.ID(),
 				name:     user.Name(),
@@ -3485,9 +3538,12 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	}
 
 	var m *SlackMessage
+	// generate ts for API calls (same approach as slash commands when original ts does not exist)
+	fakeTS := fmt.Sprintf("%s-%s", userID, common.UUID())
 	key := &SlackMessageKey{
 		channelID: channelID,
 		threadTS:  threadTS,
+		timestamp: fakeTS,
 	}
 
 	if !utils.IsEmpty(mOrigin) {
@@ -3500,22 +3556,34 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		m.fields.copyFrom(fields, true)
 	} else {
 		m = &SlackMessage{
-			slack:     s,
-			typ:       slackMessageType,
-			cmdText:   fText,
-			cmd:       cmd,
-			wrapper:   nil,
-			originKey: nil,
-			key:       key,
-			user:      mUser,
-			caller:    mUser,
-			botID:     "",
-			//visible:     false,
-			responseURL: "",
-			blocks:      nil,
-			actions:     nil,
-			params:      params,
+			slack:          s,
+			typ:            slackMessageType,
+			cmdText:        fText,
+			cmd:            cmd,
+			wrapper:        nil,
+			originKey:      nil,
+			key:            key,
+			user:           mUser,
+			caller:         mUser,
+			botID:          "",
+			responseURL:    "",
+			blocks:         nil,
+			actions:        nil,
+			params:         params,
+			statusNotifier: statusNotifier,
 		}
+	}
+
+	// Check if approval is needed
+	message, approvalChannel := s.approvalNeeded(m, cmd, params)
+	if !utils.IsEmpty(message) {
+		s.putMessageToCache(m)
+		err := s.cacheAskApproval(m, message, approvalChannel, cmd, params, nil)
+		if err != nil {
+			s.logger.Error("Slack command %s couldn't post approval from %s: %s", groupName, userID, err)
+			return err
+		}
+		return fmt.Errorf("approval pending")
 	}
 
 	_, err := s.cachePostUserCommand(m, nil, nil, params, nil, r, true)
