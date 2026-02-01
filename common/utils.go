@@ -222,6 +222,8 @@ func MakeTemplateJsonResult(err error) map[string]interface{} {
 	return r
 }
 
-func StringInSlice(str string, list []string) bool {
-	return slices.Contains(list, str)
+func CommandInSlice(str string, list []string) bool {
+	cmd := strings.Split(str, " ")
+	cmdName := cmd[0]
+	return slices.Contains(list, cmdName)
 }

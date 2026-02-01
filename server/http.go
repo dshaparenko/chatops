@@ -8,11 +8,15 @@ import (
 
 	"github.com/devopsext/chatops/common"
 	"github.com/google/uuid"
+	"github.com/jellydator/ttlcache/v3"
 )
+
+const defaultMessageTTL = time.Hour
 
 type HttpServerOptions struct {
 	Listen      string
 	AllowedCmds []string
+	MessageTTL  string
 }
 
 type MessageStatus string
@@ -61,8 +65,7 @@ type HttpServer struct {
 	options  HttpServerOptions
 	obs      *common.Observability
 	executor common.CommandExecutor
-	messages map[string]*Message
-	mu       sync.RWMutex
+	messages *ttlcache.Cache[string, *Message]
 	server   *http.Server
 }
 
@@ -98,7 +101,7 @@ func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !common.StringInSlice(req.Command, s.options.AllowedCmds) {
+	if !common.CommandInSlice(req.Command, s.options.AllowedCmds) {
 		s.writeError(w, "command not allowed", http.StatusForbidden)
 		return
 	}
@@ -118,9 +121,7 @@ func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 
-	s.mu.Lock()
-	s.messages[msg.ID] = msg
-	s.mu.Unlock()
+	s.messages.Set(msg.ID, msg, ttlcache.DefaultTTL)
 
 	s.obs.Info("[API] Command request created: %s (bot=%s, channel=%s, command=%s)", msg.ID, msg.Bot, msg.Channel, msg.Command)
 
@@ -161,14 +162,12 @@ func (s *HttpServer) getMessageStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.RLock()
-	msg, exists := s.messages[id]
-	s.mu.RUnlock()
-
-	if !exists {
+	item := s.messages.Get(id)
+	if item == nil {
 		s.writeError(w, "message not found", http.StatusNotFound)
 		return
 	}
+	msg := item.Value()
 
 	resp := GetMessageStatusResponse{
 		ID:        msg.ID,
@@ -219,23 +218,39 @@ func (s *HttpServer) Stop() {
 		s.obs.Info("HTTP server stopping...")
 		s.server.Close()
 	}
+	if s.messages != nil {
+		s.messages.Stop()
+	}
 }
 
 func (s *HttpServer) updateMessageStatus(id string, status MessageStatus, errMsg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if msg, exists := s.messages[id]; exists {
+	item := s.messages.Get(id)
+	if item != nil {
+		msg := item.Value()
 		msg.Status = status
 		msg.Error = errMsg
 	}
 }
 
 func NewHttpServer(options HttpServerOptions, obs *common.Observability, executor common.CommandExecutor) *HttpServer {
+	ttl := defaultMessageTTL
+	if options.MessageTTL != "" {
+		if parsed, err := time.ParseDuration(options.MessageTTL); err == nil {
+			ttl = parsed
+		} else if obs != nil {
+			obs.Error("[API] Invalid message TTL %q, using default %v: %v", options.MessageTTL, defaultMessageTTL, err)
+		}
+	}
+
+	messages := ttlcache.New(
+		ttlcache.WithTTL[string, *Message](ttl),
+	)
+	go messages.Start() // Start automatic cleanup
+
 	return &HttpServer{
 		options:  options,
 		obs:      obs,
 		executor: executor,
-		messages: make(map[string]*Message),
+		messages: messages,
 	}
 }

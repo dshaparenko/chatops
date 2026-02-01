@@ -467,9 +467,11 @@ func TestCreateMessageBotNotFound(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Check message status - should be failed because bot not found
-	server.mu.RLock()
-	msg := server.messages[resp.ID]
-	server.mu.RUnlock()
+	item := server.messages.Get(resp.ID)
+	if item == nil {
+		t.Fatal("message not found in cache")
+	}
+	msg := item.Value()
 
 	if msg.Status != MessageStatusFailed {
 		t.Errorf("expected status %s, got %s", MessageStatusFailed, msg.Status)

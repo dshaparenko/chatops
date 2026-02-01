@@ -75,7 +75,6 @@ func (bs *Bots) FindByName(name string) Bot {
 }
 
 // ExecuteCommand implements CommandExecutor interface.
-// userIdentifier can be a Slack user ID (e.g., "U12345678") or email (e.g., "user@example.com").
 // notifier is optional - if provided, it will be called when command completes (including after approval).
 func (bs *Bots) ExecuteCommand(botName, channel, command, userIdentifier string, notifier StatusNotifier) error {
 	bot := bs.FindByName(botName)
