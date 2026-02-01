@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -219,4 +220,8 @@ func MakeTemplateJsonResult(err error) map[string]interface{} {
 	}
 	r["error"] = err.Error()
 	return r
+}
+
+func StringInSlice(str string, list []string) bool {
+	return slices.Contains(list, str)
 }

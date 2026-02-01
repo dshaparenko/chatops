@@ -39,7 +39,8 @@ type RootOptions struct {
 var httpServerInstance *server.HttpServer
 
 var httpServerOptions = server.HttpServerOptions{
-	Listen: envGet("HTTP_SERVER_LISTEN", "127.0.0.1:8081").(string),
+	Listen:      envGet("HTTP_SERVER_LISTEN", "127.0.0.1:8081").(string),
+	AllowedCmds: strings.Split(envGet("HTTP_SERVER_ALLOWED_CMDS", "release").(string), ","),
 }
 
 var rootOptions = RootOptions{

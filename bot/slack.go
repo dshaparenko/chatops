@@ -4151,6 +4151,11 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 		}
 		return s.executeCommandAfterApprovalReaction(ctx, mInit, mInit.key, mParent.params, reaction)
 	}
+
+	if mInit.statusNotifier != nil {
+		mInit.statusNotifier.OnComplete(false, fmt.Errorf("approval rejected"))
+	}
+
 	s.addRemoveReactions(mInit.typ, mInit.key, s.options.ReactionFailed, reaction)
 	return false
 }

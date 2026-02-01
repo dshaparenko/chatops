@@ -125,8 +125,12 @@ func newTestObservability() *common.Observability {
 }
 
 func newTestServer(executor common.CommandExecutor) *HttpServer {
+	return newTestServerWithAllowedCmds(executor, nil)
+}
+
+func newTestServerWithAllowedCmds(executor common.CommandExecutor, allowedCmds []string) *HttpServer {
 	return NewHttpServer(
-		HttpServerOptions{Listen: ":0"},
+		HttpServerOptions{Listen: ":0", AllowedCmds: allowedCmds},
 		newTestObservability(),
 		executor,
 	)
@@ -138,6 +142,7 @@ func TestCreateMessage(t *testing.T) {
 	tests := []struct {
 		name           string
 		request        CreateMessageRequest
+		allowedCmds    []string
 		expectedStatus int
 		expectError    bool
 		errorContains  string
@@ -150,6 +155,7 @@ func TestCreateMessage(t *testing.T) {
 				Command: "help",        // No "/" prefix
 				UserID:  "U12345678",
 			},
+			allowedCmds:    []string{"help"},
 			expectedStatus: http.StatusCreated,
 			expectError:    false,
 		},
@@ -161,6 +167,7 @@ func TestCreateMessage(t *testing.T) {
 				Command: "app name=test-app",
 				UserID:  "api-user",
 			},
+			allowedCmds:    []string{"app name=test-app"},
 			expectedStatus: http.StatusCreated,
 			expectError:    false,
 		},
@@ -172,17 +179,32 @@ func TestCreateMessage(t *testing.T) {
 				Command: "inci/create title=\"Test Incident\"",
 				UserID:  "admin",
 			},
+			allowedCmds:    []string{"inci/create title=\"Test Incident\""},
 			expectedStatus: http.StatusCreated,
 			expectError:    false,
 		},
 		{
-			name: "Missing bot field",
+			name: "Missing bot field - rejected by allowlist first",
 			request: CreateMessageRequest{
 				Bot:     "",
 				Channel: "C06F563PYM6",
 				Command: "help",
 				UserID:  "test-user",
 			},
+			allowedCmds:    nil, // Empty allowlist
+			expectedStatus: http.StatusForbidden,
+			expectError:    true,
+			errorContains:  "command not allowed",
+		},
+		{
+			name: "Missing bot field - with allowed command",
+			request: CreateMessageRequest{
+				Bot:     "",
+				Channel: "C06F563PYM6",
+				Command: "help",
+				UserID:  "test-user",
+			},
+			allowedCmds:    []string{"help"},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 			errorContains:  "bot, channel and command are required",
@@ -195,6 +217,7 @@ func TestCreateMessage(t *testing.T) {
 				Command: "help",
 				UserID:  "test-user",
 			},
+			allowedCmds:    []string{"help"},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 			errorContains:  "bot, channel and command are required",
@@ -207,6 +230,7 @@ func TestCreateMessage(t *testing.T) {
 				Command: "",
 				UserID:  "test-user",
 			},
+			allowedCmds:    []string{""},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 			errorContains:  "bot, channel and command are required",
@@ -219,6 +243,7 @@ func TestCreateMessage(t *testing.T) {
 				Command: "status",
 				UserID:  "",
 			},
+			allowedCmds:    []string{"status"},
 			expectedStatus: http.StatusCreated,
 			expectError:    false,
 		},
@@ -231,7 +256,7 @@ func TestCreateMessage(t *testing.T) {
 			bots := common.NewBots()
 			bots.Add(mockBot)
 
-			server := newTestServer(bots)
+			server := newTestServerWithAllowedCmds(bots, tt.allowedCmds)
 
 			body, _ := json.Marshal(tt.request)
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/message", bytes.NewReader(body))
@@ -305,10 +330,114 @@ func TestCreateMessageInvalidJSON(t *testing.T) {
 	}
 }
 
+// TestAllowedCmds tests command allowlist filtering
+func TestAllowedCmds(t *testing.T) {
+	tests := []struct {
+		name           string
+		allowedCmds    []string
+		command        string
+		expectedStatus int
+		expectError    bool
+		errorContains  string
+	}{
+		{
+			name:           "Empty allowlist rejects all commands",
+			allowedCmds:    []string{},
+			command:        "help",
+			expectedStatus: http.StatusForbidden,
+			expectError:    true,
+			errorContains:  "command not allowed",
+		},
+		{
+			name:           "Nil allowlist rejects all commands",
+			allowedCmds:    nil,
+			command:        "help",
+			expectedStatus: http.StatusForbidden,
+			expectError:    true,
+			errorContains:  "command not allowed",
+		},
+		{
+			name:           "Allowed command succeeds",
+			allowedCmds:    []string{"help", "status"},
+			command:        "help",
+			expectedStatus: http.StatusCreated,
+			expectError:    false,
+		},
+		{
+			name:           "Non-allowed command rejected",
+			allowedCmds:    []string{"help", "status"},
+			command:        "admin",
+			expectedStatus: http.StatusForbidden,
+			expectError:    true,
+			errorContains:  "command not allowed",
+		},
+		{
+			name:           "Command with params - base command allowed",
+			allowedCmds:    []string{"app name=test"},
+			command:        "app name=test",
+			expectedStatus: http.StatusCreated,
+			expectError:    false,
+		},
+		{
+			name:           "Command with different params rejected",
+			allowedCmds:    []string{"app name=test"},
+			command:        "app name=other",
+			expectedStatus: http.StatusForbidden,
+			expectError:    true,
+			errorContains:  "command not allowed",
+		},
+		{
+			name:           "Nested command allowed",
+			allowedCmds:    []string{"inci/digest"},
+			command:        "inci/digest",
+			expectedStatus: http.StatusCreated,
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockBot := NewMockBot("Slack")
+			bots := common.NewBots()
+			bots.Add(mockBot)
+
+			server := newTestServerWithAllowedCmds(bots, tt.allowedCmds)
+
+			request := CreateMessageRequest{
+				Bot:     "Slack",
+				Channel: "C06F563PYM6",
+				Command: tt.command,
+				UserID:  "U12345678",
+			}
+
+			body, _ := json.Marshal(request)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/message", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			server.createMessage(rec, req)
+
+			if rec.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
+			}
+
+			if tt.expectError {
+				var errResp ErrorResponse
+				if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+					t.Fatalf("failed to decode error response: %v", err)
+				}
+				if tt.errorContains != "" && errResp.Error != tt.errorContains {
+					t.Errorf("expected error %q, got %q", tt.errorContains, errResp.Error)
+				}
+			}
+		})
+	}
+}
+
 func TestCreateMessageBotNotFound(t *testing.T) {
 	// Empty bots list - no bot registered
 	bots := common.NewBots()
-	server := newTestServer(bots)
+	server := newTestServerWithAllowedCmds(bots, []string{"help"})
 
 	request := CreateMessageRequest{
 		Bot:     "Slack",
@@ -352,7 +481,7 @@ func TestCreateMessageCommandExecution(t *testing.T) {
 	bots := common.NewBots()
 	bots.Add(mockBot)
 
-	server := newTestServer(bots)
+	server := newTestServerWithAllowedCmds(bots, []string{"inci/digest period=7d"})
 
 	request := CreateMessageRequest{
 		Bot:     "Slack",
@@ -393,7 +522,7 @@ func TestGetMessageStatus(t *testing.T) {
 	bots := common.NewBots()
 	bots.Add(mockBot)
 
-	server := newTestServer(bots)
+	server := newTestServerWithAllowedCmds(bots, []string{"help"})
 
 	// Create a message first
 	request := CreateMessageRequest{
@@ -468,10 +597,8 @@ func TestGetMessageStatusMissingID(t *testing.T) {
 	}
 }
 
-// ChatOps Exness Commands - production command names (without "/" prefix)
-// These are used to verify the HTTP layer accepts and forwards commands correctly.
 // Note: The MockBot doesn't validate command names, so these test HTTP routing only.
-var chatopsExnessCommands = []string{
+var chatopsTemplateCommands = []string{
 	// Root commands
 	"app",
 	"apps",
@@ -550,14 +677,15 @@ var chatopsExnessCommands = []string{
 	"case/daily",
 }
 
-func TestCreateMessageWithChatOpsExnessCommands(t *testing.T) {
-	for _, command := range chatopsExnessCommands {
+func TestCreateMessageWithChatOpsTemplateCommands(t *testing.T) {
+	for _, command := range chatopsTemplateCommands {
 		t.Run(command, func(t *testing.T) {
 			mockBot := NewMockBot("Slack")
 			bots := common.NewBots()
 			bots.Add(mockBot)
 
-			server := newTestServer(bots)
+			// Allow this specific command
+			server := newTestServerWithAllowedCmds(bots, []string{command})
 
 			request := CreateMessageRequest{
 				Bot:     "Slack",
@@ -621,7 +749,8 @@ func TestCreateMessageWithCommandParameters(t *testing.T) {
 			bots := common.NewBots()
 			bots.Add(mockBot)
 
-			server := newTestServer(bots)
+			// Allow this specific command
+			server := newTestServerWithAllowedCmds(bots, []string{tt.command})
 
 			request := CreateMessageRequest{
 				Bot:     "Slack",

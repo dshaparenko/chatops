@@ -11,15 +11,17 @@ import (
 )
 
 type HttpServerOptions struct {
-	Listen string
+	Listen      string
+	AllowedCmds []string
 }
 
 type MessageStatus string
 
 const (
-	MessageStatusPending   MessageStatus = "pending"
-	MessageStatusDelivered MessageStatus = "delivered"
-	MessageStatusFailed    MessageStatus = "failed"
+	MessageStatusPending         MessageStatus = "pending"
+	MessageStatusDelivered       MessageStatus = "delivered"
+	MessageStatusFailed          MessageStatus = "failed"
+	MessageStatusWaitingApproval MessageStatus = "waiting_approval"
 )
 
 type Message struct {
@@ -37,7 +39,7 @@ type CreateMessageRequest struct {
 	Bot     string `json:"bot"`     // bot name (e.g., "Slack")
 	Channel string `json:"channel"` // target channel
 	Command string `json:"command"` // command to execute (no leading slash)
-	UserID  string `json:"user_id"` // user triggering the command
+	UserID  string `json:"user_id"` // user triggering the command (UID or email for slack)
 }
 
 type CreateMessageResponse struct {
@@ -64,6 +66,26 @@ type HttpServer struct {
 	server   *http.Server
 }
 
+// messageStatusNotifier implements common.StatusNotifier for async status updates
+type messageStatusNotifier struct {
+	server    *HttpServer
+	messageID string
+}
+
+func (n *messageStatusNotifier) OnComplete(success bool, err error) {
+	if success {
+		n.server.obs.Info("[API] Command completed after approval: %s", n.messageID)
+		n.server.updateMessageStatus(n.messageID, MessageStatusDelivered, "")
+	} else {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		n.server.obs.Error("[API] Command failed after approval: %s, error: %v", n.messageID, err)
+		n.server.updateMessageStatus(n.messageID, MessageStatusFailed, errMsg)
+	}
+}
+
 func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -73,6 +95,11 @@ func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
 	var req CreateMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if !common.StringInSlice(req.Command, s.options.AllowedCmds) {
+		s.writeError(w, "command not allowed", http.StatusForbidden)
 		return
 	}
 
@@ -97,11 +124,21 @@ func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
 
 	s.obs.Info("[API] Command request created: %s (bot=%s, channel=%s, command=%s)", msg.ID, msg.Bot, msg.Channel, msg.Command)
 
+	notifier := &messageStatusNotifier{
+		server:    s,
+		messageID: msg.ID,
+	}
+
 	go func() {
-		err := s.executor.ExecuteCommand(msg.Bot, msg.Channel, msg.Command, msg.UserID)
+		err := s.executor.ExecuteCommand(msg.Bot, msg.Channel, msg.Command, msg.UserID, notifier)
 		if err != nil {
-			s.obs.Error("[API] Command execution failed: %s, error: %v", msg.ID, err)
-			s.updateMessageStatus(msg.ID, MessageStatusFailed, err.Error())
+			if err.Error() == "approval pending" {
+				s.obs.Info("[API] Command waiting for approval: %s", msg.ID)
+				s.updateMessageStatus(msg.ID, MessageStatusWaitingApproval, "")
+			} else {
+				s.obs.Error("[API] Command execution failed: %s, error: %v", msg.ID, err)
+				s.updateMessageStatus(msg.ID, MessageStatusFailed, err.Error())
+			}
 		} else {
 			s.obs.Info("[API] Command executed: %s", msg.ID)
 			s.updateMessageStatus(msg.ID, MessageStatusDelivered, "")
