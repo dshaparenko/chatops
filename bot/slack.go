@@ -3526,8 +3526,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	if !utils.IsEmpty(user) {
 		userID := user.ID()
 		userCommands := user.Commands()
-		// Empty commands list means all commands are allowed (no restrictions)
-		if len(userCommands) > 0 && !utils.Contains(userCommands, groupName) {
+		if !utils.Contains(userCommands, groupName) {
 			s.logger.Debug("Slack command user %s is not permitted to execute %s", userID, groupName)
 			return nil, nil
 		}
@@ -3541,11 +3540,11 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 
 	var m *SlackMessage
 	// generate ts for API calls (same approach as slash commands when original ts does not exist)
-	fakeTS := fmt.Sprintf("%s-%s", userID, common.UUID())
+	generatedTS := fmt.Sprintf("%s-%s", userID, common.UUID())
 	key := &SlackMessageKey{
 		channelID: channelID,
 		threadTS:  threadTS,
-		timestamp: fakeTS,
+		timestamp: generatedTS,
 	}
 
 	if !utils.IsEmpty(mOrigin) {
