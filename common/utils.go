@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -219,4 +220,10 @@ func MakeTemplateJsonResult(err error) map[string]interface{} {
 	}
 	r["error"] = err.Error()
 	return r
+}
+
+func CommandInSlice(str string, list []string) bool {
+	cmd := strings.Split(str, " ")
+	cmdName := cmd[0]
+	return slices.Contains(list, cmdName)
 }
