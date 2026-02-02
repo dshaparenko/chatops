@@ -1893,7 +1893,7 @@ func (s *Slack) updateCounters(group, command, text, userID string) {
 	if !utils.IsEmpty(group) {
 		labels["group"] = group
 	}
-	if !utils.IsEmpty(text) {
+	if !utils.IsEmpty(command) {
 		labels["command"] = command
 	}
 	if !utils.IsEmpty(sanitizedText) {
@@ -1901,7 +1901,7 @@ func (s *Slack) updateCounters(group, command, text, userID string) {
 	}
 	labels["user_id"] = userID
 
-	s.meter.Counter("processor", "requests", "Count of all requests", labels, "slack", "bot").Inc()
+	s.meter.Counter("commands", "received", "Count of all received commands", labels, "slack", "bot").Inc()
 }
 
 func (s *Slack) DeleteMessage(channel, ID string) error {
