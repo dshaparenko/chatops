@@ -14,6 +14,7 @@ const (
 	MessageStatusDelivered       MessageStatus = "delivered"
 	MessageStatusFailed          MessageStatus = "failed"
 	MessageStatusWaitingApproval MessageStatus = "waiting_approval"
+	MessageStatusRejected        MessageStatus = "rejected"
 	MessageStatusNotFound        MessageStatus = "not_found"
 )
 

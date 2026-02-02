@@ -64,7 +64,6 @@ func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
 
 	s.obs.Info("[API] Executing command: bot=%s, channel=%s, command=%s, user=%s", req.Bot, req.Channel, req.Command, req.UserID)
 
-	// Execute command synchronously - the bot handles all message tracking
 	msg, err := s.executor.ExecuteCommand(req.Bot, req.Channel, req.Command, req.UserID)
 	if err != nil {
 		s.obs.Error("[API] Command execution failed: %v", err)

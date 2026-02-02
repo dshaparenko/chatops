@@ -3584,18 +3584,15 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 			s.logger.Error("Slack command %s couldn't post approval from %s: %s", groupName, userID, err)
 			return nil, err
 		}
-		// Tag the message as waiting for approval
-		if m.tags == nil {
-			m.tags = make(map[string]string)
+		// Return the approval message (clone) that cacheAskApproval created
+		// It has originKey pointing to original message, enabling findParentMessageInCache to work
+		approvalKey := &SlackMessageKey{channelID: approvalChannel, timestamp: approvalTS}
+		mApproval := s.findMessageInCache(approvalKey)
+		if mApproval == nil {
+			s.logger.Error("Slack command %s approval message not found in cache", groupName)
+			return nil, fmt.Errorf("approval message not found in cache")
 		}
-		m.tags["status"] = string(common.MessageStatusWaitingApproval)
-		// Update key with real approval timestamp
-		m.key = &SlackMessageKey{
-			channelID: approvalChannel,
-			timestamp: approvalTS,
-		}
-		s.putMessageToCache(m)
-		return m, nil
+		return mApproval, nil
 	}
 
 	_, err := s.cachePostUserCommand(m, nil, nil, params, nil, r, true)
@@ -4050,9 +4047,21 @@ func (s *Slack) executeCommandAfterApprovalReaction(ctx *slacker.InteractionCont
 	if err != nil {
 		s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
 		s.addRemoveReactions(m.typ, reactionKey, s.options.ReactionFailed, reaction)
+		// Update status to failed after approval execution
+		if m.tags == nil {
+			m.tags = make(map[string]string)
+		}
+		m.tags["status"] = string(common.MessageStatusFailed)
+		s.putMessageToCache(m)
 		return false
 	}
 	s.addRemoveReactions(m.typ, reactionKey, s.options.ReactionDone, reaction)
+	// Update status to delivered after successful approval execution
+	if m.tags == nil {
+		m.tags = make(map[string]string)
+	}
+	m.tags["status"] = string(common.MessageStatusDelivered)
+	s.putMessageToCache(m)
 	return true
 }
 
@@ -4172,17 +4181,29 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 	if name == slackSubmitAction {
 		mParent := s.findParentMessageInCache(m)
 		if mParent == nil {
+			s.logger.Error("Slack parent message not found in cache for approval")
 			return false
 		}
-		return s.executeCommandAfterApprovalReaction(ctx, mInit, mInit.key, mParent.params, reaction)
+		success := s.executeCommandAfterApprovalReaction(ctx, mInit, mInit.key, mParent.params, reaction)
+		// Update status on approval message (m) that is originally called
+		if m.tags == nil {
+			m.tags = make(map[string]string)
+		}
+		if success {
+			m.tags["status"] = string(common.MessageStatusDelivered)
+		} else {
+			m.tags["status"] = string(common.MessageStatusFailed)
+		}
+		s.putMessageToCache(m)
+		return success
 	}
 
-	// Approval was rejected - update status tag
-	if mInit.tags == nil {
-		mInit.tags = make(map[string]string)
+	// Approval was rejected
+	if m.tags == nil {
+		m.tags = make(map[string]string)
 	}
-	mInit.tags["status"] = string(common.MessageStatusFailed)
-	s.putMessageToCache(mInit)
+	m.tags["status"] = string(common.MessageStatusRejected)
+	s.putMessageToCache(m)
 
 	s.addRemoveReactions(mInit.typ, mInit.key, s.options.ReactionFailed, reaction)
 	return false
