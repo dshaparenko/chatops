@@ -906,11 +906,11 @@ func (de *DefaultExecutor) execute(id string, obj interface{}, message common.Me
 
 	prefixes := []string{"default", "processor"}
 
-	requests := processor.meter.Counter("processor", "requests", "Count of all executions", labels, prefixes...)
+	requests := processor.meter.Counter("commands", "executed", "Count of all executed commands", labels, prefixes...)
 	requests.Inc()
 
-	errors := processor.meter.Counter("processor", "errors", "Count of all errors during executions", labels, prefixes...)
-	timeCounter := processor.meter.Counter("processor", "time", "Sum of all time executions", labels, prefixes...)
+	errors := processor.meter.Counter("commands", "errors", "Count of all command execution errors", labels, prefixes...)
+	timeCounter := processor.meter.Counter("commands", "duration_ms", "Sum of command execution time in milliseconds", labels, prefixes...)
 
 	name := command.getNameWithGroup("/")
 
