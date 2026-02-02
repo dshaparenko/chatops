@@ -1,19 +1,13 @@
 package common
 
-// StatusNotifier is called when a command execution completes.
-// Used for async status updates (e.g., after approval).
-type StatusNotifier interface {
-	// OnComplete is called when command execution finishes.
-	// success=true means command executed successfully, false means it failed.
-	OnComplete(success bool, err error)
-}
-
 // CommandExecutor provides an interface for executing commands
 // without direct dependency on specific bot implementations.
 type CommandExecutor interface {
 	// ExecuteCommand triggers a command execution on the specified bot.
-	// notifier is optional - if provided via response, it will be called when command completes
-	ExecuteCommand(botName, channel, command, userID string, notifier StatusNotifier) error
+	// Returns the Message (use Message.ID() for tracking) or nil if no message was created.
+	ExecuteCommand(botName, channel, command, userID string) (Message, error)
+	// GetMessageStatus returns the status of a message by its ID.
+	GetMessageStatus(botName, messageID string) (MessageStatus, error)
 }
 
 // GenericUser is a simple implementation of the User interface
@@ -58,7 +52,6 @@ type GenericResponse struct {
 	original bool
 	err      bool
 	iconURL  string
-	notifier StatusNotifier
 }
 
 func (r *GenericResponse) Visible() bool {
@@ -81,10 +74,6 @@ func (r *GenericResponse) IconURL() string {
 	return r.iconURL
 }
 
-func (r *GenericResponse) StatusNotifier() StatusNotifier {
-	return r.notifier
-}
-
 func NewGenericResponse(visible bool) *GenericResponse {
 	return &GenericResponse{
 		visible:  visible,
@@ -92,16 +81,5 @@ func NewGenericResponse(visible bool) *GenericResponse {
 		original: false,
 		err:      false,
 		iconURL:  "",
-	}
-}
-
-func NewGenericResponseWithNotifier(visible bool, notifier StatusNotifier) *GenericResponse {
-	return &GenericResponse{
-		visible:  visible,
-		duration: false,
-		original: false,
-		err:      false,
-		iconURL:  "",
-		notifier: notifier,
 	}
 }

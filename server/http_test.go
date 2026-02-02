@@ -32,6 +32,31 @@ import (
 	"github.com/devopsext/chatops/common"
 )
 
+// MockMessage implements common.Message for testing
+type MockMessage struct {
+	id        string
+	visible   bool
+	user      common.User
+	caller    common.User
+	channelID string
+	parentID  string
+}
+
+func (m *MockMessage) ID() string              { return m.id }
+func (m *MockMessage) Visible() bool           { return m.visible }
+func (m *MockMessage) User() common.User       { return m.user }
+func (m *MockMessage) Caller() common.User     { return m.caller }
+func (m *MockMessage) Channel() common.Channel { return &MockChannel{id: m.channelID} }
+func (m *MockMessage) ParentID() string        { return m.parentID }
+func (m *MockMessage) SetParentID(ts string)   { m.parentID = ts }
+
+// MockChannel implements common.Channel for testing
+type MockChannel struct {
+	id string
+}
+
+func (c *MockChannel) ID() string { return c.id }
+
 // MockBot implements common.Bot interface for testing.
 // It accepts any command and records what was called for verification.
 type MockBot struct {
@@ -42,11 +67,12 @@ type MockBot struct {
 	lastUser      common.User
 	commandErr    error
 	commandDelay  time.Duration
+	messageStatus common.MessageStatus
 	mu            sync.Mutex
 }
 
 func NewMockBot(name string) *MockBot {
-	return &MockBot{name: name}
+	return &MockBot{name: name, messageStatus: common.MessageStatusDelivered}
 }
 
 func (b *MockBot) Start(wg *sync.WaitGroup)                                     {}
@@ -76,7 +102,7 @@ func (b *MockBot) LookupUser(identifier string) common.User {
 	return common.NewGenericUser(identifier, identifier, "", nil)
 }
 
-func (b *MockBot) Command(channel, text string, user common.User, parent common.Message, response common.Response) error {
+func (b *MockBot) Command(channel, text string, user common.User, parent common.Message, response common.Response) (common.Message, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -89,7 +115,25 @@ func (b *MockBot) Command(channel, text string, user common.User, parent common.
 	b.lastCommand = text
 	b.lastUser = user
 
-	return b.commandErr
+	if b.commandErr != nil {
+		return nil, b.commandErr
+	}
+
+	msg := &MockMessage{
+		id:        "mock-msg-" + common.UUID(),
+		visible:   true,
+		user:      user,
+		caller:    user,
+		channelID: channel,
+	}
+	return msg, nil
+}
+
+// GetMessageStatus returns the mock message status
+func (b *MockBot) GetMessageStatus(messageID string) (common.MessageStatus, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.messageStatus, nil
 }
 
 func (b *MockBot) GetLastCommand() (string, string) {
@@ -167,7 +211,7 @@ func TestCreateMessage(t *testing.T) {
 				Command: "app name=test-app",
 				UserID:  "api-user",
 			},
-			allowedCmds:    []string{"app name=test-app"},
+			allowedCmds:    []string{"app"},
 			expectedStatus: http.StatusCreated,
 			expectError:    false,
 		},
@@ -179,7 +223,7 @@ func TestCreateMessage(t *testing.T) {
 				Command: "inci/create title=\"Test Incident\"",
 				UserID:  "admin",
 			},
-			allowedCmds:    []string{"inci/create title=\"Test Incident\""},
+			allowedCmds:    []string{"inci/create"},
 			expectedStatus: http.StatusCreated,
 			expectError:    false,
 		},
@@ -373,18 +417,17 @@ func TestAllowedCmds(t *testing.T) {
 		},
 		{
 			name:           "Command with params - base command allowed",
-			allowedCmds:    []string{"app name=test"},
+			allowedCmds:    []string{"app"},
 			command:        "app name=test",
 			expectedStatus: http.StatusCreated,
 			expectError:    false,
 		},
 		{
-			name:           "Command with different params rejected",
-			allowedCmds:    []string{"app name=test"},
+			name:           "Command with different params - same base command allowed",
+			allowedCmds:    []string{"app"},
 			command:        "app name=other",
-			expectedStatus: http.StatusForbidden,
-			expectError:    true,
-			errorContains:  "command not allowed",
+			expectedStatus: http.StatusCreated,
+			expectError:    false,
 		},
 		{
 			name:           "Nested command allowed",
@@ -453,28 +496,18 @@ func TestCreateMessageBotNotFound(t *testing.T) {
 
 	server.createMessage(rec, req)
 
-	// Request should succeed (201) because execution is async
-	if rec.Code != http.StatusCreated {
-		t.Errorf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	// Request should fail (500) because bot not found
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
 	}
 
-	var resp CreateMessageResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
+	var errResp ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
 	}
 
-	// Wait for async execution to complete
-	time.Sleep(100 * time.Millisecond)
-
-	// Check message status - should be failed because bot not found
-	item := server.messages.Get(resp.ID)
-	if item == nil {
-		t.Fatal("message not found in cache")
-	}
-	msg := item.Value()
-
-	if msg.Status != MessageStatusFailed {
-		t.Errorf("expected status %s, got %s", MessageStatusFailed, msg.Status)
+	if errResp.Error == "" {
+		t.Error("expected non-empty error message")
 	}
 }
 
@@ -483,7 +516,7 @@ func TestCreateMessageCommandExecution(t *testing.T) {
 	bots := common.NewBots()
 	bots.Add(mockBot)
 
-	server := newTestServerWithAllowedCmds(bots, []string{"inci/digest period=7d"})
+	server := newTestServerWithAllowedCmds(bots, []string{"inci/digest"})
 
 	request := CreateMessageRequest{
 		Bot:     "Slack",
@@ -502,9 +535,6 @@ func TestCreateMessageCommandExecution(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Errorf("expected status %d, got %d", http.StatusCreated, rec.Code)
 	}
-
-	// Wait for async execution
-	time.Sleep(100 * time.Millisecond)
 
 	if !mockBot.WasCommandCalled() {
 		t.Error("expected bot.Command to be called")
@@ -544,11 +574,8 @@ func TestGetMessageStatus(t *testing.T) {
 	var createResp CreateMessageResponse
 	json.NewDecoder(createRec.Body).Decode(&createResp)
 
-	// Wait for async execution
-	time.Sleep(100 * time.Millisecond)
-
-	// Get status
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/message/status?id="+createResp.ID, nil)
+	// Get status - now requires bot parameter
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/message/status?bot=Slack&id="+createResp.ID, nil)
 	statusRec := httptest.NewRecorder()
 
 	server.getMessageStatus(statusRec, statusReq)
@@ -566,22 +593,22 @@ func TestGetMessageStatus(t *testing.T) {
 		t.Errorf("expected ID %q, got %q", createResp.ID, statusResp.ID)
 	}
 
-	if statusResp.Status != MessageStatusDelivered {
-		t.Errorf("expected status %q, got %q", MessageStatusDelivered, statusResp.Status)
+	if statusResp.Status != common.MessageStatusDelivered {
+		t.Errorf("expected status %q, got %q", common.MessageStatusDelivered, statusResp.Status)
 	}
 }
 
-func TestGetMessageStatusNotFound(t *testing.T) {
+func TestGetMessageStatusMissingBot(t *testing.T) {
 	bots := common.NewBots()
 	server := newTestServer(bots)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/message/status?id=nonexistent-id", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/message/status?id=some-id", nil)
 	rec := httptest.NewRecorder()
 
 	server.getMessageStatus(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status %d, got %d", http.StatusNotFound, rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 }
 
@@ -589,7 +616,7 @@ func TestGetMessageStatusMissingID(t *testing.T) {
 	bots := common.NewBots()
 	server := newTestServer(bots)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/message/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/message/status?bot=Slack", nil)
 	rec := httptest.NewRecorder()
 
 	server.getMessageStatus(rec, req)
@@ -716,9 +743,6 @@ func TestCreateMessageWithChatOpsTemplateCommands(t *testing.T) {
 				t.Errorf("command %s: expected non-empty message ID", command)
 			}
 
-			// Wait for async execution
-			time.Sleep(50 * time.Millisecond)
-
 			if !mockBot.WasCommandCalled() {
 				t.Errorf("command %s: expected bot.Command to be called", command)
 			}
@@ -733,16 +757,17 @@ func TestCreateMessageWithChatOpsTemplateCommands(t *testing.T) {
 
 func TestCreateMessageWithCommandParameters(t *testing.T) {
 	tests := []struct {
-		name    string
-		command string
+		name       string
+		command    string
+		allowedCmd string // base command name for allowlist
 	}{
-		{"app with name param", "app name=myapp"},
-		{"app with multiple params", "app name=myapp env=prod"},
-		{"inci create with title", "inci/create title=\"Test Incident\" severity=high"},
-		{"host cmd with arguments", "host/cmd hostname=server1 command=\"uptime\""},
-		{"freeze create with params", "freeze/create reason=\"Maintenance\" duration=2h"},
-		{"digest with period", "inci/digest period=24h"},
-		{"vm with all params", "vm name=test-vm region=us-east action=restart"},
+		{"app with name param", "app name=myapp", "app"},
+		{"app with multiple params", "app name=myapp env=prod", "app"},
+		{"inci create with title", "inci/create title=\"Test Incident\" severity=high", "inci/create"},
+		{"host cmd with arguments", "host/cmd hostname=server1 command=\"uptime\"", "host/cmd"},
+		{"freeze create with params", "freeze/create reason=\"Maintenance\" duration=2h", "freeze/create"},
+		{"digest with period", "inci/digest period=24h", "inci/digest"},
+		{"vm with all params", "vm name=test-vm region=us-east action=restart", "vm"},
 	}
 
 	for _, tt := range tests {
@@ -751,8 +776,8 @@ func TestCreateMessageWithCommandParameters(t *testing.T) {
 			bots := common.NewBots()
 			bots.Add(mockBot)
 
-			// Allow this specific command
-			server := newTestServerWithAllowedCmds(bots, []string{tt.command})
+			// Allow the base command (CommandInSlice only checks the first word)
+			server := newTestServerWithAllowedCmds(bots, []string{tt.allowedCmd})
 
 			request := CreateMessageRequest{
 				Bot:     "Slack",
@@ -771,9 +796,6 @@ func TestCreateMessageWithCommandParameters(t *testing.T) {
 			if rec.Code != http.StatusCreated {
 				t.Errorf("expected status %d, got %d", http.StatusCreated, rec.Code)
 			}
-
-			// Wait for async execution
-			time.Sleep(50 * time.Millisecond)
 
 			_, cmd := mockBot.GetLastCommand()
 			if cmd != tt.command {

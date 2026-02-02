@@ -39,9 +39,8 @@ type RootOptions struct {
 var httpServerInstance *server.HttpServer
 
 var httpServerOptions = server.HttpServerOptions{
-	Listen:      envGet("HTTP_SERVER_LISTEN", "127.0.0.1:8081").(string),
+	Listen:      envGet("HTTP_SERVER_LISTEN", ":8081").(string),
 	AllowedCmds: strings.Split(envGet("HTTP_SERVER_ALLOWED_CMDS", "release").(string), ","),
-	MessageTTL:  envGet("HTTP_SERVER_MESSAGE_TTL", "3h").(string),
 }
 
 var rootOptions = RootOptions{
@@ -366,7 +365,6 @@ func Execute() {
 
 	flags.StringVar(&httpServerOptions.Listen, "http-server-listen", httpServerOptions.Listen, "HTTP server listen address (e.g., :8081)")
 	flags.StringSliceVar(&httpServerOptions.AllowedCmds, "http-server-allowed-cmds", httpServerOptions.AllowedCmds, "HTTP server allowed commands (comma-separated)")
-	flags.StringVar(&httpServerOptions.MessageTTL, "http-server-message-ttl", httpServerOptions.MessageTTL, "HTTP server message TTL (e.g., 1h, 30m)")
 
 	interceptSyscall()
 

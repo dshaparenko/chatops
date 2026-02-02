@@ -1641,7 +1641,8 @@ func (dre *DefaultRunbookCommandExecutor) execute() error {
 
 	m := dre.message
 
-	return dre.bot.Command(channel.ID(), dre.command, user, m, response)
+	_, err := dre.bot.Command(channel.ID(), dre.command, user, m, response)
+	return err
 }
 
 // Default Runbook Executor

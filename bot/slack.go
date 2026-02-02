@@ -100,24 +100,23 @@ type SlackMessageFields struct {
 }
 
 type SlackMessage struct {
-	slack          *Slack
-	typ            string
-	cmdText        string
-	cmd            common.Command
-	wrapper        common.Command
-	originKey      *SlackMessageKey
-	key            *SlackMessageKey
-	user           *SlackUser
-	caller         *SlackUser
-	botID          string
-	visible        bool
-	responseURL    string
-	blocks         []slack.Block
-	actions        []common.Action
-	params         common.ExecuteParams
-	fields         SlackMessageFields
-	tags           map[string]string     // custom tags for message grouping
-	statusNotifier common.StatusNotifier // for async status updates (API calls)
+	slack       *Slack
+	typ         string
+	cmdText     string
+	cmd         common.Command
+	wrapper     common.Command
+	originKey   *SlackMessageKey
+	key         *SlackMessageKey
+	user        *SlackUser
+	caller      *SlackUser
+	botID       string
+	visible     bool
+	responseURL string
+	blocks      []slack.Block
+	actions     []common.Action
+	params      common.ExecuteParams
+	fields      SlackMessageFields
+	tags        map[string]string // custom tags for message grouping and status tracking
 }
 
 type SlackFileResponseFull struct {
@@ -962,41 +961,35 @@ func (s *Slack) TagMessage(channelID, timestamp string, tags map[string]string) 
 	return nil
 }
 
-// func (s *Slack) findMessagesByTagInternal(key, value string) []*SlackMessage {
+// GetMessageStatus returns the status of a message by its ID (Slack timestamp).
+func (s *Slack) GetMessageStatus(messageID string) (common.MessageStatus, error) {
+	var foundMsg *SlackMessage
 
-// 	tagKey := fmt.Sprintf("%s:%s", key, value)
+	s.messages.Range(func(item *ttlcache.Item[string, *SlackMessage]) bool {
+		msg := item.Value()
+		if msg != nil && msg.key != nil && msg.key.timestamp == messageID {
+			foundMsg = msg
+			return false
+		}
+		return true
+	})
 
-// 	s.tagMutex.RLock()
-// 	item := s.messageTags.Get(tagKey)
-// 	s.tagMutex.RUnlock()
+	if foundMsg == nil {
+		return common.MessageStatusNotFound, nil
+	}
 
-// 	if item == nil {
-// 		s.logger.Debug("No messages found for tag: %s", tagKey)
-// 		return nil
-// 	}
+	if foundMsg.tags == nil {
+		// No tags set, assume delivered (default for regular messages)
+		return common.MessageStatusDelivered, nil
+	}
 
-// 	msgKeys := item.Value()
-// 	messages := make([]*SlackMessage, 0, len(msgKeys))
+	status, ok := foundMsg.tags["status"]
+	if !ok {
+		return common.MessageStatusDelivered, nil
+	}
 
-// 	for _, keyStr := range msgKeys {
-// 		parts := strings.SplitN(keyStr, "/", 2)
-// 		if len(parts) != 2 {
-// 			continue
-// 		}
-
-// 		msgKey := &SlackMessageKey{
-// 			channelID: parts[0],
-// 			timestamp: parts[1],
-// 		}
-
-// 		if msg := s.findMessageInCache(msgKey); msg != nil {
-// 			messages = append(messages, msg)
-// 		}
-// 	}
-
-// 	s.logger.Debug("Found %d messages for tag: %s", len(messages), tagKey)
-// 	return messages
-// }
+	return common.MessageStatus(status), nil
+}
 
 func (s *Slack) FindMessagesByTag(key, value string) map[string]string {
 	tagKey := fmt.Sprintf("%s:%s", key, value)
@@ -2731,7 +2724,7 @@ func (s *Slack) cacheReplyForm(m *SlackMessage, fields SlackMessageFields, param
 }
 
 func (s *Slack) cacheAskApproval(m *SlackMessage, message, channel string,
-	approvalCmd common.Command, approvalParams common.ExecuteParams, replier *slacker.ResponseReplier) error {
+	approvalCmd common.Command, approvalParams common.ExecuteParams, replier *slacker.ResponseReplier) (string, error) {
 
 	approval := approvalCmd.Approval()
 	opts := []slacker.PostOption{}
@@ -2798,7 +2791,7 @@ func (s *Slack) cacheAskApproval(m *SlackMessage, message, channel string,
 		_, ts, err = s.client.SlackClient().PostMessage(channel, slack.MsgOptionBlocks(blocks...))
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	mNew := s.cloneMessage(m)
@@ -2811,8 +2804,14 @@ func (s *Slack) cacheAskApproval(m *SlackMessage, message, channel string,
 	mNew.params = approvalParams
 	mNew.blocks = blocks
 
+	// Set status tag to waiting_approval
+	if mNew.tags == nil {
+		mNew.tags = make(map[string]string)
+	}
+	mNew.tags["status"] = string(common.MessageStatusWaitingApproval)
+
 	s.putMessageToCache(mNew)
-	return nil
+	return ts, nil
 }
 
 func (s *Slack) mergeActions(one []common.Action, two []common.Action) []common.Action {
@@ -2951,9 +2950,12 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 	start := time.Now()
 	executor, message, attachments, actions, err := m.cmd.Execute(s, m, params, action)
 	if err != nil {
-		if m.statusNotifier != nil {
-			m.statusNotifier.OnComplete(false, err)
+		// Set status tag to failed
+		if m.tags == nil {
+			m.tags = make(map[string]string)
 		}
+		m.tags["status"] = string(common.MessageStatusFailed)
+		s.putMessageToCache(m)
 		s.replyError(m, replier, err, "", attachments, nil)
 		return s.buildResponse(overwrite, response), err
 	}
@@ -3002,9 +3004,16 @@ func (s *Slack) cachePostUserCommand(m *SlackMessage, callback *slack.Interactio
 
 	afterErr := executor.After(mNew)
 
-	if m.statusNotifier != nil {
-		m.statusNotifier.OnComplete(afterErr == nil, afterErr)
+	// Set status tag based on execution result
+	if mNew.tags == nil {
+		mNew.tags = make(map[string]string)
 	}
+	if afterErr == nil {
+		mNew.tags["status"] = string(common.MessageStatusDelivered)
+	} else {
+		mNew.tags["status"] = string(common.MessageStatusFailed)
+	}
+	s.putMessageToCache(mNew)
 
 	return r, afterErr
 }
@@ -3392,7 +3401,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		message, channel := s.approvalNeeded(m, approvalCmd, approvalParams)
 		if !utils.IsEmpty(message) {
 			s.addRemoveReactions(m.typ, m.key, s.options.ReactionApproval, s.options.ReactionDoing)
-			err := s.cacheAskApproval(m, message, channel, approvalCmd, approvalParams, replier)
+			_, err := s.cacheAskApproval(m, message, channel, approvalCmd, approvalParams, replier)
 			if err != nil {
 				s.replyError(m, replier, err, "", nil, nil)
 				s.addRemoveReactions(m.typ, m.key, s.options.ReactionFailed, s.options.ReactionApproval)
@@ -3456,18 +3465,11 @@ func (s *Slack) replaceApprovalMessage(m *SlackMessage, message string) (string,
 	return s.replaceMessage(m, blocks)
 }
 
-// this method primarily used in custom command executions
-func (s *Slack) Command(channel, text string, user common.User, parent common.Message, response common.Response) error {
+func (s *Slack) Command(channel, text string, user common.User, parent common.Message, response common.Response) (common.Message, error) {
 
 	channelID := channel
 	threadTS := ""
 	userID := "unknown"
-
-	// Extract status notifier from response if available (for API calls)
-	var statusNotifier common.StatusNotifier
-	if gr, ok := response.(*common.GenericResponse); ok && gr != nil {
-		statusNotifier = gr.StatusNotifier()
-	}
 
 	r := s.buildResponse(true, response)
 
@@ -3513,7 +3515,7 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	params, cmd, group, _, _, _ := s.findParams(false, fText)
 	if cmd == nil {
 		s.logger.Debug("Slack command not found for text: %s", text)
-		return nil
+		return nil, nil
 	}
 
 	groupName := cmd.Name()
@@ -3527,14 +3529,14 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		// Empty commands list means all commands are allowed (no restrictions)
 		if len(userCommands) > 0 && !utils.Contains(userCommands, groupName) {
 			s.logger.Debug("Slack command user %s is not permitted to execute %s", userID, groupName)
-			return nil
+			return nil, nil
 		}
 	}
 
 	fields := cmd.Fields(s, parent, params, nil, nil)
 	if s.formNeeded(fields, params) {
 		s.logger.Debug("Slack command %s has no support for interaction mode", groupName)
-		return nil
+		return nil, nil
 	}
 
 	var m *SlackMessage
@@ -3556,21 +3558,20 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 		m.fields.copyFrom(fields, true)
 	} else {
 		m = &SlackMessage{
-			slack:          s,
-			typ:            slackMessageType,
-			cmdText:        fText,
-			cmd:            cmd,
-			wrapper:        nil,
-			originKey:      nil,
-			key:            key,
-			user:           mUser,
-			caller:         mUser,
-			botID:          "",
-			responseURL:    "",
-			blocks:         nil,
-			actions:        nil,
-			params:         params,
-			statusNotifier: statusNotifier,
+			slack:       s,
+			typ:         slackMessageType,
+			cmdText:     fText,
+			cmd:         cmd,
+			wrapper:     nil,
+			originKey:   nil,
+			key:         key,
+			user:        mUser,
+			caller:      mUser,
+			botID:       "",
+			responseURL: "",
+			blocks:      nil,
+			actions:     nil,
+			params:      params,
 		}
 	}
 
@@ -3578,21 +3579,45 @@ func (s *Slack) Command(channel, text string, user common.User, parent common.Me
 	message, approvalChannel := s.approvalNeeded(m, cmd, params)
 	if !utils.IsEmpty(message) {
 		s.putMessageToCache(m)
-		err := s.cacheAskApproval(m, message, approvalChannel, cmd, params, nil)
+		approvalTS, err := s.cacheAskApproval(m, message, approvalChannel, cmd, params, nil)
 		if err != nil {
 			s.logger.Error("Slack command %s couldn't post approval from %s: %s", groupName, userID, err)
-			return err
+			return nil, err
 		}
-		return fmt.Errorf("approval pending")
+		// Tag the message as waiting for approval
+		if m.tags == nil {
+			m.tags = make(map[string]string)
+		}
+		m.tags["status"] = string(common.MessageStatusWaitingApproval)
+		// Update key with real approval timestamp
+		m.key = &SlackMessageKey{
+			channelID: approvalChannel,
+			timestamp: approvalTS,
+		}
+		s.putMessageToCache(m)
+		return m, nil
 	}
 
 	_, err := s.cachePostUserCommand(m, nil, nil, params, nil, r, true)
 	if err != nil {
 		s.logger.Error("Slack command %s couldn't post from %s: %s", groupName, userID, err)
-		return err
+		// Tag as failed
+		if m.tags == nil {
+			m.tags = make(map[string]string)
+		}
+		m.tags["status"] = string(common.MessageStatusFailed)
+		s.putMessageToCache(m)
+		return m, err
 	}
 
-	return nil
+	// Tag as delivered
+	if m.tags == nil {
+		m.tags = make(map[string]string)
+	}
+	m.tags["status"] = string(common.MessageStatusDelivered)
+	s.putMessageToCache(m)
+
+	return m, nil
 }
 
 // this method is needed to post custom messages
@@ -3991,7 +4016,7 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 				}
 			}
 
-			err := s.cacheAskApproval(m, message, channel, m.cmd, params, replier)
+			_, err := s.cacheAskApproval(m, message, channel, m.cmd, params, replier)
 			if err != nil {
 				s.replyError(m, replier, err, "", nil, nil)
 				s.addRemoveReactions(m.typ, m.originKey, s.options.ReactionFailed, s.options.ReactionApproval)
@@ -4152,9 +4177,12 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 		return s.executeCommandAfterApprovalReaction(ctx, mInit, mInit.key, mParent.params, reaction)
 	}
 
-	if mInit.statusNotifier != nil {
-		mInit.statusNotifier.OnComplete(false, fmt.Errorf("approval rejected"))
+	// Approval was rejected - update status tag
+	if mInit.tags == nil {
+		mInit.tags = make(map[string]string)
 	}
+	mInit.tags["status"] = string(common.MessageStatusFailed)
+	s.putMessageToCache(mInit)
 
 	s.addRemoveReactions(mInit.typ, mInit.key, s.options.ReactionFailed, reaction)
 	return false
