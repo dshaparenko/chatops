@@ -43,65 +43,68 @@ type HttpServer struct {
 	meter    *sre.Metrics
 }
 
-func (s *HttpServer) incRequests(method, url string) {
+func (s *HttpServer) incRequests(method, url, cmd string) {
 	if s.meter == nil {
 		return
 	}
 	labels := map[string]string{
-		"http_in_method": method,
-		"http_in_url":    url,
+		"http_in_method":  method,
+		"http_in_url":     url,
+		"http_in_command": cmd,
 	}
 	s.meter.Counter("http", "in_requests_total", "Count of all incoming HTTP requests", labels, "server", "http").Inc()
 }
 
-func (s *HttpServer) incErrors(method, url string) {
+func (s *HttpServer) incErrors(method, url, cmd string) {
 	if s.meter == nil {
 		return
 	}
 	labels := map[string]string{
-		"http_in_method": method,
-		"http_in_url":    url,
+		"http_in_method":  method,
+		"http_in_url":     url,
+		"http_in_command": cmd,
 	}
 	s.meter.Counter("http", "in_request_errors_total", "Count of HTTP request errors", labels, "server", "http").Inc()
 }
 
-func (s *HttpServer) incResponses(method, url string, statusCode int) {
+func (s *HttpServer) incResponses(method, url, cmd string, statusCode int) {
 	if s.meter == nil {
 		return
 	}
 	labels := map[string]string{
 		"http_in_method":        method,
 		"http_in_url":           url,
+		"http_in_command":       cmd,
 		"http_in_response_code": fmt.Sprintf("%d", statusCode),
 	}
 	s.meter.Counter("http", "in_responses_total", "Count of all HTTP responses", labels, "server", "http").Inc()
 }
 
 func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
-	s.incRequests(r.Method, r.URL.Path)
 
 	if r.Method != http.MethodPost {
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, "method not allowed", http.StatusMethodNotAllowed)
+		s.incErrors(r.Method, r.URL.Path, "")
+		s.writeErrorWithMetrics(w, r, "", "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req CreateMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, "invalid request body", http.StatusBadRequest)
+		s.incErrors(r.Method, r.URL.Path, "")
+		s.writeErrorWithMetrics(w, r, "", "invalid request body", http.StatusBadRequest)
 		return
 	}
+	s.incRequests(r.Method, r.URL.Path, common.GetCommandName(req.Command))
 
 	if !common.CommandInSlice(req.Command, s.options.AllowedCmds) {
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, "command not allowed", http.StatusForbidden)
+		s.incErrors(r.Method, r.URL.Path, common.GetCommandName(req.Command))
+		s.writeErrorWithMetrics(w, r, common.GetCommandName(req.Command), "command not allowed", http.StatusForbidden)
 		return
 	}
 
 	if req.Bot == "" || req.Channel == "" || req.Command == "" {
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, "bot, channel and command are required", http.StatusBadRequest)
+		s.incErrors(r.Method, r.URL.Path, common.GetCommandName(req.Command))
+		s.writeErrorWithMetrics(w, r, common.GetCommandName(req.Command), "bot, channel and command are required", http.StatusBadRequest)
 		return
 	}
 
@@ -110,29 +113,29 @@ func (s *HttpServer) createMessage(w http.ResponseWriter, r *http.Request) {
 	msg, err := s.executor.ExecuteCommand(req.Bot, req.Channel, req.Command, req.UserID)
 	if err != nil {
 		s.obs.Error("[API] Command execution failed: %v", err)
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, err.Error(), http.StatusInternalServerError)
+		s.incErrors(r.Method, r.URL.Path, common.GetCommandName(req.Command))
+		s.writeErrorWithMetrics(w, r, common.GetCommandName(req.Command), err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if msg == nil {
 		s.obs.Info("[API] Command produced no trackable message")
-		s.writeJSONWithMetrics(w, r, ErrorResponse{Error: "command produced no message"}, http.StatusOK)
+		s.writeJSONWithMetrics(w, r, common.GetCommandName(req.Command), ErrorResponse{Error: "command produced no message"}, http.StatusOK)
 		return
 	}
 
 	s.obs.Info("[API] Command executed, message ID: %s", msg.ID())
 
 	resp := CreateMessageResponse{ID: msg.ID()}
-	s.writeJSONWithMetrics(w, r, resp, http.StatusCreated)
+	s.writeJSONWithMetrics(w, r, common.GetCommandName(req.Command), resp, http.StatusCreated)
 }
 
 func (s *HttpServer) getMessageStatus(w http.ResponseWriter, r *http.Request) {
-	s.incRequests(r.Method, r.URL.Path)
+	s.incRequests(r.Method, r.URL.Path, "")
 
 	if r.Method != http.MethodGet {
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, "method not allowed", http.StatusMethodNotAllowed)
+		s.incErrors(r.Method, r.URL.Path, "")
+		s.writeErrorWithMetrics(w, r, "", "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -140,21 +143,21 @@ func (s *HttpServer) getMessageStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 
 	if bot == "" {
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, "bot query parameter is required", http.StatusBadRequest)
+		s.incErrors(r.Method, r.URL.Path, "")
+		s.writeErrorWithMetrics(w, r, "", "bot query parameter is required", http.StatusBadRequest)
 		return
 	}
 	if id == "" {
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, "id query parameter is required", http.StatusBadRequest)
+		s.incErrors(r.Method, r.URL.Path, "")
+		s.writeErrorWithMetrics(w, r, "", "id query parameter is required", http.StatusBadRequest)
 		return
 	}
 
 	status, err := s.executor.GetMessageStatus(bot, id)
 	if err != nil {
 		s.obs.Error("[API] Failed to get message status: %v", err)
-		s.incErrors(r.Method, r.URL.Path)
-		s.writeErrorWithMetrics(w, r, err.Error(), http.StatusInternalServerError)
+		s.incErrors(r.Method, r.URL.Path, "")
+		s.writeErrorWithMetrics(w, r, "", err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -162,7 +165,7 @@ func (s *HttpServer) getMessageStatus(w http.ResponseWriter, r *http.Request) {
 		ID:     id,
 		Status: status,
 	}
-	s.writeJSONWithMetrics(w, r, resp, http.StatusOK)
+	s.writeJSONWithMetrics(w, r, "", resp, http.StatusOK)
 }
 
 func (s *HttpServer) writeJSON(w http.ResponseWriter, data any, status int) {
@@ -171,8 +174,8 @@ func (s *HttpServer) writeJSON(w http.ResponseWriter, data any, status int) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func (s *HttpServer) writeJSONWithMetrics(w http.ResponseWriter, r *http.Request, data any, status int) {
-	s.incResponses(r.Method, r.URL.Path, status)
+func (s *HttpServer) writeJSONWithMetrics(w http.ResponseWriter, r *http.Request, cmd string, data any, status int) {
+	s.incResponses(r.Method, r.URL.Path, cmd, status)
 	s.writeJSON(w, data, status)
 }
 
@@ -180,8 +183,8 @@ func (s *HttpServer) writeError(w http.ResponseWriter, message string, status in
 	s.writeJSON(w, ErrorResponse{Error: message}, status)
 }
 
-func (s *HttpServer) writeErrorWithMetrics(w http.ResponseWriter, r *http.Request, message string, status int) {
-	s.incResponses(r.Method, r.URL.Path, status)
+func (s *HttpServer) writeErrorWithMetrics(w http.ResponseWriter, r *http.Request, cmd string, message string, status int) {
+	s.incResponses(r.Method, r.URL.Path, cmd, status)
 	s.writeError(w, message, status)
 }
 
