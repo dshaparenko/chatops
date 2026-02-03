@@ -1877,27 +1877,13 @@ func (s *Slack) findParams(wrapper bool, text string) (common.ExecuteParams, com
 	return ep, ecm, egr, wp, wcm, wgr
 }
 
-func (s *Slack) updateCounters(group, command, text, userID string) {
-
-	sanitizedText := text
-	if !utils.IsEmpty(text) {
-		// replace newlines and other problematic characters
-		sanitizedText = strings.ReplaceAll(sanitizedText, "\n", " ")
-		sanitizedText = strings.ReplaceAll(sanitizedText, "\r", " ")
-		sanitizedText = strings.ReplaceAll(sanitizedText, "\t", " ")
-		sanitizedText = strings.ReplaceAll(sanitizedText, "\"", "")
-		sanitizedText = strings.Join(strings.Fields(sanitizedText), " ")
-	}
-
+func (s *Slack) updateCounters(group, command, userID string) {
 	labels := make(map[string]string)
 	if !utils.IsEmpty(group) {
 		labels["group"] = group
 	}
 	if !utils.IsEmpty(command) {
 		labels["command"] = command
-	}
-	if !utils.IsEmpty(sanitizedText) {
-		labels["text"] = sanitizedText
 	}
 	labels["user_id"] = userID
 
@@ -2038,7 +2024,7 @@ func (s *Slack) unsupportedCommandHandler(cc *slacker.CommandContext) {
 		s.defaultDefinition.Handler(cc)
 		return
 	}
-	s.updateCounters("", "", text, cc.Event().UserID)
+	s.updateCounters("", "", cc.Event().UserID)
 }
 
 func (s *Slack) reply(m *SlackMessage, message, channel string,
@@ -3293,7 +3279,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 		cName := eCmd.Name()
 		group = eGroup
 
-		s.updateCounters(group, cName, text, u.id)
+		s.updateCounters(group, cName, u.id)
 
 		groupName := cName
 		if !utils.IsEmpty(group) {

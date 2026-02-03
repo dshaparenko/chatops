@@ -73,6 +73,7 @@ type DefaultPost struct {
 }
 
 type DefaultExecutor struct {
+	name        string
 	command     *DefaultCommand
 	visible     *bool
 	error       *bool
@@ -898,6 +899,9 @@ func (de *DefaultExecutor) execute(id string, obj interface{}, message common.Me
 	}
 	labels["command"] = command.name
 	labels["bot"] = de.bot.Name()
+	if !utils.IsEmpty(de.name) && de.name != command.name {
+		labels["template"] = de.name
+	}
 
 	user := de.message.User()
 	if !utils.IsEmpty(user) {
@@ -1172,6 +1176,7 @@ func NewExecutor(name, path string, command *DefaultCommand, bot common.Bot, mes
 	}
 
 	executor := &DefaultExecutor{
+		name:        name,
 		command:     command,
 		attachments: &sync.Map{},
 		actions:     &sync.Map{},
@@ -2303,6 +2308,9 @@ func (dc *DefaultCommand) Confirmation(params common.ExecuteParams) string {
 	if dc.config != nil {
 
 		content := dc.config.Confirmation
+		if utils.IsEmpty(content) {
+			return ""
+		}
 		name := fmt.Sprintf("%s-confirmation", dc.name)
 
 		tOpts := toolsRender.TemplateOptions{
