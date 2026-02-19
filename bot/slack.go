@@ -215,6 +215,17 @@ const (
 	slackApprovalDescription        = "approval-description"
 	slackApprovalReasonsCaption     = "Reasons"
 	slackApprovalDescriptionCaption = "Description"
+
+	approvalReasonCmdMissing      = "cmd_missing"
+	approvalReasonApprovalMissing = "approval_config_missing"
+	approvalReasonInitMissing     = "init_not_found"
+	approvalReasonSelfApproval    = "self_approval_disallowed"
+	approvalReasonReplaceFailed   = "replace_message_failed"
+	approvalReasonEmptyMessage    = "empty_approved_message"
+	approvalReasonReplyFailed     = "reply_failed"
+	approvalReasonParentMissing   = "parent_not_found"
+	approvalReasonExecuteCmdNil   = "execute_cmd_missing"
+	approvalReasonExecuteFailed   = "execute_cmd_failed"
 )
 
 // SlackUserGroups
@@ -874,6 +885,38 @@ func (s *Slack) findInitMessageInCache(child *SlackMessage) *SlackMessage {
 		}
 	}
 	return nil
+}
+
+func (s *Slack) logApprovalFailure(reason string, m *SlackMessage, mInit *SlackMessage, err error) {
+	approvalKey := ""
+	originKey := ""
+	requester := ""
+	approver := ""
+
+	if m != nil {
+		if m.key != nil {
+			approvalKey = m.key.String()
+		}
+		if m.originKey != nil {
+			originKey = m.originKey.String()
+		}
+		if m.user != nil {
+			requester = m.user.id
+		}
+		if m.caller != nil {
+			approver = m.caller.id
+		}
+	}
+
+	if originKey == "" && mInit != nil && mInit.key != nil {
+		originKey = mInit.key.String()
+	}
+
+	if err != nil {
+		s.logger.Error("Slack approval failed: reason=%s approval_key=%s origin_key=%s approver=%s requester=%s err=%v", reason, approvalKey, originKey, approver, requester, err)
+		return
+	}
+	s.logger.Error("Slack approval failed: reason=%s approval_key=%s origin_key=%s approver=%s requester=%s", reason, approvalKey, originKey, approver, requester)
 }
 
 func (s *Slack) cloneMessage(m *SlackMessage) *SlackMessage {
@@ -4023,6 +4066,7 @@ func (s *Slack) executeCommandAfterApprovalReaction(ctx *slacker.InteractionCont
 
 	callback := ctx.Callback()
 	if m.cmd == nil {
+		s.logApprovalFailure(approvalReasonExecuteCmdNil, m, nil, nil)
 		return false
 	}
 
@@ -4031,8 +4075,8 @@ func (s *Slack) executeCommandAfterApprovalReaction(ctx *slacker.InteractionCont
 	_, err := s.cachePostUserCommand(m, callback, ctx.Response(), params, nil, r, false)
 	if err != nil {
 		s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
+		s.logApprovalFailure(approvalReasonExecuteFailed, m, nil, err)
 		s.addRemoveReactions(m.typ, reactionKey, s.options.ReactionFailed, reaction)
-		// Update status to failed after approval execution
 		if m.tags == nil {
 			m.tags = make(map[string]string)
 		}
@@ -4041,7 +4085,6 @@ func (s *Slack) executeCommandAfterApprovalReaction(ctx *slacker.InteractionCont
 		return false
 	}
 	s.addRemoveReactions(m.typ, reactionKey, s.options.ReactionDone, reaction)
-	// Update status to delivered after successful approval execution
 	if m.tags == nil {
 		m.tags = make(map[string]string)
 	}
@@ -4053,25 +4096,31 @@ func (s *Slack) executeCommandAfterApprovalReaction(ctx *slacker.InteractionCont
 func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContext, m *SlackMessage, name, reaction string) bool {
 
 	callback := ctx.Callback()
-	if m.cmd == nil {
+	mInit := (*SlackMessage)(nil)
+	fail := func(reason string, err error) bool {
+		s.logApprovalFailure(reason, m, mInit, err)
+		if mInit != nil {
+			s.addRemoveReactions(mInit.typ, mInit.key, s.options.ReactionFailed, reaction)
+		}
 		return false
+	}
+
+	if m.cmd == nil {
+		return fail(approvalReasonCmdMissing, nil)
 	}
 
 	approval := m.cmd.Approval()
 	if approval == nil {
-		return false
+		return fail(approvalReasonApprovalMissing, nil)
 	}
 
-	mInit := s.findInitMessageInCache(m)
+	mInit = s.findInitMessageInCache(m)
 	if mInit == nil {
-		return false
+		return fail(approvalReasonInitMissing, nil)
 	}
 
-	if !s.options.ApprovalAny {
-		if callback.User.ID == m.userID() {
-			s.logger.Error("Slack same user cannot approve its action")
-			return false
-		}
+	if !s.options.ApprovalAny && callback.User.ID == m.userID() {
+		return fail(approvalReasonSelfApproval, nil)
 	}
 
 	approvedRejected := ""
@@ -4087,9 +4136,7 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 	m.responseURL = callback.ResponseURL
 	_, err := s.replaceApprovalMessage(m, approvedRejected)
 	if err != nil {
-		s.logger.Error("Slack couldn't update approval message, error: %s", err)
-		s.addRemoveReactions(mInit.typ, mInit.key, s.options.ReactionFailed, reaction)
-		return false
+		return fail(approvalReasonReplaceFailed, err)
 	}
 
 	reasons := ""
@@ -4143,7 +4190,7 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 	}
 
 	if utils.IsEmpty(message) {
-		return false
+		return fail(approvalReasonEmptyMessage, nil)
 	}
 
 	r := &SlackResponse{
@@ -4152,9 +4199,7 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 
 	key, blocks, err := s.reply(mInit, message, "", ctx.Response(), nil, nil, r, nil, false)
 	if err != nil {
-		s.logger.Error("Slack couldn't post from %s: %s", m.userID(), err)
-		s.addRemoveReactions(mInit.typ, mInit.key, s.options.ReactionFailed, reaction)
-		return false
+		return fail(approvalReasonReplyFailed, err)
 	}
 
 	mNew := s.cloneMessage(mInit)
@@ -4166,11 +4211,9 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 	if name == slackSubmitAction {
 		mParent := s.findParentMessageInCache(m)
 		if mParent == nil {
-			s.logger.Error("Slack parent message not found in cache for approval")
-			return false
+			return fail(approvalReasonParentMissing, nil)
 		}
 		success := s.executeCommandAfterApprovalReaction(ctx, mInit, mInit.key, mParent.params, reaction)
-		// Update status on approval message (m) that is originally called
 		if m.tags == nil {
 			m.tags = make(map[string]string)
 		}
