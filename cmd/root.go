@@ -17,8 +17,11 @@ import (
 	"github.com/devopsext/chatops/server"
 	"github.com/slack-go/slack"
 
-	"net/http"
-	"net/http/pprof"
+	// pprof is always enabled on the Prometheus listener because importing this
+	// package registers its handlers on DefaultServeMux via init(). The Prometheus
+	// sre provider calls http.Serve(listener, nil) which uses DefaultServeMux, so
+	// /debug/pprof/* endpoints are available on the metrics port unconditionally.
+	_ "net/http/pprof"
 
 	sreCommon "github.com/devopsext/sre/common"
 	sreProvider "github.com/devopsext/sre/provider"
@@ -134,22 +137,6 @@ var defaultOptions = processor.DefaultOptions{
 
 func envGet(s string, def interface{}) interface{} {
 	return utils.EnvGet(fmt.Sprintf("%s_%s", APPNAME, s), def)
-}
-
-// pprof on the metrics listener (8080)
-var pprofMetricsEnable = envGet("PPROF_METRICS_ENABLE", false).(bool)
-var pprofMetricsPrefix = envGet("PPROF_METRICS_PREFIX", "/debug/pprof").(string)
-
-func enableMetricsPprof(prefix string) {
-	if prefix == "" {
-		prefix = "/debug/pprof"
-	}
-	http.HandleFunc(prefix+"/", pprof.Index)
-	http.HandleFunc(prefix+"/cmdline", pprof.Cmdline)
-	http.HandleFunc(prefix+"/profile", pprof.Profile)
-	http.HandleFunc(prefix+"/symbol", pprof.Symbol)
-	http.HandleFunc(prefix+"/trace", pprof.Trace)
-	logs.Info("Metrics listener pprof enabled at %s", prefix)
 }
 
 // botsInstance holds a reference to the bots for shutdown
@@ -268,18 +255,6 @@ func buildDefaultProcessors(options processor.DefaultOptions, obs *common.Observ
 	return nil
 }
 
-// /start - show list of commands and simple description
-// /k8s - list of k8s clusters
-// /k8s/cluster1 - type k8s cluster
-// /k8s/cluster2 - type k8s cluster
-// /grafana - current grafana
-// /aws/name-of-resource - some resource under aws
-// /alicloud - whole alicloud account
-// /some-command - custom command
-// /gitlab?
-// /datadog
-// /newrelic
-
 func Execute() {
 
 	rootCmd := &cobra.Command{
@@ -297,13 +272,10 @@ func Execute() {
 			logs.Info("Booting...")
 
 			// Metrics
-
+			//sre provider calls http.Serve(listener, nil) which uses DefaultServeMux !
 			prometheusOptions.Version = version
 			prometheus := sreProvider.NewPrometheusMeter(prometheusOptions, logs, stdout)
 			if utils.Contains(rootOptions.Metrics, "prometheus") && prometheus != nil {
-				if pprofMetricsEnable {
-					enableMetricsPprof(pprofMetricsPrefix)
-				}
 				prometheus.StartInWaitGroup(&mainWG)
 				metrics.Register(prometheus)
 			}
@@ -350,9 +322,6 @@ func Execute() {
 	flags.StringVar(&prometheusOptions.URL, "prometheus-url", prometheusOptions.URL, "Prometheus endpoint url")
 	flags.StringVar(&prometheusOptions.Listen, "prometheus-listen", prometheusOptions.Listen, "Prometheus listen")
 	flags.StringVar(&prometheusOptions.Prefix, "prometheus-prefix", prometheusOptions.Prefix, "Prometheus prefix")
-	flags.BoolVar(&pprofMetricsEnable, "pprof-metrics-enable", pprofMetricsEnable, "Enable pprof on metrics listener")
-	flags.StringVar(&pprofMetricsPrefix, "pprof-metrics-prefix", pprofMetricsPrefix, "pprof URL prefix on metrics listener")
-
 	flags.StringVar(&telegramOptions.BotToken, "telegram-bot-token", telegramOptions.BotToken, "Telegram bot token")
 	flags.BoolVar(&telegramOptions.Debug, "telegram-debug", telegramOptions.Debug, "Telegram debug")
 	flags.IntVar(&telegramOptions.Timeout, "telegram-timeout", telegramOptions.Timeout, "Telegram timeout")
