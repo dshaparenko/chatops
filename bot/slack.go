@@ -83,6 +83,7 @@ type SlackUser struct {
 	name     string
 	timezone string
 	commands []string
+	isBot    bool
 }
 
 type SlackChannel struct {
@@ -289,6 +290,10 @@ func (su *SlackUser) TimeZone() string {
 
 func (su *SlackUser) Commands() []string {
 	return su.commands
+}
+
+func (su *SlackUser) IsBot() bool {
+	return su.isBot
 }
 
 // SlackChannel
@@ -3159,6 +3164,7 @@ func (s *Slack) buildSlackUser(user *slack.User) *SlackUser {
 			id:       user.ID,
 			name:     user.Name,
 			timezone: user.TZ,
+			isBot:    user.IsBot,
 		}
 		u.commands = s.listUserCommands(user.ID, s.userGroups.items)
 	}

@@ -9,6 +9,7 @@ type User interface {
 	Name() string
 	TimeZone() string
 	Commands() []string
+	IsBot() bool
 }
 
 type Channel interface {

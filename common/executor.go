@@ -16,6 +16,7 @@ type GenericUser struct {
 	name     string
 	timezone string
 	commands []string
+	isBot    bool
 }
 
 func (u *GenericUser) ID() string {
@@ -32,6 +33,10 @@ func (u *GenericUser) TimeZone() string {
 
 func (u *GenericUser) Commands() []string {
 	return u.commands
+}
+
+func (u *GenericUser) IsBot() bool {
+	return u.isBot
 }
 
 func NewGenericUser(id, name, timezone string, commands []string) *GenericUser {
