@@ -27,9 +27,11 @@ type SlackMessageCache struct {
 	// User information
 	UserID         string `json:"user_id,omitempty"`
 	UserName       string `json:"user_name,omitempty"`
+	UserEmail      string `json:"user_email,omitempty"`
 	UserTimeZone   string `json:"user_timezone,omitempty"`
 	CallerID       string `json:"caller_id,omitempty"`
 	CallerName     string `json:"caller_name,omitempty"`
+	CallerEmail    string `json:"caller_email,omitempty"`
 	CallerTimeZone string `json:"caller_timezone,omitempty"`
 	BotID          string `json:"bot_id,omitempty"`
 
@@ -91,6 +93,7 @@ func ToSlackMessageCache(sm *SlackMessage) (*SlackMessageCache, error) {
 	if sm.user != nil {
 		cache.UserID = sm.user.id
 		cache.UserName = sm.user.name
+		cache.UserEmail = sm.user.email
 		cache.UserTimeZone = sm.user.timezone
 	}
 
@@ -98,6 +101,7 @@ func ToSlackMessageCache(sm *SlackMessage) (*SlackMessageCache, error) {
 	if sm.caller != nil {
 		cache.CallerID = sm.caller.id
 		cache.CallerName = sm.caller.name
+		cache.CallerEmail = sm.caller.email
 		cache.CallerTimeZone = sm.caller.timezone
 	}
 
@@ -192,6 +196,7 @@ func FromSlackMessageCache(cache *SlackMessageCache, slack *Slack) (*SlackMessag
 		sm.user = &SlackUser{
 			id:       cache.UserID,
 			name:     cache.UserName,
+			email:    cache.UserEmail,
 			timezone: cache.UserTimeZone,
 		}
 	}
@@ -201,6 +206,7 @@ func FromSlackMessageCache(cache *SlackMessageCache, slack *Slack) (*SlackMessag
 		sm.caller = &SlackUser{
 			id:       cache.CallerID,
 			name:     cache.CallerName,
+			email:    cache.CallerEmail,
 			timezone: cache.CallerTimeZone,
 		}
 	}

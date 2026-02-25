@@ -14,6 +14,7 @@ type CommandExecutor interface {
 type GenericUser struct {
 	id       string
 	name     string
+	email    string
 	timezone string
 	commands []string
 	isBot    bool
@@ -25,6 +26,10 @@ func (u *GenericUser) ID() string {
 
 func (u *GenericUser) Name() string {
 	return u.name
+}
+
+func (u *GenericUser) Email() string {
+	return u.email
 }
 
 func (u *GenericUser) TimeZone() string {

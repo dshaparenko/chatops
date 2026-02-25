@@ -7,6 +7,7 @@ import (
 type User interface {
 	ID() string
 	Name() string
+	Email() string
 	TimeZone() string
 	Commands() []string
 	IsBot() bool

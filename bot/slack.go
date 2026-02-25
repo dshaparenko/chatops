@@ -81,6 +81,7 @@ type SlackMessageKey struct {
 type SlackUser struct {
 	id       string
 	name     string
+	email    string
 	timezone string
 	commands []string
 	isBot    bool
@@ -282,6 +283,10 @@ func (su *SlackUser) ID() string {
 
 func (su *SlackUser) Name() string {
 	return su.name
+}
+
+func (su *SlackUser) Email() string {
+	return su.email
 }
 
 func (su *SlackUser) TimeZone() string {
@@ -3163,6 +3168,7 @@ func (s *Slack) buildSlackUser(user *slack.User) *SlackUser {
 		u = &SlackUser{
 			id:       user.ID,
 			name:     user.Name,
+			email:    user.Profile.Email,
 			timezone: user.TZ,
 			isBot:    user.IsBot,
 		}
