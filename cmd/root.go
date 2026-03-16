@@ -124,6 +124,8 @@ var slackOptions = bot.SlackOptions{
 	UserGroupsInterval: envGet("SLACK_USER_GROUPS_INTERVAL", 5).(int),
 
 	CacheFileName: envGet("SLACK_CACHE_FILE_NAME", "").(string),
+
+	FormUpdateDebounceMs: envGet("SLACK_FORM_UPDATE_DEBOUNCE_MS", 3000).(int),
 }
 
 var defaultOptions = processor.DefaultOptions{
@@ -349,6 +351,7 @@ func Execute() {
 	flags.IntVar(&slackOptions.MaxQueryOptions, "slack-max-query-options", slackOptions.MaxQueryOptions, "Slack max query options")
 	flags.IntVar(&slackOptions.MinQueryLength, "slack-min-query-length", slackOptions.MinQueryLength, "Slack min query length")
 	flags.IntVar(&slackOptions.UserGroupsInterval, "slack-user-groups-interval", slackOptions.UserGroupsInterval, "Slack user groups interval")
+	flags.IntVar(&slackOptions.FormUpdateDebounceMs, "slack-form-update-debounce-ms", slackOptions.FormUpdateDebounceMs, "Slack form update debounce ms (0=disabled)")
 
 	flags.StringVar(&defaultOptions.CommandsDir, "default-commands-dir", defaultOptions.CommandsDir, "Default commands directory")
 	flags.StringVar(&defaultOptions.TemplatesDir, "default-templates-dir", defaultOptions.TemplatesDir, "Default templates directory")
