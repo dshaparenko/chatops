@@ -156,6 +156,7 @@ type DefaultField struct {
 	Values       []string
 	Default      string
 	Required     bool
+	Mandatory    bool
 	Template     string
 	Dependencies []string
 	Hint         string
@@ -1223,6 +1224,10 @@ func (df *DefaultFieldWrapper) Required() bool {
 	return df.DefaultField.Required
 }
 
+func (df *DefaultFieldWrapper) Mandatory() bool {
+	return df.DefaultField.Mandatory
+}
+
 func (df *DefaultFieldWrapper) Template() string {
 	return df.DefaultField.Template
 }
@@ -1288,8 +1293,11 @@ func (df *DefaultField) merge(field *DefaultField, empty bool) bool {
 	if !utils.IsEmpty(field.Hint) || (utils.IsEmpty(field.Hint) && empty) {
 		df.Hint = field.Hint
 	}
-	if field.Required && !df.Required {
+	if field.Required && !df.Required { // built in slack (not really needed)
 		df.Required = field.Required
+	}
+	if field.Mandatory && !df.Mandatory { // real mandatory
+		df.Mandatory = field.Mandatory
 	}
 	if len(field.Values) != 0 || (len(field.Values) == 0 && empty) {
 		df.Values = field.Values
@@ -2334,6 +2342,7 @@ func (dc *DefaultCommand) Confirmation(params common.ExecuteParams) string {
 	}
 	return ""
 }
+
 
 func (dc *DefaultCommand) Approval() common.Approval {
 

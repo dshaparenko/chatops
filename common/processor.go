@@ -55,6 +55,7 @@ type Field interface {
 	Values() []string
 	Default() string
 	Required() bool
+	Mandatory() bool
 	Template() string
 	Dependencies() []string
 	Hint() string

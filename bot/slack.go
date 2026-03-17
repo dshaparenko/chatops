@@ -344,6 +344,13 @@ func (smf *SlackMessageField) Required() bool {
 	return smf.field.Required()
 }
 
+func (smf *SlackMessageField) Mandatory() bool {
+	if utils.IsEmpty(smf.field) {
+		return false
+	}
+	return smf.field.Mandatory()
+}
+
 /*
 func (smf *SlackMessageField) Template() string {
 	if utils.IsEmpty(smf.field) {
@@ -2689,9 +2696,6 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 		return blocks, nil
 	}
 
-	/*divider := slack.NewDividerBlock()
-	blocks = append(blocks, divider)*/
-
 	submitActionID := s.encodeActionID(blockID, slackFormButtonType, slackSubmitAction)
 	submit := slack.NewButtonBlockElement(submitActionID, "", slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonSubmitCaption, false, false))
 	submit.Style = slack.Style(s.options.ButtonSubmitStyle)
@@ -2713,10 +2717,40 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 	cancel := slack.NewButtonBlockElement(cancelActionID, "", slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonCancelCaption, false, false))
 	cancel.Style = slack.Style(s.options.ButtonCancelStyle)
 
-	ab := slack.NewActionBlock(blockID, submit, cancel)
+	// Only show submit button when all mandatory fields have a value
+	var ab *slack.ActionBlock
+	if s.allMandatoryFieldsFilled(fields, params, visibles) {
+		ab = slack.NewActionBlock(blockID, submit, cancel)
+	} else {
+		ab = slack.NewActionBlock(blockID, cancel)
+	}
 	blocks = append(blocks, ab)
 
 	return blocks, nil
+}
+
+func (s *Slack) allMandatoryFieldsFilled(fields SlackMessageFields, params common.ExecuteParams, visibles map[string]bool) bool {
+	for _, f := range fields.items {
+		if !f.Mandatory() {
+			continue
+		}
+		if visibles != nil {
+			if !visibles[f.Name()] {
+				continue
+			}
+		} else if !f.Visible() {
+			continue
+		}
+		name := f.Name()
+		if v, ok := params[name]; ok && !utils.IsEmpty(v) {
+			continue
+		}
+		if !utils.IsEmpty(f.Value()) || !utils.IsEmpty(f.Default()) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (s *Slack) cacheReplyForm(m *SlackMessage, fields SlackMessageFields, params common.ExecuteParams,
@@ -3883,6 +3917,9 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		return false
 	}
 
+	m.responseURL = callback.ResponseURL
+	wasMandatoryFilled := s.allMandatoryFieldsFilled(m.fields, m.params, nil)
+
 	// find all fields that depends on name
 	deps := []string{}
 	allDeps := []string{}
@@ -3943,6 +3980,9 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 			if utils.IsEmpty(tpl) {
 				m.params = common.MergeInterfaceMaps(m.params, params)
 				s.putMessageToCache(m)
+				if wasMandatoryFilled != s.allMandatoryFieldsFilled(m.fields, m.params, nil) {
+					return s.reRenderForm(m)
+				}
 				return false
 			}
 
@@ -3953,6 +3993,9 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 					// use cached values - no need to re-execute template
 					m.params = common.MergeInterfaceMaps(m.params, params)
 					s.putMessageToCache(m)
+					if wasMandatoryFilled != s.allMandatoryFieldsFilled(m.fields, m.params, nil) {
+						return s.reRenderForm(m)
+					}
 					return false
 				}
 			}
@@ -3974,27 +4017,29 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 
 	m.mergeParams(params, deps)
 	m.fields.merge(flds)
-	m.responseURL = callback.ResponseURL
 	s.putMessageToCache(m)
 
 	if !update {
+		if wasMandatoryFilled != s.allMandatoryFieldsFilled(m.fields, m.params, nil) {
+			return s.reRenderForm(m)
+		}
 		return false
 	}
 
+	return s.reRenderForm(m)
+}
+
+func (s *Slack) reRenderForm(m *SlackMessage) bool {
 	blocks, err := s.formBlocks(m.cmd, m.fields, m.params, m.user)
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return false
 	}
-
-	options := []slack.MsgOption{}
-
-	// section doesn't work
-	//options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionPostEphemeral(m.userID))
-
-	// section works :(, but there is a message in the channel if a request is the thread
-	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionTS(m.key.threadTS))
-
+	options := []slack.MsgOption{
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionReplaceOriginal(m.responseURL),
+		slack.MsgOptionTS(m.key.threadTS),
+	}
 	_, _, _, err = s.client.SlackClient().UpdateMessage(m.key.channelID, m.key.timestamp, options...)
 	if err != nil {
 		s.logger.Error("Slack couldn't update form message, error: %s", err)
@@ -4944,7 +4989,8 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 					}
 
 					var messageTTL time.Duration
-					age := now.Sub(cacheItem.CachedAt)
+
+					age := cacheEntryAge(key, cacheItem.CachedAt, now)
 
 					if len(slackMessage.tags) > 0 {
 						// Tagged messages: calculate remaining TTL from ttlTags
