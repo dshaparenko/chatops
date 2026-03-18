@@ -102,23 +102,24 @@ type SlackMessageFields struct {
 }
 
 type SlackMessage struct {
-	slack       *Slack
-	typ         string
-	cmdText     string
-	cmd         common.Command
-	wrapper     common.Command
-	originKey   *SlackMessageKey
-	key         *SlackMessageKey
-	user        *SlackUser
-	caller      *SlackUser
-	botID       string
-	visible     bool
-	responseURL string
-	blocks      []slack.Block
-	actions     []common.Action
-	params      common.ExecuteParams
-	fields      SlackMessageFields
-	tags        map[string]string // custom tags for message grouping and status tracking
+	slack               *Slack
+	typ                 string
+	cmdText             string
+	cmd                 common.Command
+	wrapper             common.Command
+	originKey           *SlackMessageKey
+	key                 *SlackMessageKey
+	user                *SlackUser
+	caller              *SlackUser
+	botID               string
+	visible             bool
+	responseURL         string
+	blocks              []slack.Block
+	actions             []common.Action
+	params              common.ExecuteParams
+	fields              SlackMessageFields
+	tags                map[string]string // custom tags for message grouping and status tracking
+	submitButtonVisible bool              // tracks actual rendered state of the submit button
 }
 
 type SlackFileResponseFull struct {
@@ -2321,7 +2322,7 @@ func (s *Slack) fieldValueTransform(field common.Field, value interface{}) inter
 	return r
 }
 
-func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params common.ExecuteParams, u *SlackUser) ([]slack.Block, error) {
+func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params common.ExecuteParams, u *SlackUser) ([]slack.Block, bool, error) {
 
 	blocks := []slack.Block{}
 	blockID := common.UUID()
@@ -2349,6 +2350,10 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 		if len(deps) > 0 {
 			dac = &slack.DispatchActionConfig{
 				TriggerActionsOn: []string{slackTriggerOnEnterPressed},
+			}
+		} else if field.Required() {
+			dac = &slack.DispatchActionConfig{
+				TriggerActionsOn: []string{slackTriggerOnCharacterEntered},
 			}
 		}
 
@@ -2679,18 +2684,14 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 			b = slack.NewInputBlock("", l, nil, el)
 			if b != nil {
 				b.DispatchAction = dac != nil
-				b.Optional = !field.Required()
 				blocks = append(blocks, b)
 			}
 		}
 	}
 
 	if len(blocks) == 0 {
-		return blocks, nil
+		return blocks, false, nil
 	}
-
-	/*divider := slack.NewDividerBlock()
-	blocks = append(blocks, divider)*/
 
 	submitActionID := s.encodeActionID(blockID, slackFormButtonType, slackSubmitAction)
 	submit := slack.NewButtonBlockElement(submitActionID, "", slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonSubmitCaption, false, false))
@@ -2713,10 +2714,41 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 	cancel := slack.NewButtonBlockElement(cancelActionID, "", slack.NewTextBlockObject(slack.PlainTextType, s.options.ButtonCancelCaption, false, false))
 	cancel.Style = slack.Style(s.options.ButtonCancelStyle)
 
-	ab := slack.NewActionBlock(blockID, submit, cancel)
+	// only showing submit button when all required fields have a value
+	buttonVisible := s.allRequiredFieldsFilled(fields, params, visibles)
+	var ab *slack.ActionBlock
+	if buttonVisible {
+		ab = slack.NewActionBlock(blockID, submit, cancel)
+	} else {
+		ab = slack.NewActionBlock(blockID, cancel)
+	}
 	blocks = append(blocks, ab)
 
-	return blocks, nil
+	return blocks, buttonVisible, nil
+}
+
+func (s *Slack) allRequiredFieldsFilled(fields SlackMessageFields, params common.ExecuteParams, visibles map[string]bool) bool {
+	for _, f := range fields.items {
+		if !f.Required() {
+			continue
+		}
+		if visibles != nil {
+			if !visibles[f.Name()] { // skip invisible fields, they are not required until they become visible
+				continue
+			}
+		} else if !f.Visible() {
+			continue
+		}
+		name := f.Name()
+		if v, ok := params[name]; ok && !utils.IsEmpty(v) {
+			continue
+		}
+		if !utils.IsEmpty(f.Value()) || !utils.IsEmpty(f.Default()) { // if field has a default value it's considered filled
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (s *Slack) cacheReplyForm(m *SlackMessage, fields SlackMessageFields, params common.ExecuteParams,
@@ -2733,7 +2765,7 @@ func (s *Slack) cacheReplyForm(m *SlackMessage, fields SlackMessageFields, param
 		opts = append(opts, slacker.SetEphemeral(m.userID()))
 	}
 
-	blocks, err := s.formBlocks(m.cmd, fields, params, m.user)
+	blocks, buttonVisible, err := s.formBlocks(m.cmd, fields, params, m.user)
 	if err != nil {
 		return err
 	}
@@ -2756,6 +2788,7 @@ func (s *Slack) cacheReplyForm(m *SlackMessage, fields SlackMessageFields, param
 		threadTS:  mThreadTS,
 	}
 	mNew.blocks = blocks
+	mNew.submitButtonVisible = buttonVisible
 
 	s.putMessageToCache(mNew)
 
@@ -3883,6 +3916,9 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		return false
 	}
 
+	m.responseURL = callback.ResponseURL
+	wasRequiredFilled := m.submitButtonVisible
+
 	// find all fields that depends on name
 	deps := []string{}
 	allDeps := []string{}
@@ -3943,6 +3979,10 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 			if utils.IsEmpty(tpl) {
 				m.params = common.MergeInterfaceMaps(m.params, params)
 				s.putMessageToCache(m)
+				nowFilled := s.allRequiredFieldsFilled(m.fields, m.params, nil)
+				if wasRequiredFilled != nowFilled {
+					return s.reRenderForm(m)
+				}
 				return false
 			}
 
@@ -3953,6 +3993,10 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 					// use cached values - no need to re-execute template
 					m.params = common.MergeInterfaceMaps(m.params, params)
 					s.putMessageToCache(m)
+					nowFilled := s.allRequiredFieldsFilled(m.fields, m.params, nil)
+					if wasRequiredFilled != nowFilled {
+						return s.reRenderForm(m)
+					}
 					return false
 				}
 			}
@@ -3974,32 +4018,37 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 
 	m.mergeParams(params, deps)
 	m.fields.merge(flds)
-	m.responseURL = callback.ResponseURL
 	s.putMessageToCache(m)
 
-	if !update {
+	if !update { // just check required
+		nowFilled := s.allRequiredFieldsFilled(m.fields, m.params, nil)
+		if wasRequiredFilled != nowFilled {
+			return s.reRenderForm(m)
+		}
 		return false
 	}
 
-	blocks, err := s.formBlocks(m.cmd, m.fields, m.params, m.user)
+	return s.reRenderForm(m)
+}
+
+func (s *Slack) reRenderForm(m *SlackMessage) bool {
+	blocks, buttonVisible, err := s.formBlocks(m.cmd, m.fields, m.params, m.user)
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return false
 	}
-
-	options := []slack.MsgOption{}
-
-	// section doesn't work
-	//options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionPostEphemeral(m.userID))
-
-	// section works :(, but there is a message in the channel if a request is the thread
-	options = append(options, slack.MsgOptionBlocks(blocks...), slack.MsgOptionReplaceOriginal(m.responseURL), slack.MsgOptionTS(m.key.threadTS))
-
+	options := []slack.MsgOption{
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionReplaceOriginal(m.responseURL),
+		slack.MsgOptionTS(m.key.threadTS),
+	}
 	_, _, _, err = s.client.SlackClient().UpdateMessage(m.key.channelID, m.key.timestamp, options...)
 	if err != nil {
 		s.logger.Error("Slack couldn't update form message, error: %s", err)
 		return false
 	}
+	m.submitButtonVisible = buttonVisible
+	s.putMessageToCache(m)
 	return true
 }
 
@@ -4944,7 +4993,8 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 					}
 
 					var messageTTL time.Duration
-					age := now.Sub(cacheItem.CachedAt)
+
+					age := cacheEntryAge(key, cacheItem.CachedAt, now)
 
 					if len(slackMessage.tags) > 0 {
 						// Tagged messages: calculate remaining TTL from ttlTags
