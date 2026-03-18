@@ -2,10 +2,28 @@ package bot
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/devopsext/chatops/common"
 )
+
+// cacheEntryAge returns the true age of a cache entry.
+// It parses the Slack unix timestamp from the cache key (format "channelID/ts"),
+// which is set at message creation time and survives pod restarts unchanged.
+// For slash-command keys whose second segment is a UUID rather than a numeric
+// timestamp, it falls back to cachedAt (the time the cache was last written to disk).
+func cacheEntryAge(key string, cachedAt time.Time, now time.Time) time.Duration {
+	if keyParts := strings.SplitN(key, "/", 2); len(keyParts) == 2 {
+		if slackTS, err := strconv.ParseFloat(keyParts[1], 64); err == nil {
+			sec := int64(slackTS)
+			nsec := int64((slackTS - float64(sec)) * float64(time.Second/time.Nanosecond))
+			return now.Sub(time.Unix(sec, nsec))
+		}
+	}
+	return now.Sub(cachedAt)
+}
 
 // SlackMessageCache is a simplified version of SlackMessage for caching purposes.
 // It contains only the essential fields needed for caching and is designed for easy serialization.
