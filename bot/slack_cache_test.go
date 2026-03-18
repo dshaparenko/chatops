@@ -31,7 +31,6 @@ func (m *MockField) Label() string          { return m.label }
 func (m *MockField) Values() []string       { return m.values }
 func (m *MockField) Default() string        { return m.defaultValue }
 func (m *MockField) Required() bool         { return m.required }
-func (m *MockField) Mandatory() bool        { return false }
 func (m *MockField) Template() string       { return m.template }
 func (m *MockField) Dependencies() []string { return m.dependencies }
 func (m *MockField) Hint() string           { return m.hint }
