@@ -31,6 +31,7 @@ func testSlackWithDebounce(debounceMs int) *Slack {
 		formUpdates: formUpdatesState{
 			pending:   make(map[string]*PendingFormUpdate),
 			revisions: make(map[string]int64),
+			inFlight:  make(map[string]int64),
 		},
 	}
 }
@@ -444,4 +445,22 @@ func TestConcurrentScheduleCancelDifferentKeys(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, 0, testCountPending(s), "no pending after concurrent schedule+cancel different keys")
 	require.Equal(t, concurrency, testCountRevisions(s), "one revision entry per key")
+}
+
+func TestHasInFlightOlderUpdateScenarios(t *testing.T) {
+	s := testSlackWithDebounce(100)
+	key := testMessageWithKey("ch1", "ts1").key.String()
+
+	// no in-flight entry -> false
+	require.False(t, s.hasInFlightOlderUpdate(key, 2), "no in-flight state must return false")
+
+	s.formUpdates.mu.Lock()
+	s.formUpdates.inFlight[key] = 2
+	s.formUpdates.mu.Unlock()
+
+	// older in-flight revision -> true
+	require.True(t, s.hasInFlightOlderUpdate(key, 3), "older in-flight revision must be detected")
+	// same/newer target revision -> false
+	require.False(t, s.hasInFlightOlderUpdate(key, 2), "same revision is not older")
+	require.False(t, s.hasInFlightOlderUpdate(key, 1), "newer in-flight revision should not match")
 }
