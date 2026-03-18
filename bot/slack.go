@@ -442,6 +442,9 @@ func (smf *SlackMessageField) merge(field *SlackMessageField) bool {
 func (smf *SlackMessageField) depsFullfilledOrVisible(fields SlackMessageFields, visibles map[string]bool) bool {
 
 	deps := smf.Dependencies()
+	if len(deps) == 0 {
+		return false
+	}
 	for _, f := range fields.items {
 
 		name := f.Name()
@@ -2612,7 +2615,7 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 			}
 			el = e
 		case common.FieldTypeMarkdown:
-			if addToBlocks {
+			if addToBlocks && !utils.IsEmpty(def) {
 				e := slack.NewTextBlockObject(slack.MarkdownType, def, false, false)
 				blocks = append(blocks, slack.NewSectionBlock(e, nil, nil))
 			}
@@ -3395,7 +3398,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 			}
 		}
 
-		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit}
+		list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit, common.FieldTypeMarkdown}
 		only := s.getFieldsByType(cmd, list)
 
 		rFields := cmd.Fields(s, m, eParams, only, nil)
@@ -3435,7 +3438,7 @@ func (s *Slack) commandDefinition(cmd common.Command, group string) *slacker.Com
 				}
 			}
 
-			list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit}
+			list := []string{common.FieldTypeSelect, common.FieldTypeMultiSelect, common.FieldTypeEdit, common.FieldTypeMarkdown}
 			only := s.getFieldsByType(wrappedCmd, list)
 
 			rFields = wrappedCmd.Fields(s, m, rParams, only, nil)
