@@ -267,6 +267,10 @@ var formUpdateDebounceFieldTypes = []common.FieldType{
 	common.FieldTypeMultiGroup,
 }
 
+// Guard against unbounded growth of form update revisions map.
+// Value is var (not const) to allow deterministic tests.
+var formUpdateRevisionsMaxEntries = 20_000
+
 // SlackUserGroups
 
 func (ugs *SlackUserGroups) refresh() {
@@ -3975,6 +3979,7 @@ func (s *Slack) bumpFormUpdateRevision(key *SlackMessageKey) int64 {
 		s.formUpdates.revisions = make(map[string]int64)
 	}
 	s.formUpdates.revisions[keyStr]++
+	s.pruneFormUpdateRevisionsLocked(keyStr)
 	return s.formUpdates.revisions[keyStr]
 }
 
@@ -3982,6 +3987,30 @@ func (s *Slack) getFormUpdateRevision(keyStr string) int64 {
 	s.formUpdates.mu.Lock()
 	defer s.formUpdates.mu.Unlock()
 	return s.formUpdates.revisions[keyStr]
+}
+
+func (s *Slack) pruneFormUpdateRevisionsLocked(protectedKeyStr string) {
+	if formUpdateRevisionsMaxEntries <= 0 {
+		return
+	}
+	for len(s.formUpdates.revisions) > formUpdateRevisionsMaxEntries {
+		removed := false
+		for keyStr := range s.formUpdates.revisions {
+			if keyStr == protectedKeyStr {
+				continue
+			}
+			if _, isPending := s.formUpdates.pending[keyStr]; isPending {
+				continue
+			}
+			delete(s.formUpdates.revisions, keyStr)
+			removed = true
+			break
+		}
+		if !removed {
+			// All keys are either pending or protected; keep them to preserve active debounce state.
+			return
+		}
+	}
 }
 
 func (s *Slack) scheduleDebouncedFormUpdate(m *SlackMessage) {
