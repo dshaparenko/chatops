@@ -4249,10 +4249,14 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 	actionField := m.fields.findField(name)
 	debounceUpdate := actionField != nil && s.shouldDebounceFormUpdate(actionField.Type())
 
-	revision := s.bumpFormUpdateRevision(m.key)
-	forceImmediateAfterInFlight := debounceUpdate && s.hasInFlightOlderUpdate(m.key.String(), revision)
+	var revision int64
+	forceImmediateAfterInFlight := false
 
 	if debounceUpdate {
+		// Bump revision and manage in-flight updates only when debouncing is enabled.
+		revision = s.bumpFormUpdateRevision(m.key)
+		forceImmediateAfterInFlight = s.hasInFlightOlderUpdate(m.key.String(), revision)
+
 		// Cancel immediately to prevent an old timer from updating UI while we recalculate current state.
 		s.cancelPendingFormUpdate(m.key)
 	}
