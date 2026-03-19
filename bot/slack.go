@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -70,6 +71,8 @@ type SlackOptions struct {
 	UserGroupsInterval int
 
 	CacheFileName string
+
+	FormUpdateDebounceMs int
 }
 
 type SlackMessageKey struct {
@@ -118,6 +121,7 @@ type SlackMessage struct {
 	actions             []common.Action
 	params              common.ExecuteParams
 	fields              SlackMessageFields
+	formBlockID         string
 	tags                map[string]string // custom tags for message grouping and status tracking
 	submitButtonVisible bool              // tracks actual rendered state of the submit button
 }
@@ -165,6 +169,35 @@ type Slack struct {
 	saveTicker        *time.Ticker
 	stopSave          chan bool
 	userGroups        SlackUserGroups
+
+	formUpdates formUpdatesState
+}
+
+type PendingFormUpdate struct {
+	timer      *time.Timer
+	generation int64
+	snapshot   *FormUpdateSnapshot
+	canceled   bool
+}
+
+type FormUpdateSnapshot struct {
+	key         *SlackMessageKey
+	responseURL string
+	cmd         common.Command
+	fields      SlackMessageFields
+	params      common.ExecuteParams
+	user        *SlackUser
+	formBlockID string
+	revision    int64
+}
+
+// formUpdatesState holds all state for debounced Slack form updates.
+type formUpdatesState struct {
+	pending    map[string]*PendingFormUpdate
+	revisions  map[string]int64
+	inFlight   map[string]int64
+	mu         sync.Mutex
+	generation int64
 }
 
 type SlackRichTextQuoteElement struct {
@@ -230,6 +263,17 @@ const (
 	approvalReasonExecuteCmdNil   = "execute_cmd_missing"
 	approvalReasonExecuteFailed   = "execute_cmd_failed"
 )
+
+// formUpdateDebounceFieldTypes lists field types for which form updates are debounced when FormUpdateDebounceMs > 0.
+var formUpdateDebounceFieldTypes = []common.FieldType{
+	common.FieldTypeMultiSelect,
+	common.FieldTypeDynamicMultiSelect,
+	common.FieldTypeMultiGroup,
+}
+
+// Guard against unbounded growth of form update revisions map.
+// Value is var (not const) to allow deterministic tests.
+var formUpdateRevisionsMaxEntries = 20_000
 
 // SlackUserGroups
 
@@ -830,7 +874,7 @@ func (sm *SlackMessage) mergeFields(fields []common.Field, params common.Execute
 	return newFields, updateIsNeeded
 }
 
-// SlackCacheMessageKey
+// SlackMessageKey
 
 func (smk *SlackMessageKey) String() string {
 	return fmt.Sprintf("%s/%s", smk.channelID, smk.timestamp)
@@ -2325,10 +2369,12 @@ func (s *Slack) fieldValueTransform(field common.Field, value interface{}) inter
 	return r
 }
 
-func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params common.ExecuteParams, u *SlackUser) ([]slack.Block, bool, error) {
+func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params common.ExecuteParams, u *SlackUser, blockID string) ([]slack.Block, bool, error) {
 
 	blocks := []slack.Block{}
-	blockID := common.UUID()
+	if utils.IsEmpty(blockID) {
+		blockID = common.UUID()
+	}
 
 	// to do
 	confirmationParams := make(common.ExecuteParams)
@@ -2526,12 +2572,18 @@ func (s *Slack) formBlocks(cmd common.Command, fields SlackMessageFields, params
 			optType := slack.MultiOptTypeExternal
 			if fType == common.FieldTypeMultiSelect {
 				arr := s.parseArrayValues(def)
+				selectedByValue := make(map[string]*slack.OptionBlockObject, len(arr))
 				for _, v := range currentValues {
 					block := slack.NewOptionBlockObject(v, slack.NewTextBlockObject(slack.PlainTextType, v, false, false), h)
+					options = append(options, block)
 					if utils.Contains(arr, v) {
+						selectedByValue[v] = block
+					}
+				}
+				for _, v := range arr {
+					if block, ok := selectedByValue[v]; ok {
 						dBlocks = append(dBlocks, block)
 					}
-					options = append(options, block)
 				}
 				optType = slack.MultiOptTypeStatic
 				if len(options) == 0 && !utils.IsEmpty(def) {
@@ -2768,7 +2820,7 @@ func (s *Slack) cacheReplyForm(m *SlackMessage, fields SlackMessageFields, param
 		opts = append(opts, slacker.SetEphemeral(m.userID()))
 	}
 
-	blocks, buttonVisible, err := s.formBlocks(m.cmd, fields, params, m.user)
+	blocks, buttonVisible, err := s.formBlocks(m.cmd, fields, params, m.user, ensureFormBlockID(m))
 	if err != nil {
 		return err
 	}
@@ -3505,6 +3557,7 @@ func (s *Slack) removeMessage(m *SlackMessage) {
 	if m == nil || m.key == nil {
 		return
 	}
+	s.cancelPendingFormUpdate(m.key)
 	s.client.SlackClient().PostEphemeral(m.key.channelID, m.userID(),
 		slack.MsgOptionReplaceOriginal(m.responseURL),
 		slack.MsgOptionDeleteOriginal(m.responseURL),
@@ -3912,6 +3965,258 @@ func (s *Slack) AddDivider(channelID, message string) error {
 	return nil
 }
 
+func cloneFormUpdateFields(fields SlackMessageFields) SlackMessageFields {
+	out := SlackMessageFields{items: make([]*SlackMessageField, 0, len(fields.items))}
+	for _, f := range fields.items {
+		if f == nil {
+			continue
+		}
+		fn := &SlackMessageField{
+			field: f.field,
+			value: f.value,
+		}
+		if len(f.values) > 0 {
+			fn.values = append([]string(nil), f.values...)
+		}
+		out.items = append(out.items, fn)
+	}
+	return out
+}
+
+func buildFormUpdateSnapshot(m *SlackMessage) *FormUpdateSnapshot {
+	if m == nil || m.key == nil {
+		return nil
+	}
+	key := &SlackMessageKey{
+		channelID: m.key.channelID,
+		timestamp: m.key.timestamp,
+		threadTS:  m.key.threadTS,
+	}
+	return &FormUpdateSnapshot{
+		key:         key,
+		responseURL: m.responseURL,
+		cmd:         m.cmd,
+		fields:      cloneFormUpdateFields(m.fields),
+		params:      maps.Clone(m.params),
+		user:        m.user,
+		formBlockID: m.formBlockID,
+	}
+}
+
+func ensureFormBlockID(m *SlackMessage) string {
+	if m == nil {
+		return ""
+	}
+	if utils.IsEmpty(m.formBlockID) {
+		m.formBlockID = common.UUID()
+	}
+	return m.formBlockID
+}
+
+func (s *Slack) shouldDebounceFormUpdate(fieldType common.FieldType) bool {
+	if s.options.FormUpdateDebounceMs <= 0 {
+		return false
+	}
+	return utils.Contains(formUpdateDebounceFieldTypes, fieldType)
+}
+
+func (s *Slack) bumpFormUpdateRevision(key *SlackMessageKey) int64 {
+	if key == nil {
+		return 0
+	}
+	keyStr := key.String()
+	s.formUpdates.mu.Lock()
+	defer s.formUpdates.mu.Unlock()
+	if s.formUpdates.revisions == nil {
+		s.formUpdates.revisions = make(map[string]int64)
+	}
+	s.formUpdates.revisions[keyStr]++
+	s.pruneFormUpdateRevisionsLocked(keyStr)
+	return s.formUpdates.revisions[keyStr]
+}
+
+func (s *Slack) getFormUpdateRevision(keyStr string) int64 {
+	s.formUpdates.mu.Lock()
+	defer s.formUpdates.mu.Unlock()
+	return s.formUpdates.revisions[keyStr]
+}
+
+func (s *Slack) hasInFlightOlderUpdate(keyStr string, revision int64) bool {
+	s.formUpdates.mu.Lock()
+	defer s.formUpdates.mu.Unlock()
+	if s.formUpdates.inFlight == nil {
+		return false
+	}
+	inFlightRev, ok := s.formUpdates.inFlight[keyStr]
+	return ok && inFlightRev > 0 && inFlightRev < revision
+}
+
+func (s *Slack) pruneFormUpdateRevisionsLocked(protectedKeyStr string) {
+	if formUpdateRevisionsMaxEntries <= 0 {
+		return
+	}
+	for len(s.formUpdates.revisions) > formUpdateRevisionsMaxEntries {
+		removed := false
+		for keyStr := range s.formUpdates.revisions {
+			if keyStr == protectedKeyStr {
+				continue
+			}
+			if _, isPending := s.formUpdates.pending[keyStr]; isPending {
+				continue
+			}
+			delete(s.formUpdates.revisions, keyStr)
+			removed = true
+			break
+		}
+		if !removed {
+			// All keys are either pending or protected; keep them to preserve active debounce state.
+			return
+		}
+	}
+}
+
+func (s *Slack) scheduleDebouncedFormUpdate(m *SlackMessage) {
+	s.scheduleDebouncedFormUpdateWithRevision(m, 0)
+}
+
+func (s *Slack) scheduleDebouncedFormUpdateWithRevision(m *SlackMessage, revision int64) {
+	if m == nil || m.key == nil {
+		return
+	}
+	if s.options.FormUpdateDebounceMs <= 0 {
+		return
+	}
+
+	snapshot := buildFormUpdateSnapshot(m)
+	if snapshot == nil {
+		return
+	}
+
+	keyStr := m.key.String()
+	d := time.Duration(s.options.FormUpdateDebounceMs) * time.Millisecond
+
+	s.formUpdates.mu.Lock()
+	defer s.formUpdates.mu.Unlock()
+
+	currentRevision := s.formUpdates.revisions[keyStr]
+	// Ignore stale schedules that arrive after a newer field action.
+	if revision > 0 && revision < currentRevision {
+		return
+	}
+	if revision <= 0 {
+		revision = currentRevision
+	}
+	snapshot.revision = revision
+
+	s.formUpdates.generation++
+	gen := s.formUpdates.generation
+
+	if old, ok := s.formUpdates.pending[keyStr]; ok {
+		old.canceled = true
+		old.timer.Stop()
+		delete(s.formUpdates.pending, keyStr)
+	}
+
+	s.formUpdates.pending[keyStr] = &PendingFormUpdate{
+		timer:      time.AfterFunc(d, func() { s.runPendingFormUpdate(keyStr, gen) }),
+		generation: gen,
+		snapshot:   snapshot,
+	}
+}
+
+func (s *Slack) cancelPendingFormUpdate(key *SlackMessageKey) {
+	if key == nil {
+		return
+	}
+	keyStr := key.String()
+	s.formUpdates.mu.Lock()
+	defer s.formUpdates.mu.Unlock()
+	if p, ok := s.formUpdates.pending[keyStr]; ok {
+		p.canceled = true
+		p.timer.Stop()
+		delete(s.formUpdates.pending, keyStr)
+	}
+}
+
+func (s *Slack) cancelAllPendingFormUpdates() {
+	s.formUpdates.mu.Lock()
+	defer s.formUpdates.mu.Unlock()
+	for _, p := range s.formUpdates.pending {
+		p.canceled = true
+		p.timer.Stop()
+	}
+	s.formUpdates.pending = make(map[string]*PendingFormUpdate)
+}
+
+// runPendingFormUpdate performs the form redraw when the debounce timer fires.
+// Runs only if generation still matches (avoids stale update after a newer schedule).
+func (s *Slack) runPendingFormUpdate(keyStr string, generation int64) {
+	cleanup := func() {
+		s.formUpdates.mu.Lock()
+		defer s.formUpdates.mu.Unlock()
+		if p, ok := s.formUpdates.pending[keyStr]; ok && p.generation == generation {
+			delete(s.formUpdates.pending, keyStr)
+		}
+	}
+
+	s.formUpdates.mu.Lock()
+	p, ok := s.formUpdates.pending[keyStr]
+	if !ok || p.generation != generation || p.canceled {
+		s.formUpdates.mu.Unlock()
+		return
+	}
+	snapshot := p.snapshot
+	s.formUpdates.mu.Unlock()
+
+	if snapshot == nil || snapshot.key == nil {
+		cleanup()
+		return
+	}
+
+	blocks, _, err := s.formBlocks(snapshot.cmd, snapshot.fields, snapshot.params, snapshot.user, snapshot.formBlockID)
+	if err != nil {
+		s.logger.Error("Slack couldn't generate form blocks (debounced), error: %s", err)
+		cleanup()
+		return
+	}
+
+	s.formUpdates.mu.Lock()
+	current, ok := s.formUpdates.pending[keyStr]
+	if !ok {
+		s.formUpdates.mu.Unlock()
+		return
+	}
+	currentRevision := s.formUpdates.revisions[keyStr]
+	if current.generation != generation {
+		s.formUpdates.mu.Unlock()
+		return
+	}
+	if current.canceled || currentRevision != snapshot.revision {
+		delete(s.formUpdates.pending, keyStr)
+		s.formUpdates.mu.Unlock()
+		return
+	}
+	delete(s.formUpdates.pending, keyStr)
+	if s.formUpdates.inFlight == nil {
+		s.formUpdates.inFlight = make(map[string]int64)
+	}
+	s.formUpdates.inFlight[keyStr] = snapshot.revision
+	s.formUpdates.mu.Unlock()
+
+	opts := []slack.MsgOption{
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionReplaceOriginal(snapshot.responseURL),
+		slack.MsgOptionTS(snapshot.key.threadTS),
+	}
+	_, _, _, err = s.client.SlackClient().UpdateMessage(snapshot.key.channelID, snapshot.key.timestamp, opts...)
+	s.formUpdates.mu.Lock()
+	delete(s.formUpdates.inFlight, keyStr)
+	s.formUpdates.mu.Unlock()
+	if err != nil {
+		s.logger.Error("Slack couldn't update form message (debounced), error: %s", err)
+	}
+}
+
 func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage, action *slack.BlockAction, name string) bool {
 
 	callback := ctx.Callback()
@@ -3931,6 +4236,29 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 	if len(m.fields.items) == 0 {
 		fields := m.cmd.Fields(s, nil, nil, nil, nil)
 		m.fields.copyFrom(fields, true)
+	}
+
+	actionBlockID, _, _ := s.decodeActionID(action.ActionID)
+	if utils.IsEmpty(m.formBlockID) && !utils.IsEmpty(actionBlockID) {
+		m.formBlockID = actionBlockID
+	}
+	if !utils.IsEmpty(actionBlockID) && !utils.IsEmpty(m.formBlockID) && actionBlockID != m.formBlockID {
+		return false
+	}
+
+	actionField := m.fields.findField(name)
+	debounceUpdate := actionField != nil && s.shouldDebounceFormUpdate(actionField.Type())
+
+	var revision int64
+	forceImmediateAfterInFlight := false
+
+	if debounceUpdate {
+		// Bump revision and manage in-flight updates only when debouncing is enabled.
+		revision = s.bumpFormUpdateRevision(m.key)
+		forceImmediateAfterInFlight = s.hasInFlightOlderUpdate(m.key.String(), revision)
+
+		// Cancel immediately to prevent an old timer from updating UI while we recalculate current state.
+		s.cancelPendingFormUpdate(m.key)
 	}
 
 	var parent common.Field
@@ -3953,12 +4281,27 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 
 	// set default value based on action
 	params := make(common.ExecuteParams)
-	params[name] = action.Value
+	if actionField != nil {
+		// Use getActionValue so multi_static_select etc. get value from action.SelectedOptions
+		// when BlockActionState.Values is empty (common for ephemeral messages).
+		if v, ok := s.getActionValue(actionField, *action); ok {
+			params[name] = v
+		} else {
+			params[name] = action.Value
+		}
+	} else {
+		params[name] = action.Value
+	}
 
 	for _, v1 := range callback.BlockActionState.Values {
 		for k2, v2 := range v1 {
 			_, _, n2 := s.decodeActionID(k2)
 			if utils.IsEmpty(n2) {
+				continue
+			}
+			// Never overwrite the triggering field: we already set it from the action
+			// (state.values can be empty or stale for multi_static_select on ephemeral messages).
+			if n2 == name {
 				continue
 			}
 			f := m.fields.findField(n2)
@@ -4031,11 +4374,16 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 		return false
 	}
 
+	if debounceUpdate && !forceImmediateAfterInFlight {
+		s.scheduleDebouncedFormUpdateWithRevision(m, revision)
+		return true
+	}
+
 	return s.reRenderForm(m)
 }
 
 func (s *Slack) reRenderForm(m *SlackMessage) bool {
-	blocks, buttonVisible, err := s.formBlocks(m.cmd, m.fields, m.params, m.user)
+	blocks, buttonVisible, err := s.formBlocks(m.cmd, m.fields, m.params, m.user, ensureFormBlockID(m))
 	if err != nil {
 		s.logger.Error("Slack couldn't generate form blocks, error: %s", err)
 		return false
@@ -4061,6 +4409,8 @@ func (s *Slack) handleFormButtonReaction(ctx *slacker.InteractionContext, m *Sla
 	if m.cmd == nil {
 		return false
 	}
+
+	s.cancelPendingFormUpdate(m.key)
 
 	m.responseURL = callback.ResponseURL
 
@@ -4865,6 +5215,7 @@ func (t *Slack) startPeriodicSave(interval time.Duration) {
 // Stop gracefully shuts down the Slack bot and saves the cache
 func (t *Slack) Stop() {
 	t.logger.Info("Stopping Slack bot...")
+	t.cancelAllPendingFormUpdates()
 
 	// stop periodic save
 	if t.saveTicker != nil {
@@ -4948,6 +5299,10 @@ func NewSlack(options SlackOptions, observability *common.Observability, process
 		messages:         messages,
 		messageTags:      messageTags,
 		taggedMessageTTL: ttlTags,
+		formUpdates: formUpdatesState{
+			pending:   make(map[string]*PendingFormUpdate),
+			revisions: make(map[string]int64),
+		},
 	}
 
 	if options.CacheFileName != "" {

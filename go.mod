@@ -20,6 +20,7 @@ require (
 	github.com/slack-go/slack v0.17.3
 	github.com/slack-io/slacker v0.1.1
 	github.com/spf13/cobra v1.8.0
+	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.19.0
 	gopkg.in/yaml.v2 v2.4.0
 )

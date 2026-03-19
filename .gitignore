@@ -7,7 +7,7 @@ vscode.sh
 grafana.yml
 k8s.yml
 coverage.txt
-__debug_bin
+__debug_bin*
 chatops
 .start.template
 .commands/
