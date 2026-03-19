@@ -4613,7 +4613,17 @@ func (s *Slack) cacheHandleApprovalButtonReaction(ctx *slacker.InteractionContex
 
 	key, blocks, err := s.reply(mInit, message, "", ctx.Response(), nil, nil, r, nil, false)
 	if err != nil {
-		return fail(approvalReasonReplyFailed, err)
+		if name != slackSubmitAction {
+			// Rejection: notification failed, treat the whole action as failed
+			if m.tags == nil {
+				m.tags = make(map[string]string)
+			}
+			m.tags["status"] = string(common.MessageStatusFailed)
+			s.putMessageToCache(m)
+			return fail(approvalReasonReplyFailed, err)
+		}
+		// Approval: notification to requester failed, but still proceed with execution
+		s.logger.Error("Slack approval reply to requester failed, proceeding with execution: %v", err)
 	}
 
 	mNew := s.cloneMessage(mInit)
