@@ -3773,8 +3773,11 @@ func (s *Slack) PostMessage(channel string, message string, attachments []*commo
 				}
 				threadTS = mOrigin.key.threadTS
 			}
-			if utils.IsEmpty(threadTS) && !utils.IsEmpty(mOrigin.ParentID()) {
+			if utils.IsEmpty(threadTS) && mOrigin != nil && !utils.IsEmpty(mOrigin.ParentID()) {
 				threadTS = mOrigin.ParentID()
+			}
+			if utils.IsEmpty(threadTS) && !utils.IsEmpty(m.ParentID()) {
+				threadTS = m.ParentID()
 			}
 			r = s.buildResponse(false, append(s.messageResponses(mOrigin, true), response)...)
 		}
