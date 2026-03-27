@@ -10,7 +10,7 @@ replace github.com/slack-io/slacker => github.com/devopsext/slacker v0.1.1-4
 
 require (
 	github.com/devopsext/sre v0.7.5
-	github.com/devopsext/tools v0.20.16
+	github.com/devopsext/tools v0.20.18
 	github.com/devopsext/utils v0.4.8
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible
 	github.com/google/uuid v1.6.0
@@ -121,7 +121,6 @@ require (
 	github.com/slack-io/proper v0.0.0-20231119200853-f78ba4fc878f // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/technoweenie/multipartstreamer v1.0.1 // indirect
 	github.com/theckman/httpforwarded v0.4.0 // indirect
 	github.com/tidwall/gjson v1.17.1 // indirect
