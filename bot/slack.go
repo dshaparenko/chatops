@@ -4252,6 +4252,12 @@ func (s *Slack) handleFormField(ctx *slacker.InteractionContext, m *SlackMessage
 	actionField := m.fields.findField(name)
 	debounceUpdate := actionField != nil && s.shouldDebounceFormUpdate(actionField.Type())
 
+	// Non-debounced field edits (e.g. env select) must cancel any pending debounced redraw;
+	// otherwise the timer may apply an older snapshot and revert multiselect/process state.
+	if !debounceUpdate {
+		s.cancelPendingFormUpdate(m.key)
+	}
+
 	var revision int64
 	forceImmediateAfterInFlight := false
 
